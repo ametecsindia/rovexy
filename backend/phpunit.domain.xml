@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Runs the framework-independent domain tests. Works with PHPUnit 9.6+ and without vendor/. -->
+<phpunit bootstrap="tests/Domain/bootstrap.php" colors="true" failOnWarning="true" failOnRisky="true">
+    <testsuites>
+        <testsuite name="Domain">
+            <directory>tests/Domain</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>

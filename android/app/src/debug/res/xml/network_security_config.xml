@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEBUG BUILD ONLY: cleartext is allowed at the network layer because private-LAN IPs cannot be listed as domains.
+     The app itself (ServerUrl.normalise with ALLOW_LOCAL_HTTP) still accepts http:// only for loopback / private-LAN IPv4 literals.
+     Release builds use src/main/res/xml/network_security_config.xml (HTTPS only). -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors><certificates src="system" /></trust-anchors>
+    </base-config>
+</network-security-config>

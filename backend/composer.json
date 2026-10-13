@@ -1,0 +1,55 @@
+{
+    "name": "ametecs/managed-mobile-server",
+    "description": "Ametecs Managed Mobile (working name) \u2014 company device management and customer-calling server.",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": "^8.3",
+        "laravel/framework": "^13.0",
+        "laravel/sanctum": "^4.0",
+        "laravel/reverb": "^1.0",
+        "openspout/openspout": "^4.28",
+        "league/flysystem-aws-s3-v3": "^3.0"
+    },
+    "require-dev": {
+        "fakerphp/faker": "^1.23",
+        "phpunit/phpunit": "^11.0 || ^12.0",
+        "mockery/mockery": "^1.6",
+        "laravel/pint": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Tests\\": "tests/"
+        },
+        "exclude-from-classmap": [
+            "tests/Domain/"
+        ]
+    },
+    "scripts": {
+        "post-autoload-dump": [
+            "@php artisan package:discover --ansi"
+        ],
+        "test:domain": "phpunit -c phpunit.domain.xml",
+        "test": [
+            "@php artisan config:clear --ansi",
+            "@php artisan test"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "preferred-install": "dist",
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "extra": {
+        "comment": "Version constraints were written while Packagist was unreachable from the build environment. Run `composer update` and review the resolved versions against current upstream support policies before release."
+    }
+}

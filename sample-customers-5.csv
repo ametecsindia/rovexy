@@ -1,0 +1,6 @@
+Customer ID,Customer Name,Phone Number,Alternate Number,Campaign,Assigned Employee,Assigned Team,Notes,Status,Follow-up Date
+CUST-1001,Ravi Kumar Sharma,9876543210,9876501234,Personal Loan - Oct,EMP001,,EMI overdue 2 months,new,2026-10-05
+CUST-1002,Priya Reddy,9123456780,,Credit Card - Oct,EMP001,,Asked for callback after 6 pm,follow_up,2026-10-03
+CUST-1003,Mohammed Irfan,9988776655,9988001122,Two Wheeler Loan,EMP001,,Promised partial payment,in_progress,2026-10-04
+CUST-1004,Sneha Patel,9012345678,,Personal Loan - Oct,EMP001,,New allocation,new,
+CUST-1005,Arjun Naidu,9345678123,9345600011,Credit Card - Oct,EMP001,,Wrong number on alternate earlier,new,2026-10-06

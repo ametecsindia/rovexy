@@ -1,0 +1,28 @@
+{
+  "name": "ammp-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Windows administrator desktop app — a hardened Electron shell around the company server's admin console.",
+  "main": "dist/main.js",
+  "author": "Ametecs India Private Limited",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/*.test.js",
+    "start": "npm run build && electron .",
+    "dist:win": "npm run build && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "typescript": "~6.0.3"
+  },
+  "build": {
+    "appId": "in.ametecs.managedmobile.admin",
+    "productName": "Ametecs Managed Mobile Admin",
+    "directories": { "output": "release" },
+    "files": ["dist/**", "static/**", "package.json"],
+    "win": { "target": [{ "target": "nsis", "arch": ["x64"] }], "signAndEditExecutable": true },
+    "nsis": { "oneClick": false, "perMachine": false, "allowToChangeInstallationDirectory": true }
+  }
+}

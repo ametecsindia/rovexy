@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ROVEXY</string>
+    <string name="mc_server_url">Company server URL</string>
+    <string name="mc_company_slug">Company workspace</string>
+    <string name="mc_enrolment_ref">Enrolment reference</string>
+    <string name="mc_lock_server">Lock server address</string>
+    <string name="notif_channel_work">Work session</string>
+    <string name="recorder_accessibility_description">Company call recording. Lets this app record your customer calls (made from this app) through the microphone while a "Recording this call" notification is shown. It does not read your screen or what you type.</string>
+    <string name="recorder_accessibility_label">Company call recorder</string>
+    <string name="notif_channel_monitor">Screen and camera sessions</string>
+</resources>

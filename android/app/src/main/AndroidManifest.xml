@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Only used when policy enables background work-session location; granted through Android Management. -->
+    <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- SIM calling route: place the call, read its duration from the call log, and read the file written by the phone's
+         OWN call recorder (the app never records audio itself). -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <!-- In-app call recorder: microphone during SIM calls, always with a visible notification. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Default phone app: our own call screen (incoming calls shown full-screen). -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <!-- Deliberately NOT requested: READ/WRITE_CONTACTS, PROCESS_OUTGOING_CALLS, SYSTEM_ALERT_WINDOW. -->
+
+    <!-- ODialer mode: check it is installed and open its Play Store page. -->
+    <queries>
+        <package android:name="com.oplus.dialer" />
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="market" /></intent>
+    </queries>
+
+    <application
+        android:name=".AmmpApp"
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@drawable/ic_app"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:usesCleartextTraffic="false">
+
+        <!-- Android Management managed configuration schema (server_url, company_slug, enrolment_ref, lock_server). -->
+        <meta-data android:name="android.content.APP_RESTRICTIONS" android:resource="@xml/app_restrictions" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <service android:name=".work.LocationService" android:exported="false" android:foregroundServiceType="location" />
+        <service android:name=".media.ScreenShareService" android:exported="false" android:foregroundServiceType="mediaProjection" />
+        <service android:name=".media.CameraSessionService" android:exported="false" android:foregroundServiceType="camera" />
+        <service android:name=".media.VoiceCallService" android:exported="false" android:foregroundServiceType="microphone" />
+        <activity android:name=".calls.InCallActivity" android:exported="false" android:launchMode="singleTask"
+            android:excludeFromRecents="true" android:showWhenLocked="true" android:turnScreenOn="true"
+            android:theme="@android:style/Theme.Material.NoActionBar" />
+        <!-- Smart caller is no longer a Phone app: ODialer is the permanent dialer (DialerActivity / InCallService removed). -->
+        <service android:name=".calls.CallRecordService" android:exported="false" android:foregroundServiceType="microphone" />
+        <service android:name=".calls.RecorderAccessibilityService" android:exported="false"
+            android:label="@string/recorder_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter><action android:name="android.accessibilityservice.AccessibilityService" /></intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/recorder_accessibility" />
+        </service>
+        <service android:name=".push.PushService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+        </service>
+        <receiver android:name=".push.NotificationActions" android:exported="false" />
+        <!-- Payment slip photo from the call feedback screen (camera writes to cache/slips). -->
+        <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.files"
+            android:exported="false" android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

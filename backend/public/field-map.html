@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Field map</title>
+<style>html,body{height:100%;margin:0;padding:0;background:#F3F5F8}
+/* Pinned to the window edges: in the phone's WebView height:100% resolved to 0 (map 360x0). */
+#map{position:absolute;top:0;left:0;right:0;bottom:0}
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+// Field map view for the phone app (Android WebView). Served from this server so the admin's Google Maps key can be
+// restricted to this site. The app sends data with FM.render / FM.fit; taps go back through window.Android.
+(function () {
+  var A = window.Android || { onReady: function () {}, onMarker: function () {}, onError: function () {}, onStatus: function () {} };
+  var STEPS = ['page', 'google-loading', 'google-loaded', 'map-creating', 'tiles'], step = -1;
+  function status(t) {   // loading steps, shown on the phone until the map draws (only ever moves forward)
+    var i = STEPS.indexOf(t);
+    if (i <= step) return;
+    step = i;
+    try { A.onStatus(t); } catch (e) {}
+  }
+  window.onerror = function (msg, src, line) { A.onError('js:' + msg + ' (' + String(src || '').split('/').pop() + ':' + line + ')'); };
+  status('page');
+
+  var lineKey = '', map, cluster, me, meRing, meHalo, casing, line, lastMile, zone, zoneKey = '', routeTok = 0, pins = {};
+  var NAVY = '#1F3A5F', GOLD = '#C9A35E';
+  // Light, low-contrast base map so the customers and the route are what stands out.
+  var STYLE = [
+    { elementType: 'geometry', stylers: [{ color: '#F3F5F8' }] },
+    { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#5B6676' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#F3F5F8' }, { weight: 3 }] },
+    { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#C9D1DC' }] },
+    { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
+    { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: NAVY }] },
+    { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ visibility: 'on' }, { color: '#E2EEE2' }] },
+    { featureType: 'road', elementType: 'geometry.fill', stylers: [{ color: '#FFFFFF' }] },
+    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#DFE4EB' }] },
+    { featureType: 'road.highway', elementType: 'geometry.fill', stylers: [{ color: '#F6E6C6' }] },
+    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#E5CC98' }] },
+    { featureType: 'road.local', elementType: 'labels.text.fill', stylers: [{ color: '#8A94A3' }] },
+    { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#C8DAEE' }] },
+    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#5C7A99' }] }
+  ];
+  var THEME = {
+    normal:   { bg: '#FFFFFF', fg: '#15202E', dot: '#DC2626', bd: '#D3DAE3' },
+    nearest:  { bg: GOLD,      fg: '#13243B', dot: '#13243B', bd: '#A9843F' },
+    selected: { bg: NAVY,      fg: '#FFFFFF', dot: GOLD,      bd: '#13243B' },
+    stop:     { bg: '#5B3CC4', fg: '#FFFFFF', dot: '#FFFFFF', bd: '#46309A' }
+  };
+  var Z = { normal: 1, stop: 20, nearest: 25, selected: 30 };
+  var measure = document.createElement('canvas').getContext('2d');
+  measure.font = '600 12px Roboto, Arial, sans-serif';
+  function esc(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function svgUrl(svg) { return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg); }
+  // Customer marker = name chip with a pointer; the pointer tip is the exact spot. Stop number in a badge.
+  function chip(name, k, num) {
+    var t = THEME[k] || THEME.normal, tw = Math.ceil(measure.measureText(name).width);
+    var lead = num ? 30 : 22, w = lead + tw + 12, h = 26, W = w + 4, H = h + 12, cx = W / 2;
+    var body = function (dx, dy, fill, stroke) {
+      return '<path d="M' + (2 + dx + 13) + ' ' + (1 + dy) + 'h' + (w - 26) + 'a13 13 0 0 1 0 ' + h + 'h-' + (w / 2 - 19) + 'l-6 7l-6 -7h-' + (w / 2 - 19) +
+        'a13 13 0 0 1 0 -' + h + 'z" fill="' + fill + '"' + (stroke ? ' stroke="' + stroke + '" stroke-width="1"' : '') + '/>';
+    };
+    var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + W + '" height="' + H + '">' +
+      body(0, 2, 'rgba(15,23,42,0.18)') + body(0, 0, t.bg, t.bd) +
+      (num ? '<circle cx="' + (2 + 15) + '" cy="' + (1 + h / 2) + '" r="9" fill="' + t.dot + '"/><text x="' + (2 + 15) + '" y="' + (1 + h / 2 + 4) +
+             '" font-family="Roboto,Arial,sans-serif" font-size="11" font-weight="700" text-anchor="middle" fill="' + t.bg + '">' + esc(num) + '</text>'
+           : '<circle cx="' + (2 + 12) + '" cy="' + (1 + h / 2) + '" r="4" fill="' + t.dot + '"/>') +
+      '<text x="' + (2 + lead) + '" y="' + (1 + h / 2 + 4) + '" font-family="Roboto,Arial,sans-serif" font-size="12" font-weight="600" fill="' + t.fg + '">' + esc(name) + '</text></svg>';
+    return { url: svgUrl(svg), size: new google.maps.Size(W, H), scaledSize: new google.maps.Size(W, H), anchor: new google.maps.Point(cx, h + 8) };
+  }
+  // Cluster bubble: navy with a gold ring, sized by count.
+  function bubble(n) {
+    var s = n < 10 ? 40 : n < 50 ? 46 : 54, r = s / 2;
+    return { url: svgUrl('<svg xmlns="http://www.w3.org/2000/svg" width="' + s + '" height="' + s + '"><circle cx="' + r + '" cy="' + r + '" r="' + (r - 1) + '" fill="' + NAVY + '" fill-opacity="0.18"/>' +
+      '<circle cx="' + r + '" cy="' + r + '" r="' + (r - 6) + '" fill="' + NAVY + '" stroke="' + GOLD + '" stroke-width="2.5"/></svg>'),
+      scaledSize: new google.maps.Size(s, s), anchor: new google.maps.Point(r, r) };
+  }
+  // Normal pins go in the cluster (bubbles that split on zoom); highlighted ones sit on the map above them.
+  function place(m, k) {
+    if (k === 'normal' && cluster) { if (!m._inC) { m.setMap(null); cluster.addMarker(m, true); m._inC = true; } }
+    else { if (m._inC) { cluster.removeMarker(m, true); m._inC = false; } m.setMap(map); }
+  }
+  function ease(k) { return 1 - Math.pow(1 - k, 3); }
+  // Glide the blue dot to the new fix instead of jumping.
+  function glideMe(to, acc) {
+    var from = me.getPosition(), t0 = performance.now();
+    meRing.setRadius(acc || 0);
+    if (!from) { me.setPosition(to); meRing.setCenter(to); meHalo.setPosition(to); return; }
+    var a = { lat: from.lat(), lng: from.lng() };
+    (function step(now) {
+      var k = ease(Math.min(1, (now - t0) / 900)), p = { lat: a.lat + (to.lat - a.lat) * k, lng: a.lng + (to.lng - a.lng) * k };
+      me.setPosition(p); meRing.setCenter(p); meHalo.setPosition(p);
+      if (k < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+  // Soft pulse around the blue dot (~12 frames a second; cheap).
+  function pulse() {
+    var t = (performance.now() % 2000) / 2000;
+    if (meHalo) meHalo.setIcon({ path: google.maps.SymbolPath.CIRCLE, scale: 8 + 16 * t, fillColor: '#2563EB', fillOpacity: 0.28 * (1 - t), strokeOpacity: 0 });
+    setTimeout(pulse, 80);
+  }
+  // Route: dark casing + bright line + direction arrows, drawn from the start outwards.
+  function drawRoute(path) {
+    var tok = ++routeTok;
+    [casing, line].forEach(function (l) { if (l) l.setMap(null); });
+    casing = line = null;
+    if (!path.length) return;
+    casing = new google.maps.Polyline({ map: map, path: [], strokeColor: '#0F2A57', strokeOpacity: 0.9, strokeWeight: 10, zIndex: 5, clickable: false });
+    line = new google.maps.Polyline({ map: map, path: [], strokeColor: '#3B82F6', strokeOpacity: 1, strokeWeight: 6, zIndex: 6, clickable: false,
+      icons: [{ icon: { path: google.maps.SymbolPath.FORWARD_OPEN_ARROW, scale: 1.8, strokeColor: '#FFFFFF', strokeWeight: 2 }, offset: '30px', repeat: '80px' }] });
+    var n = path.length, t0 = performance.now(), D = Math.min(1100, 350 + n * 3);
+    (function step(now) {
+      if (tok !== routeTok) return;
+      var k = ease(Math.min(1, (now - t0) / D)), p = path.slice(0, Math.max(2, Math.round(n * k)));
+      casing.setPath(p); line.setPath(p);
+      if (k < 1) requestAnimationFrame(step);
+    })(t0);
+  }
+  window.gm_authFailure = function () { A.onError('key'); };   // Google calls this when the key is refused
+  // Google reports key / API / billing problems only in the console ("…MapError"): pass the code to the app.
+  ['error', 'warn'].forEach(function (lvl) {
+    var orig = console[lvl];
+    console[lvl] = function () {
+      var m = String(Array.prototype.join.call(arguments, ' ')).match(/([A-Za-z]+MapError)/);
+      if (m) A.onError('g:' + m[1]);
+      return orig.apply(console, arguments);
+    };
+  });
+  window.__fmReady = function () { FM._ready(); };
+  window.FM = {
+    init: function (key) {
+      if (FM._started) return;   // the app may call init twice (page-finished can fire twice); loading Google twice breaks it
+      FM._started = true;
+      if (window.google && google.maps && google.maps.Map) return FM._ready();
+      status('google-loading');
+      var s = document.createElement('script');
+      s.src = 'https://maps.googleapis.com/maps/api/js?v=weekly&language=en&region=IN&loading=async&callback=__fmReady&key=' + encodeURIComponent(key);
+      s.async = true;
+      s.onerror = function () { A.onError('offline'); };
+      s.onload = function () {
+        status('google-loaded');
+        // Fallback if Google's callback never arrives: build the map as soon as the classes are there.
+        var tries = 0, t = setInterval(function () {
+          if (map || ++tries > 30) return clearInterval(t);
+          if (window.google && google.maps && (google.maps.importLibrary || google.maps.Map)) { clearInterval(t); FM._ready(); }
+        }, 500);
+      };
+      document.head.appendChild(s);
+    },
+    _ready: function () {
+      if (map || FM._creating) return;
+      FM._creating = true;
+      var go = function () { try { FM._create(); } catch (e) { A.onError('js:' + (e && e.message || e)); } };
+      if (google.maps.importLibrary) {   // loading=async: the classes arrive through importLibrary
+        Promise.all([google.maps.importLibrary('maps'), google.maps.importLibrary('marker')]).then(go, function (e) { A.onError('js:' + (e && e.message || e)); });
+      } else go();
+    },
+    _create: function () {
+      status('map-creating');
+      // Starting view only until the app sends the employee's position / customers (FM.fit).
+      map = new google.maps.Map(document.getElementById('map'), { center: { lat: 20.59, lng: 78.96 }, zoom: 5,
+        disableDefaultUI: true, zoomControl: false, clickableIcons: false, gestureHandling: 'greedy', isFractionalZoomEnabled: true,
+        backgroundColor: '#F3F5F8', styles: STYLE });
+      try {
+        if (window.markerClusterer) {
+          var mc = window.markerClusterer, opts = { map: map, markers: [],
+            renderer: { render: function (c) {
+              return new google.maps.Marker({ position: c.position, icon: bubble(c.count), zIndex: 100 + c.count,
+                label: { text: String(c.count), color: '#FFFFFF', fontSize: '13px', fontWeight: '700' } });
+            } } };
+          // Name chips are wide: group a bit more than the default so they don't overlap; all split at street level.
+          try { opts.algorithm = new mc.SuperClusterAlgorithm({ radius: 90, maxZoom: 16 }); } catch (e) {}
+          cluster = new mc.MarkerClusterer(opts);
+        }
+      } catch (e) { cluster = null; }   // no clustering is fine
+      pulse();
+      google.maps.event.addListenerOnce(map, 'tilesloaded', function () { status('tiles'); });
+      google.maps.event.addListenerOnce(map, 'idle', function () { status('tiles'); });
+      // A WebView can lay the page out before it has a size: re-measure once it does, and say so if it never gets one.
+      // An Android WebView without explicit layout params reports a 0-px-tall viewport: then size the map from the screen.
+      var fixSize = function () {
+        var el = document.getElementById('map');
+        if (el.clientHeight < 50) { el.style.bottom = 'auto'; el.style.height = Math.max(400, screen.height) + 'px'; }
+        google.maps.event.trigger(map, 'resize');
+      };
+      fixSize(); setTimeout(fixSize, 1000); setTimeout(fixSize, 3000);
+      window.addEventListener('resize', function () { if (map) google.maps.event.trigger(map, 'resize'); });
+      A.onReady();
+    },
+    render: function (s) {
+      if (!map) return;
+      if (s.me) {
+        var p = { lat: s.me.lat, lng: s.me.lng };
+        if (!me) {
+          meRing = new google.maps.Circle({ map: map, clickable: false, strokeColor: '#2563EB', strokeOpacity: 0.25, strokeWeight: 1, fillColor: '#2563EB', fillOpacity: 0.10 });
+          meHalo = new google.maps.Marker({ map: map, zIndex: 998, clickable: false });
+          me = new google.maps.Marker({ map: map, zIndex: 999, clickable: false, title: 'You',
+            icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: '#2563EB', fillOpacity: 1, strokeColor: '#fff', strokeWeight: 3 } });
+        }
+        glideMe(p, s.me.acc);
+      } else if (me) { me.setMap(null); meRing.setMap(null); meHalo.setMap(null); me = meRing = meHalo = null; }
+
+      var seen = {}, changed = false;   // redraw clusters / route only when something actually changed (no flicker)
+      (s.pins || []).forEach(function (d) {
+        seen[d.id] = true;
+        var m = pins[d.id];
+        if (!m) {
+          m = new google.maps.Marker({ position: { lat: d.lat, lng: d.lng }, title: d.t });
+          m.addListener('click', function () { A.onMarker(String(d.id)); });
+          pins[d.id] = m;
+        }
+        var name = (d.label || '') + '|' + (d.t.length > 22 ? d.t.slice(0, 21) + '…' : d.t);   // stop number + name
+        if (m._k !== d.k || m._l !== name) {
+          m.setIcon(chip(name.split('|')[1], d.k, d.label));
+          m.setZIndex(Z[d.k] || 1);
+          place(m, d.k);
+          m._k = d.k; m._l = name; changed = true;
+        }
+      });
+      Object.keys(pins).forEach(function (id) {
+        if (seen[id]) return;
+        var m = pins[id];
+        if (m._inC) cluster.removeMarker(m, true); else m.setMap(null);
+        delete pins[id]; changed = true;
+      });
+      if (cluster && changed) cluster.render();
+
+      var rk = s.route && s.route.length ? s.route.length + ':' + s.route[0] + ':' + s.route[s.route.length - 1] : '';
+      if (rk !== lineKey) { lineKey = rk; drawRoute(rk ? s.route.map(function (q) { return { lat: q[0], lng: q[1] }; }) : []); }
+      // Dotted last bit from where the road ends to the customer's pin.
+      if (lastMile) { lastMile.setMap(null); lastMile = null; }
+      if (rk && s.arrive) {
+        var end = s.route[s.route.length - 1];
+        lastMile = new google.maps.Polyline({ map: map, clickable: false, zIndex: 6, strokeOpacity: 0, path: [{ lat: end[0], lng: end[1] }, { lat: s.arrive.lat, lng: s.arrive.lng }],
+          icons: [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: 1, strokeColor: '#3B82F6', strokeWeight: 3, scale: 2 }, offset: '0', repeat: '10px' }] });
+      }
+      // Check-in zone round the customer the card is about: gold, green once the employee is inside.
+      var zk = s.arrive ? s.arrive.lat + ',' + s.arrive.lng + ',' + s.arrive.r + ',' + !!s.arrive.inside : '';
+      if (zk !== zoneKey) {
+        zoneKey = zk;
+        if (zone) { zone.setMap(null); zone = null; }
+        if (zk) {
+          var c = s.arrive.inside ? '#16A34A' : GOLD;
+          zone = new google.maps.Circle({ map: map, clickable: false, center: { lat: s.arrive.lat, lng: s.arrive.lng }, radius: s.arrive.r,
+            strokeColor: c, strokeOpacity: 0.9, strokeWeight: 1.5, fillColor: c, fillOpacity: s.arrive.inside ? 0.16 : 0.08, zIndex: 2 });
+        }
+      }
+    },
+    // pad = space the app's search bar (top) and bottom sheet cover, in CSS px.
+    fit: function (pts, pad) {
+      if (!map || !pts.length) return;
+      pad = pad || { top: 140, bottom: 300, left: 30, right: 70 };
+      if (pts.length === 1) {   // glide there: pan first (animated), then step the zoom in once the pan settles
+        var target = { lat: pts[0][0], lng: pts[0][1] }, dy = (pad.bottom - pad.top) / 2;
+        var c = map.getCenter(), still = c && Math.abs(c.lat() - target.lat) < 1e-5 && Math.abs(c.lng() - target.lng) < 1e-5;
+        if (!still) map.panTo(target);
+        var step = function () {
+          if (map.getZoom() < 15) { map.setZoom(Math.min(15, map.getZoom() + 2)); google.maps.event.addListenerOnce(map, 'idle', function () { FM.fit(pts, pad); }); }
+          else map.panBy(0, dy);
+        };
+        still ? step() : google.maps.event.addListenerOnce(map, 'idle', step);
+        return;
+      }
+      var b = new google.maps.LatLngBounds();
+      pts.forEach(function (q) { b.extend({ lat: q[0], lng: q[1] }); });
+      map.fitBounds(b, pad);
+    },
+    zoom: function (d) { if (map) map.setZoom(map.getZoom() + d); }
+  };
+})();
+</script>
+<script src="vendor/markerclusterer-2.5.3.min.js"></script>
+</body>
+</html>

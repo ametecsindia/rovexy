@@ -1,0 +1,5 @@
+-keepattributes *Annotation*, InnerClasses
+-keep,includedescriptorclasses class ametecs.managedmobile.**$$serializer { *; }
+-keepclassmembers class ametecs.managedmobile.** { *** Companion; }
+-keep class org.webrtc.** { *; }
+-keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }   # field map WebView bridge
