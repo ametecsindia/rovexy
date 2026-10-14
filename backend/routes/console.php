@@ -69,3 +69,14 @@ Artisan::command('rovexy:payments-reconcile', function () {
 })->purpose('Settle Razorpay payments that no callback or webhook reported');
 Schedule::command('rovexy:payments-reconcile')->everyTenMinutes()->name('payments:reconcile')->withoutOverlapping()
     ->when(fn () => !\App\Services\Licensing\LicenceClient::isClient());
+
+// On-prem install: ask once a day whether a new version is published (shows "update available" on the Licence page).
+Schedule::call(function () {
+    try {
+        app(\App\Services\Updates\UpdateClient::class)->check();
+    } catch (\Throwable) {
+        // no key / offline / AMC ended: the Licence page explains it when an admin presses Check for update
+    }
+})->dailyAt('02:30')->name('updates:check')->withoutOverlapping()
+    ->when(fn () => \App\Services\Licensing\LicenceClient::isClient() && config('ammp.updates.auto_check')
+        && !in_array(app(\App\Services\Updates\UpdateClient::class)->state()['phase'] ?? 'idle', ['downloading', 'downloaded', 'installing'], true));

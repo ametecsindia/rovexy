@@ -43,7 +43,7 @@ final class LicenceController extends Controller
             $lic->forget();
             $row = $client->row();
             $p = $client->payload();
-            return response()->json($lic->current() + ['mode' => 'onprem', 'feature_labels' => Licensing::FEATURES, 'server_id' => LicenceClient::fingerprint(),
+            return response()->json($lic->current() + ['mode' => 'onprem', 'feature_labels' => Licensing::FEATURES, 'server_id' => LicenceClient::fingerprint(), 'weak_fingerprint' => LicenceClient::weakFingerprint(),
                 'holder' => $p['holder'] ?? $ctx->get()?->name, 'grace_days' => $p['grace_days'] ?? null, 'deployment' => 'onprem',
                 'licence_key' => $row->licence_key, 'source' => $row->source, 'verdict' => $row->status, 'last_checked_at' => $row->last_checked_at,
                 'unreachable_since' => $row->unreachable_since, 'last_error' => $row->last_error, 'server_url' => config('ammp.licence.server_url') ?: null,

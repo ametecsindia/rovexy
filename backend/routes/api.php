@@ -15,6 +15,10 @@ Route::post('webhooks/razorpay', [\App\Http\Controllers\Site\PaymentWebhookContr
 
 // Licence server: on-prem installs check in here (the licence key is the credential). Central server only.
 Route::post('v1/license/validate', [\App\Http\Controllers\Platform\OnPremController::class, 'validate'])->middleware(['central', 'throttle:60,1']);
+Route::middleware(['central', 'throttle:30,1'])->prefix('v1/updates')->group(function () {
+    Route::post('check', [\App\Http\Controllers\Platform\UpdateApiController::class, 'check']);
+    Route::get('download/{token}', [\App\Http\Controllers\Platform\UpdateApiController::class, 'download'])->where('token', '[A-Za-z0-9]{48}');
+});
 Route::middleware(['central', 'throttle:30,1'])->prefix('v1/license')->group(function () {
     Route::post('offer', [\App\Http\Controllers\Platform\OnPremController::class, 'offer']);
     Route::post('quote', [\App\Http\Controllers\Platform\OnPremController::class, 'quote']);
@@ -74,6 +78,12 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::post('coupons', [$c, 'saveCoupon'])->middleware('platform:plans');
     Route::put('coupons/{id}', [$c, 'saveCoupon'])->whereNumber('id')->middleware('platform:plans');
     Route::delete('coupons/{id}', [$c, 'deleteCoupon'])->whereNumber('id')->middleware('platform:plans');
+    $uc = \App\Http\Controllers\Platform\UpdateCatalogController::class;   // software updates for on-prem servers (super only)
+    Route::get('updates', [$uc, 'index'])->middleware('platform:settings');
+    Route::post('updates', [$uc, 'store'])->middleware('platform:settings');
+    Route::put('updates/{id}', [$uc, 'update'])->whereNumber('id')->middleware('platform:settings');
+    Route::post('updates/{id}/publish', [$uc, 'publish'])->whereNumber('id')->middleware('platform:settings');
+    Route::delete('updates/{id}', [$uc, 'destroy'])->whereNumber('id')->middleware('platform:settings');
     Route::get('mail-log', [$c, 'mailLog'])->middleware('platform:audit');
     Route::get('leads', [$c, 'leads'])->middleware('platform:leads');
     Route::post('leads', [$c, 'saveLead'])->middleware('platform:leads');
@@ -290,6 +300,10 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::post('licence/key', [Admin\LicenceController::class, 'saveKey'])->middleware(['perm:settings.storage', 'throttle:10,1']);
         Route::post('licence/check', [Admin\LicenceController::class, 'checkNow'])->middleware(['perm:settings.storage', 'throttle:10,1']);
         Route::post('licence/file', [Admin\LicenceController::class, 'uploadFile'])->middleware(['perm:settings.storage', 'throttle:10,1']);
+        Route::get('licence/update', [Admin\UpdateController::class, 'show'])->middleware('perm:settings.storage');
+        Route::post('licence/update/check', [Admin\UpdateController::class, 'check'])->middleware(['perm:settings.storage', 'throttle:10,1']);
+        Route::post('licence/update/download', [Admin\UpdateController::class, 'download'])->middleware(['perm:settings.storage', 'throttle:5,1']);
+        Route::post('licence/update/install', [Admin\UpdateController::class, 'install'])->middleware(['perm:settings.storage', 'throttle:5,1']);
         Route::post('licence/orders/{number}/cancel', [Admin\LicenceController::class, 'cancel'])->middleware('perm:settings.storage');
         Route::get('branding', [Admin\SettingsController::class, 'branding']);
         Route::post('branding', [Admin\SettingsController::class, 'saveBranding'])->middleware('perm:branding.manage');

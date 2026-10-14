@@ -26,6 +26,7 @@ const MENU: { to: string; module: string; label: string; icon: string }[] = [
   { to: '/custom-prices', module: 'plans', label: 'Custom pricing', icon: 'chart' },
   { to: '/staff', module: 'admins', label: 'Staff users', icon: 'people' },
   { to: '/settings', module: 'settings', label: 'Settings', icon: 'settings' },
+  { to: '/updates', module: 'settings', label: 'Software updates', icon: 'shield' },
   { to: '/audit', module: 'audit', label: 'Audit log', icon: 'check' },
   { to: '/emails', module: 'audit', label: 'Sent e-mails', icon: 'chat' },
 ];
@@ -71,6 +72,7 @@ export function SuperApp() {
           {can('audit') && <Route path="/emails" element={<Emails />} />}
           {can('admins') && <Route path="/staff" element={<Staff me={me} />} />}
           {can('settings') && <Route path="/settings" element={<Settings />} />}
+          {can('settings') && <Route path="/updates" element={<Updates />} />}
           {can('audit') && <Route path="/audit" element={<Audit />} />}
           <Route path="/profile" element={<MyProfile me={me} onChange={setMe} onSignOut={logout} />} />
           <Route path="*" element={<Navigate to={items[0]?.to ?? '/'} replace />} />
@@ -1013,6 +1015,71 @@ function Coupons({ can }: { can: boolean }) {
           <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.new_only} onChange={(e) => setEdit({ ...edit, new_only: e.target.checked })} />New purchases only (not renewals)</label>
           <label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.active} onChange={(e) => setEdit({ ...edit, active: e.target.checked })} />Active</label>
           <button disabled={a.busy} type="submit">Save code</button>
+        </form>
+      </Modal>}
+    </Page>
+  );
+}
+
+// ── Software updates (on-premises servers) ──
+const mb = (b: number) => `${(b / 1048576).toFixed(1)} MB`;
+
+function Updates() {
+  const list = useAsync(() => get<any>('/updates'));
+  const [add, setAdd] = useState<any | null>(null);
+  const [edit, setEdit] = useState<any | null>(null);
+  const a = useAction();
+  const x = list.data;
+  const publish = (u: any, on: boolean) => a.run(async () => { await post(`/updates/${u.id}/publish`, { published: on }); toast(on ? `Version ${u.version} published` : `Version ${u.version} withdrawn`); await list.reload(); });
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    void a.run(async () => {
+      if (edit) { await put(`/updates/${edit.id}`, { title: edit.title || null, notes: edit.notes || null, channel: edit.channel, min_version: edit.min_version || null }); setEdit(null); }
+      else {
+        const f = new FormData();
+        if (add.file) f.append('file', add.file); else f.append('existing', add.existing);
+        (['title', 'notes', 'channel', 'min_version'] as const).forEach((k) => add[k] && f.append(k, add[k]));
+        const r: any = await post('/updates', f); toast(`Version ${r.version} added — publish it when ready`); setAdd(null);
+      }
+      await list.reload();
+    });
+  };
+  const form = edit ?? add;
+  const set = (k: string, v: any) => (edit ? setEdit({ ...edit, [k]: v }) : setAdd({ ...add, [k]: v }));
+  return (
+    <Page title="Software updates" subtitle="New versions for on-premises servers. A customer's admin installs them from Licence → Check for update; perpetual licences need active AMC."
+      actions={<button onClick={() => setAdd({ file: null, existing: x?.files_on_server?.[0] ?? '', title: '', notes: '', channel: 'stable', min_version: '' })}>Add update</button>}>
+      <ErrorBox error={list.error ?? a.error} />
+      {x && !x.can_sign && <Notice tone="bad">The signing key is missing on this server, so packages can't be signed. Run php artisan rovexy:licence-keys.</Notice>}
+      <Notice>Build the package on the build PC with <code>php artisan rovexy:build-update</code> (it reads version.json and bumps it afterwards). The version is taken from inside the package — it can't be mistyped.</Notice>
+      <Card>
+        <Table rows={x?.updates} empty="No updates yet." columns={[
+          { key: 'version', label: 'Version', render: (u: any) => <><b>{u.version}</b>{u.channel === 'beta' && <> <Badge value="pending" label="beta" /></>}<div className="muted small">{u.title}</div></> },
+          { key: 'min', label: 'Needs', render: (u: any) => u.min_version ? `${u.min_version} or later` : 'any version' },
+          { key: 'file', label: 'Package', render: (u: any) => <>{u.filename}<div className="muted small">{mb(u.size_bytes)} · SHA-256 {u.sha256.slice(0, 12)}… {u.file_present ? '' : '· FILE MISSING'}</div></> },
+          { key: 'dl', label: 'Downloads', align: 'right', render: (u: any) => u.downloads },
+          { key: 'pub', label: 'Status', render: (u: any) => <><Badge value={u.is_published ? 'active' : 'cancelled'} label={u.is_published ? 'published' : 'draft'} />{u.released_at && <div className="muted small">{fmtDate(u.released_at)}</div>}</> },
+          { key: 'act', label: '', render: (u: any) => <div className="row" style={{ gap: 6 }}>
+            <button className="secondary small" disabled={a.busy} onClick={() => void publish(u, !u.is_published)}>{u.is_published ? 'Withdraw' : 'Publish'}</button>
+            <button className="ghost small" onClick={() => setEdit({ ...u, title: u.title ?? '', notes: u.notes ?? '', min_version: u.min_version ?? '' })}>Edit</button>
+            {!u.is_published && <DeleteButton what={`version ${u.version}`} path={`/updates/${u.id}`} onDone={() => void list.reload()} />}</div> },
+        ]} />
+      </Card>
+      {form && <Modal title={edit ? `Version ${edit.version}` : 'Add update'} onClose={() => { setAdd(null); setEdit(null); }}>
+        <form onSubmit={save}>
+          <ErrorBox error={a.error} />
+          {!edit && <>
+            <Field label="Package file on the server" hint="ZIPs in storage/app/updates (where rovexy:build-update writes them) — no upload size limit">
+              <select value={add.existing} onChange={(e) => setAdd({ ...add, existing: e.target.value, file: null })}><option value="">—</option>{(x?.files_on_server ?? []).map((f: string) => <option key={f}>{f}</option>)}</select></Field>
+            <Field label={`…or upload the ZIP (up to ${x?.upload_limit_mb ?? '?'} MB here)`}><input type="file" accept=".zip" onChange={(e) => setAdd({ ...add, file: e.target.files?.[0] ?? null, existing: '' })} /></Field>
+          </>}
+          <div className="form-grid">
+            <Field label="Title (shown to customers)"><input value={form.title} onChange={(e) => set('title', e.target.value)} maxLength={150} /></Field>
+            <Field label="Channel"><select value={form.channel} onChange={(e) => set('channel', e.target.value)}><option value="stable">Stable — everyone</option><option value="beta">Beta — test servers only</option></select></Field>
+            <Field label="Minimum version" hint="Blank = any. Servers below it must install that version first."><input value={form.min_version} onChange={(e) => set('min_version', e.target.value)} pattern="\d+(\.\d+){0,3}" placeholder="e.g. 1.5" /></Field>
+          </div>
+          <Field label="What's new (shown before installing)"><textarea rows={6} value={form.notes} onChange={(e) => set('notes', e.target.value)} maxLength={8000} /></Field>
+          <button disabled={a.busy || (!edit && !add.file && !add.existing)}>{a.busy ? 'Checking the package…' : 'Save'}</button>
         </form>
       </Modal>}
     </Page>

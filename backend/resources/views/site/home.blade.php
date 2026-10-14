@@ -143,11 +143,12 @@
 .stage .rings i{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(212,174,106,.16)}.stage .rings i:nth-child(2){inset:14%;border-color:rgba(212,174,106,.22)}.stage .rings i:nth-child(3){inset:28%;border:0;background:radial-gradient(circle,rgba(184,137,59,.28),transparent 68%)}
 .stage .rings:after{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 80%,rgba(212,174,106,.35) 92%,transparent);mask:radial-gradient(circle,transparent 69.6%,#000 70%,#000 71%,transparent 71.4%);-webkit-mask:radial-gradient(circle,transparent 69.6%,#000 70%,#000 71%,transparent 71.4%);animation:sweep 9s linear infinite}
 @keyframes sweep{to{transform:rotate(1turn)}}
-.panes{position:relative;min-height:760px;width:100%;overflow:hidden}
+.live-phone{position:relative;width:330px;height:680px;flex:none}.live-phone iframe{display:block;width:100%;height:100%;border:0;background:transparent;pointer-events:none}
+.live-phone a{position:absolute;right:-6px;bottom:12px;transform:translateX(100%);font-size:.8rem;font-weight:600;color:var(--brass-2);text-decoration:none;white-space:nowrap}.live-phone a:hover{text-decoration:underline}
+@media (max-width:1100px){.live-phone a{position:static;transform:none;display:block;text-align:center;margin-top:8px}}
+.panes{position:relative;min-height:150px;width:100%;overflow:hidden}
 .pane{position:absolute;inset:0;opacity:0;visibility:hidden;transform:translateY(16px) scale(.98);transition:opacity .45s,transform .45s,visibility .45s;display:flex;flex-direction:column;align-items:center}
 .pane.on{opacity:1;visibility:visible;transform:none;position:relative}
-.how .droid{color:var(--ink)}
-.pane .droid{box-shadow:0 40px 80px -20px rgba(0,0,0,.7),0 0 0 1px rgba(255,255,255,.06)}
 .cap{margin-top:22px;max-width:440px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);backdrop-filter:blur(10px);border-radius:16px;padding:14px 18px;text-align:left}
 .cap small{display:block;color:var(--brass-2);font-weight:600;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:4px}
 .cap p{margin:0;color:#B9C6D6;font-size:.94rem;line-height:1.55}.cap p b{color:#fff}
@@ -156,78 +157,6 @@
 .tour-nav button:hover{background:var(--brass);color:var(--ink)}.tour-nav button:focus-visible{outline:2px solid var(--brass-2)}
 @media (max-width:960px){.panes{min-height:0}.stage .rings{width:440px}.tour-nav{top:34%}.tour-nav button{width:38px;height:38px}}
 
-/* realistic Android phone */
-.droid{width:300px;height:628px;border-radius:48px;padding:11px;background:linear-gradient(145deg,#2B313A,#0D1015);box-shadow:inset 0 0 0 2px #3C434E,0 40px 80px -30px rgba(14,26,43,.6),0 0 0 1px #0D1015;position:relative;flex:none}
-.droid:before{content:"";position:absolute;right:-3px;top:130px;width:3px;height:70px;border-radius:0 3px 3px 0;background:#2B313A}
-.droid:after{content:"";position:absolute;right:-3px;top:220px;width:3px;height:42px;border-radius:0 3px 3px 0;background:#2B313A}
-.d-screen{position:relative;height:100%;border-radius:38px;overflow:hidden;background:#F4F6F9;font-size:12px;line-height:1.35;display:flex;flex-direction:column}
-.d-status{position:absolute;z-index:6;left:0;right:0;top:0;height:30px;display:flex;justify-content:space-between;align-items:center;padding:0 22px;color:#fff;font-size:.78rem;font-weight:600}
-.d-status .cam{position:absolute;left:50%;top:9px;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#0B0E12;box-shadow:inset 0 0 0 2px #1C222B}
-.d-ic{display:flex;gap:5px}.d-ic svg{height:10px;width:auto}
-.d-nav{position:absolute;z-index:6;left:0;right:0;bottom:0;height:22px;display:grid;place-items:center}.d-nav i{width:96px;height:4px;border-radius:4px;background:rgba(14,26,43,.55)}
-.a-hero{background:linear-gradient(160deg,#1F3A5F,#2A4C78);color:#fff;padding:40px 16px 16px;border-radius:0 0 26px 26px}
-.a-row{display:flex;justify-content:space-between;align-items:center;gap:8px}.a-row b{font-size:1rem}
-.a-pill{font-size:.66rem;background:rgba(255,255,255,.14);padding:3px 8px;border-radius:999px;color:#D4E1F0}
-.a-today{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:14px;background:rgba(255,255,255,.08);border-radius:14px;padding:10px}
-.a-today b{display:block;font-size:1rem;font-variant-numeric:tabular-nums}.a-today small{color:#C8D3E0;font-size:.62rem}
-.a-tiles{display:flex;gap:6px;overflow:hidden;padding:12px 12px 0}.a-tiles span{flex:none;background:#fff;border:1px solid #E1E6EC;border-radius:10px;padding:6px 8px;font-size:.66rem;color:var(--mute)}
-.a-tiles span b{display:block;color:var(--ink);font-size:.9rem}.a-tiles span.w{border-color:var(--brass)}
-.a-search{margin:10px 12px 0;background:#fff;border:1px solid #E1E6EC;border-radius:12px;padding:9px 12px;color:#98A3B3;font-size:.72rem}
-.a-list{padding:8px 12px;display:flex;flex-direction:column;gap:7px}
-.a-case{display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center;background:#fff;border:1px solid #E1E6EC;border-radius:14px;padding:9px 10px}
-.a-case > i{width:32px;height:32px;border-radius:50%;background:#E6ECF4;color:var(--navy);font-style:normal;font-weight:700;display:grid;place-items:center}
-.a-case b{display:block;font-size:.8rem}.a-case small{color:var(--mute);font-size:.66rem}.a-case .r{text-align:right}
-.a-case em{display:block;font-style:normal;font-size:.62rem;font-weight:600;margin-top:2px}.a-case em.r{color:var(--late)}.a-case em.a{color:#B7791F}.a-case em.g{color:var(--ok)}
-.a-hero.case{padding-top:36px}.a-hero.case .a-row{font-size:.78rem}.a-hero.case .gs{color:#E5C98F}
-.a-who{display:flex;gap:10px;align-items:center;margin-top:8px}.a-who > i{width:44px;height:44px;border-radius:50%;background:#E6ECF4;color:var(--navy);font-style:normal;font-weight:700;font-size:1.1rem;display:grid;place-items:center;flex:none}
-.a-who b{display:block;font-size:1rem}.a-who small{display:block;color:#C8D3E0;font-size:.64rem}.a-who div{flex:1;min-width:0}
-.a-st{font-size:.6rem;background:#FBF1E0;color:#94600E;border-radius:999px;padding:2px 7px;font-weight:600}
-.a-met{display:grid;grid-template-columns:repeat(3,1fr);margin-top:12px}.a-met b{display:block;font-size:.95rem}.a-met b.al{color:#FFB4A8}.a-met small{color:#C8D3E0;font-size:.6rem}
-.a-acts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:10px 10px 0}
-.a-acts span{background:#fff;border:1px solid #E1E6EC;border-radius:12px;padding:7px 0;text-align:center;font-size:.64rem;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:3px}
-.a-acts svg{width:18px;height:18px;fill:currentColor}.a-acts .g{color:#1E8E5A}.a-acts .a{color:#B7791F}.a-acts .t{color:#0F8A84}.a-acts .b{color:#2563EB}
-.a-outl{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;padding:8px 10px 0}.a-outl span{border:1px solid #C9D2DC;border-radius:999px;text-align:center;padding:5px 0;font-size:.66rem;color:var(--navy);font-weight:600}
-.a-tabs{display:flex;gap:12px;padding:10px 12px 0;font-size:.68rem;color:var(--mute);border-bottom:1px solid #E1E6EC}.a-tabs > *{padding-bottom:7px}.a-tabs b{color:var(--navy);border-bottom:2px solid var(--navy)}
-.a-card{margin:10px 12px;background:#fff;border:1px solid #E1E6EC;border-radius:12px;padding:10px}.a-card small{display:block;color:var(--mute);font-size:.64rem}.a-card b{font-size:.76rem}
-.a-scrim{position:absolute;inset:0;background:rgba(14,26,43,.45);z-index:3;opacity:0}.pane.on .a-scrim{animation:fadein .3s .5s forwards}
-@keyframes fadein{to{opacity:1}}
-.a-sheet{position:absolute;z-index:4;left:0;right:0;bottom:0;background:#fff;border-radius:22px 22px 0 0;padding:10px 16px 34px;display:flex;flex-direction:column;gap:8px;transform:translateY(100%)}
-.pane.on .a-sheet{animation:sheet .5s .6s cubic-bezier(.2,.7,.2,1) forwards}@keyframes sheet{to{transform:none}}
-.a-sheet .grab{width:36px;height:4px;border-radius:4px;background:#D3DAE3;align-self:center}.a-sheet .st{font-size:.95rem;margin:2px 0 2px}
-.a-fld{border:1px solid #C9D2DC;border-radius:10px;padding:6px 10px}.a-fld small{display:block;color:var(--mute);font-size:.6rem}.a-fld b{font-size:.82rem}
-.a-btn{background:var(--navy);color:#fff;text-align:center;border-radius:999px;padding:9px;font-weight:600;font-size:.76rem}
-.a-slip{display:flex;justify-content:space-between;align-items:center;border:1.5px dashed #C9D2DC;border-radius:10px;padding:9px 10px;font-size:.72rem}.a-slip em{font-style:normal;color:var(--ok);font-weight:600;opacity:0}.pane.on .a-slip em{animation:fadein .3s 1.6s forwards}
-.a-fine{color:var(--mute);font-size:.6rem}
-.a-dlg{position:absolute;z-index:4;left:18px;right:18px;top:200px;background:#fff;border-radius:22px;padding:18px;box-shadow:0 20px 40px -10px rgba(0,0,0,.4);opacity:0;transform:scale(.92)}
-.pane.on .a-dlg{animation:pop2 .35s .6s forwards}@keyframes pop2{to{opacity:1;transform:none}}
-.a-dlg b{font-size:.95rem}.a-dlg p{color:var(--mute);font-size:.74rem;margin:6px 0 12px}.a-dlg span{color:var(--navy);font-weight:700;font-size:.76rem;float:right}
-.a-push{position:absolute;z-index:5;left:10px;right:10px;top:34px;display:flex;gap:10px;align-items:center;background:rgba(255,255,255,.97);border-radius:18px;padding:10px 12px;box-shadow:0 14px 30px -10px rgba(0,0,0,.45);transform:translateY(-140%)}
-.pane.on .a-push{animation:push .5s .8s cubic-bezier(.2,.7,.2,1) forwards}@keyframes push{to{transform:none}}
-.a-push > i{width:28px;height:28px;border-radius:8px;background:var(--navy);color:var(--brass-2);font-style:normal;font-weight:700;font-size:.64rem;display:grid;place-items:center;flex:none}
-.a-push b{display:block;font-size:.76rem}.a-push small{color:var(--mute);font-size:.64rem}.a-push em{margin-left:auto;font-style:normal;font-size:.6rem;color:var(--mute);align-self:flex-start}
-.a-toast{position:absolute;z-index:5;left:16px;right:16px;bottom:36px;background:#1E2A3A;color:#fff;border-radius:12px;padding:10px 12px;font-size:.72rem;font-weight:600;opacity:0;transform:translateY(12px)}
-.pane.on .a-toast{animation:toast .4s 2.4s forwards}.pane.on .a-toast.late{animation-delay:3.4s}@keyframes toast{to{opacity:1;transform:none}}
-.a-toast.amber{background:#7A5418}.a-toast.info{background:var(--navy)}
-.a-sign{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(170deg,#1F3A5F,#14263F);color:#fff;text-align:center;padding:0 24px}
-.a-sign .lg{width:54px;height:54px;border-radius:16px;background:#24395A;color:var(--brass-2);font-style:normal;font-weight:800;display:grid;place-items:center;margin-bottom:10px}
-.a-sign small{color:#B9C6D6}.a-sign .code{margin:26px 0 18px;background:rgba(255,255,255,.08);border-radius:18px;padding:16px 26px}.a-sign .code b{display:block;font-size:2.4rem;letter-spacing:.14em}
-.a-sign .spin{width:22px;height:22px;border-radius:50%;border:3px solid rgba(255,255,255,.2);border-top-color:var(--brass-2);animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
-.a-call{position:absolute;z-index:4;left:10px;right:10px;top:250px;display:flex;gap:10px;align-items:center;background:#0F8A5F;color:#fff;border-radius:16px;padding:10px 12px;opacity:0;transform:translateY(10px)}
-.pane.on .a-call{animation:pop2 .35s .7s forwards}.a-call > i{width:9px;height:9px;border-radius:50%;background:#FF6B6B;animation:blink 1.1s infinite}.a-call b{display:block;font-size:.78rem}.a-call small{font-size:.66rem;color:#D5F2E5}
-.a-call .end{margin-left:auto;background:#D93636;border-radius:999px;padding:4px 10px;font-size:.66rem;font-weight:700}
-.a-bar{background:var(--navy);color:#fff;padding:38px 14px 12px;font-weight:600}
-.a-map{height:230px;position:relative;background:#E8ECF1;background-image:linear-gradient(90deg,rgba(255,255,255,.95) 3px,transparent 3px),linear-gradient(rgba(255,255,255,.95) 3px,transparent 3px);background-size:46px 46px}
-.a-map svg{position:absolute;inset:0;width:100%;height:100%}.trail2{stroke-dasharray:300;stroke-dashoffset:300}.pane.on .trail2{animation:dash 2.2s .4s ease-out forwards}@keyframes dash{to{stroke-dashoffset:0}}
-.a-map .me{position:absolute;left:24px;bottom:12px;width:14px;height:14px;border-radius:50%;background:#2563EB;border:3px solid #fff;box-shadow:0 0 0 8px rgba(37,99,235,.18)}
-.a-map .pin{position:absolute;background:#fff;border-radius:999px;padding:2px 8px;font-size:.62rem;font-weight:600;box-shadow:0 4px 10px -4px rgba(0,0,0,.4)}.a-map .p1{right:16px;top:30px;background:var(--brass);color:var(--ink)}.a-map .p2{left:40px;top:48px}
-.a-map .ring{position:absolute;right:22px;top:6px;width:44px;height:44px;border-radius:50%;border:2px solid var(--ok);background:rgba(30,142,90,.12)}
-.a-near{padding:10px 12px;display:flex;flex-direction:column;gap:8px}
-.a-pay{margin:10px 12px;background:#fff;border:1px solid #E1E6EC;border-radius:12px;padding:10px}.a-pay > small{color:var(--mute);font-size:.64rem}
-.a-prow{display:flex;flex-direction:column;gap:6px;margin-top:6px}.a-prow b{font-size:.8rem;display:block}.a-prow small{font-size:.6rem;color:var(--mute)}
-.a-prow em{font-style:normal;font-size:.64rem;font-weight:700;border-radius:999px;padding:3px 9px;align-self:flex-start}.st1{background:#FBF1E0;color:#94600E}.st2{background:#E7F4EC;color:#1E7A4D;opacity:0}.stx{position:relative;height:20px;display:block}.stx em{position:absolute;left:0;top:0}
-.pane.on .st1{animation:fadeout .3s 2.2s forwards}.pane.on .st2{animation:fadein .3s 2.2s forwards}@keyframes fadeout{to{opacity:0}}
-.a-loc{margin:10px 12px 0;background:#E7F4EC;color:#14532D;border-radius:10px;padding:8px 10px;font-size:.66rem;font-weight:600;order:-1}
-.typed{overflow:hidden}
 
 /* feature blocks with real console screens */
 .feat{padding:112px 0}.feat-head{margin-bottom:24px}.feat-head h2{margin-bottom:6px}
@@ -393,44 +322,16 @@ $faqs = [
 @endphp
 
     @php
-      // Realistic Android frame + the app's own screens (navy hero header, white cards, same labels as the Kotlin app).
-      $droid = fn (string $screen, string $over = '') => '<div class="droid"><div class="d-screen"><div class="d-status"><span>9:41</span><i class="cam"></i><span class="d-ic"><svg viewBox="0 0 24 12"><path d="M1 11h3V8H1zm5 0h3V5H6zm5 0h3V2h-3zm5 0h3V0h-3z" fill="currentColor"/></svg><svg viewBox="0 0 26 12"><rect x=".5" y=".5" width="22" height="11" rx="3" fill="none" stroke="currentColor"/><rect x="2" y="2" width="15" height="8" rx="1.5" fill="currentColor"/><rect x="23.5" y="4" width="2" height="4" rx="1" fill="currentColor"/></svg></span></div>' . $screen . $over . '<div class="d-nav"><i></i></div></div></div>';
-      $home = fn (string $tag = '') => '<div class="a-hero"><div class="a-row"><b>Good morning, Priya</b><span class="a-pill">' . ($tag ?: 'Work session active') . '</span></div>'
-          . '<div class="a-today"><div><b>18</b><small>Calls</small></div><div><b>11</b><small>Connected</small></div><div><b>42:10</b><small>Talk time</small></div><div><b>6</b><small>Follow-ups</small></div></div></div>'
-          . '<div class="a-tiles"><span>Overdue <b>212</b></span><span>Due today <b>9</b></span><span class="w">Promises today <b>4</b></span><span>Callbacks due <b>3</b></span></div>'
-          . '<div class="a-search">Search name, case ID or last 4+ digits</div>'
-          . '<div class="a-list">' . collect([['Ravi Kumar', 'Axis Q3 Oct', '₹12,400', '34 DPD', 'r'], ['Meena Reddy', 'Axis Q3 Oct', '₹7,850', 'Callback 4:30 pm', 'a'], ['Suresh Babu', 'HDFC Cards Sep', '₹8,000', 'Promise today', 'g'], ['Lakshmi K.', 'Axis Q3 Oct', '₹21,300', '61 DPD', 'r']])
-              ->map(fn ($c) => '<div class="a-case"><i>' . e(mb_substr($c[0], 0, 1)) . '</i><div><b>' . e($c[0]) . '</b><small>' . e($c[1]) . '</small></div><div class="r"><b>' . e($c[2]) . '</b><em class="' . $c[4] . '">' . e($c[3]) . '</em></div></div>')->implode('') . '</div>';
-      $case = fn () => '<div class="a-hero case"><div class="a-row"><span>‹ Back</span><span class="gs">Refresh</span></div><div class="a-who"><i>R</i><div><b>Ravi Kumar</b><small>AX-220781 · Axis Q3 Oct</small><small>Assigned to Priya S. · Hyderabad callers</small></div><span class="a-st">Follow up</span></div>'
-          . '<div class="a-met"><div><b class="al">₹12,400</b><small>Overdue now</small></div><div><b class="al">34</b><small>Days overdue</small></div><div><b>₹48,900</b><small>Outstanding</small></div></div></div>'
-          . '<div class="a-acts"><span class="g"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15 15 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1z"/></svg>Call</span><span class="a"><svg viewBox="0 0 24 24"><path d="M7 2v3M17 2v3M3 9h18M5 5h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" fill="none" stroke="currentColor" stroke-width="2"/></svg>Callback</span><span class="t"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7" fill="none" stroke="currentColor" stroke-width="2.4"/></svg>Payment</span><span class="b"><svg viewBox="0 0 24 24"><path d="M12 22s7-7.4 7-13a7 7 0 0 0-14 0c0 5.6 7 13 7 13z"/></svg>Directions</span></div>'
-          . '<div class="a-outl"><span>Promise</span><span>Note</span><span>Status</span></div><div class="a-tabs"><b>Overview</b><span>Details</span><span>Dues</span><span>Payments</span><span>Calls</span></div>'
-          . '<div class="a-card"><small>Latest promise</small><b>No promises recorded.</b></div>';
-      $sheet = fn (string $title, string $body) => '<div class="a-scrim"></div><div class="a-sheet"><i class="grab"></i><b class="st">' . $title . '</b>' . $body . '</div>';
-      $field = fn (string $l, string $v, string $cls = '') => '<div class="a-fld ' . $cls . '"><small>' . $l . '</small><b>' . $v . '</b></div>';
-      $note = fn (string $t, string $s, string $cls = '') => '<div class="a-push ' . $cls . '"><i>SC</i><div><b>' . $t . '</b><small>' . $s . '</small></div><em>now</em></div>';
-      $toast = fn (string $t, string $cls = '') => '<div class="a-toast ' . $cls . '">' . $t . '</div>';
-
       $tour = [
-        ['Office', 'Upload the portfolio', 'The office drops in the bank\'s Excel or CSV and assigns it to a group. Each phone gets its cases straight away, with a push alert.',
-          $droid($home(), $note('24 new cases assigned', 'Axis Q3 Oct · sorted by days past due'))],
-        ['Office + phone', 'Approve the company phone', 'A new phone shows a code. The admin matches it in Devices & approvals and approves it. Unapproved phones cannot sign in.',
-          $droid('<div class="a-sign"><i class="lg">SC</i><b>ROVEXY</b><small>This phone is waiting for your admin</small><div class="code"><small>Code on phone</small><b>4821</b></div><span class="spin"></span></div>', $toast('✓ Phone approved — you can sign in'))],
-        ['Phone', 'Recording must be on', 'Work cannot start until a test call proves auto call recording is on. An answered call without a recording blocks calling again.',
-          $droid($home('Calls blocked'), '<div class="a-scrim"></div><div class="a-dlg"><b>Recording not saved</b><p>Auto call recording is OFF. Calls are blocked until it is switched on.</p><span>Open call settings</span></div>' . $toast('✓ Recording found — calls unlocked', 'late'))],
-        ['Phone', 'Call the customer', 'Cases are sorted by days past due and amount. The call goes out on the company SIM and the recording uploads by itself.',
-          $droid($case(), '<div class="a-call"><i></i><div><b>On call · Ravi Kumar</b><small>Recording · <span data-timer="0">00:00</span></small></div><span class="end">End</span></div>' . $toast('Uploading the call recording…', 'late info'))],
-        ['Phone', 'Record the outcome', 'After every call: a promise with amount and date, a payment, or a callback. Promises and callbacks land on the follow-up list.',
-          $droid($case(), $sheet('Record commitment', $field('Promised amount (₹)', '12,400', 'typed') . $field('Promised payment date (required)', '15 Oct 2026') . $field('Notes (optional)', 'Salary on 14th') . '<span class="a-btn">Save</span>') . $toast('✓ Promise saved', 'late'))],
-        ['Phone', 'Visit and check in', 'Field agents see customers near them with road distance. "I\'ve reached" only counts within 100 m of the customer\'s pin.',
-          $droid('<div class="a-bar">‹ &nbsp;Customers near me</div><div class="a-map"><svg viewBox="0 0 260 190" preserveAspectRatio="none"><path class="trail2" d="M30 170 C 80 150, 100 90, 150 80 S 220 40, 226 28" stroke="#1F3A5F" stroke-width="5" fill="none" stroke-linecap="round"/></svg><span class="me"></span><span class="pin p1">Suresh B.</span><span class="pin p2">Lakshmi K.</span><span class="ring"></span></div>'
-            . '<div class="a-near"><div class="a-case"><i>S</i><div><b>Suresh Babu</b><small>Distance &amp; route · 2.4 km · 9 min</small></div></div><span class="a-btn">I\'ve reached · Check in</span></div>', $toast('✓ Field visit · reached the customer (38 m)'))],
-        ['Phone', 'Collect the payment', 'Mode, amount and a photo of the slip, on the spot. The office checks the payment before it reduces the balance.',
-          $droid($case(), $sheet('Record payment', $field('Payment mode', 'UPI') . $field('Amount (₹)', '8,000') . '<div class="a-slip"><span>Take photo</span><em>Slip attached</em></div><small class="a-fine">The office checks the payment before it reduces the balance.</small><span class="a-btn">Save</span>') . $toast('Waiting for office check', 'late amber'))],
-        ['Office', 'Check and confirm', 'Managers see each slip next to the payment and confirm it or send it back with a note. The agent sees the result on the case.',
-          $droid($case(), '<div class="a-pay"><small>Payments</small><div class="a-prow"><div><b>₹8,000 · UPI</b><small>Paid 12 Oct · Ref 428207645190 · slip attached</small></div><span class="stx"><em class="st1">Waiting for office check</em><em class="st2">Confirmed</em></span></div></div>' . $note('Payment confirmed', 'Suresh Babu · ₹8,000 checked by the office', 'late'))],
-        ['Office', 'See the team live', 'The office sees who is on a call, who is working and who has gone quiet. Location is shared only during the work session.',
-          $droid($home(), '<div class="a-loc">Location is shared with your company while you are signed in.</div>' . $toast('Work session active · 6 h 12 m'))],
+        ['Office', 'Upload the portfolio', 'The office drops in the bank\'s Excel or CSV and assigns it to a group. Each phone gets its cases straight away, with a push alert.'],
+        ['Office + phone', 'Approve the company phone', 'A new phone shows a code. The admin matches it in Devices & approvals and approves it. Unapproved phones cannot sign in.'],
+        ['Phone', 'Recording must be on', 'Work cannot start until a test call proves auto call recording is on. An answered call without a recording blocks calling again.'],
+        ['Phone', 'Call the customer', 'Cases are sorted by days past due and amount. The call goes out on the company SIM and the recording uploads by itself.'],
+        ['Phone', 'Record the outcome', 'After every call: a promise with amount and date, a payment, or a callback. Promises and callbacks land on the follow-up list.'],
+        ['Phone', 'Visit and check in', 'Field agents see customers near them with road distance. "I\'ve reached" only counts within 100 m of the customer\'s pin.'],
+        ['Phone', 'Collect the payment', 'Mode, amount and a photo of the slip, on the spot. The office checks the payment before it reduces the balance.'],
+        ['Office', 'Check and confirm', 'Managers see each slip next to the payment and confirm it or send it back with a note. The agent sees the result on the case.'],
+        ['Office', 'See the team live', 'The office sees who is on a call, who is working and who has gone quiet. Location is shared only during the work session.'],
       ];
     @endphp
 <section class="hero"><div class="wrap hero-grid">
@@ -473,10 +374,11 @@ $faqs = [
     </div>
     <div class="stage">
       <i class="rings" aria-hidden="true"><i></i><i></i><i></i></i>
+      {{-- The real ROVEXY app (the live demo) plays each step in this phone. --}}
+      <div class="live-phone"><iframe src="/demo?tour=1" title="The ROVEXY app playing the selected step" loading="lazy" tabindex="-1" aria-hidden="true"></iframe><a href="/demo">Try it yourself →</a></div>
       <div class="panes">
-        @foreach($tour as $i => [$who, $t, $text, $mock])
+        @foreach($tour as $i => [$who, $t, $text])
           <div class="pane {{ $i ? '' : 'on' }}" role="tabpanel" id="tp{{ $i }}" aria-labelledby="tt{{ $i }}">
-            <div class="pane-mock" aria-hidden="true">{!! $mock !!}</div>
             <div class="cap"><small>Step {{ sprintf('%02d', $i + 1) }} / {{ sprintf('%02d', count($tour)) }} · {{ $who }}</small><p><b>{{ $t }}.</b> {{ $text }}</p></div>
           </div>
         @endforeach
@@ -730,9 +632,20 @@ $faqs = [
     var t = tabs[cur]; void t.offsetWidth; if (auto) t.classList.add('run');
     if (focus) t.focus();
     if (window.innerWidth <= 900) t.scrollIntoView({ block: 'nearest', inline: 'center', behavior: still ? 'auto' : 'smooth' });
-    [].forEach.call(panes[cur].querySelectorAll('[data-timer]'), function (el) { el.dataset.timer = 0; el.textContent = '00:00'; });
+    play();
     clearTimeout(timer); if (auto) timer = setTimeout(function () { show(cur + 1); }, DWELL);
   }
+  // the phone is the live demo app; each step is a short scene it plays (and reports how long it takes)
+  var frame = root.querySelector('.live-phone iframe'), ready = false;
+  function play() { if (ready && frame.contentWindow) frame.contentWindow.postMessage({ rovexyScene: cur }, location.origin); }
+  window.addEventListener('message', function (e) {
+    if (e.origin !== location.origin || e.source !== frame.contentWindow || !e.data) return;
+    if (e.data.rovexyReady) { ready = true; play(); }
+    if (e.data.rovexySceneLen && e.data.scene === cur) {
+      var ms = e.data.rovexySceneLen + 1500; root.style.setProperty('--dwell', ms / 1000 + 's');
+      var t = tabs[cur]; t.classList.remove('run'); void t.offsetWidth; if (auto) { t.classList.add('run'); clearTimeout(timer); timer = setTimeout(function () { show(cur + 1); }, ms); }
+    }
+  });
   tabs.forEach(function (t, k) {
     t.addEventListener('click', function () { auto = false; show(k); });
     t.addEventListener('keydown', function (e) { var d = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key]; if (d) { e.preventDefault(); auto = false; show(cur + d, true); } });
@@ -746,12 +659,6 @@ $faqs = [
 })();
 </script>
 
-<script>
-[].forEach.call(document.querySelectorAll('[data-timer]'), function (el) {
-  if (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  setInterval(function () { var s = (+el.dataset.timer || 0) + 1; el.dataset.timer = s; el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0'); }, 1000);
-});
-</script>
 <script>
 (function () {   // console showcase: tabs auto-advance; each callout lights up in turn
   var root = document.querySelector('.showcase'); if (!root) return;

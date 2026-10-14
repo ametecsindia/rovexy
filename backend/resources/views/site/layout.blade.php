@@ -72,10 +72,10 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
 <header class="top"><div class="wrap">
   <a class="logo" href="/" aria-label="ROVEXY home"><img src="/brand/rovexy-lockup.svg" alt="ROVEXY" width="151" height="44"></a>
   <nav aria-label="Main">
-    <a class="hide-sm" href="/#how">How it works</a><a class="hide-sm" href="/#product">Product</a><a class="hide-sm" href="/#security">Security</a><a class="hide-sm" href="/#pricing">Pricing</a><a class="hide-sm" href="/#faq">FAQ</a>
+    <a class="hide-sm" href="/#how">How it works</a><a class="hide-sm" href="/demo">Live demo</a><a class="hide-sm" href="/#product">Product</a><a class="hide-sm" href="/#security">Security</a><a class="hide-sm" href="/#pricing">Pricing</a><a class="hide-sm" href="/#faq">FAQ</a>
     <a class="hide-xs" href="/admin">Sign in</a><a class="btn gold" href="/#trial">Free trial</a>
     <details class="menu" onclick="if(event.target.tagName==='A')this.open=false"><summary aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="#0F1E33" stroke-width="2" stroke-linecap="round"/></svg></summary>
-      <div><a href="/#how">How it works</a><a href="/#screens">Screens</a><a href="/#product">Product</a><a href="/#security">Security</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/contact">Contact</a><a href="/admin">Sign in</a></div></details>
+      <div><a href="/#how">How it works</a><a href="/demo">Live demo</a><a href="/#screens">Screens</a><a href="/#product">Product</a><a href="/#security">Security</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/contact">Contact</a><a href="/admin">Sign in</a></div></details>
   </nav>
 </div></header>
 @yield('main')
@@ -87,7 +87,7 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
     <div><span class="logo"><img src="/brand/rovexy-logo-dark.svg" alt="ROVEXY — Your Workforce. In Motion." width="206" height="60"></span>
       <p>Recorded calls, verified visits and payment slips for collection teams. A product of {{ $co::get('seller_name') }}.</p>
       <address>{{ $co::get('seller_address') }}</address></div>
-    <div><h4>Product</h4><ul><li><a href="/#how">How it works</a></li><li><a href="/#screens">Screens</a></li><li><a href="/#product">Product</a></li><li><a href="/#security">Security</a></li><li><a href="/#pricing">Pricing</a></li></ul></div>
+    <div><h4>Product</h4><ul><li><a href="/#how">How it works</a></li><li><a href="/demo">Live demo</a></li><li><a href="/#screens">Screens</a></li><li><a href="/#product">Product</a></li><li><a href="/#security">Security</a></li><li><a href="/#pricing">Pricing</a></li></ul></div>
     <div><h4>Get started</h4><ul><li><a href="/#trial">Free trial</a></li><li><a href="/buy">Buy a package</a></li><li><a href="/admin">Sign in</a></li><li><a href="/#faq">FAQ</a></li></ul></div>
     <div><h4>Company</h4><ul><li><a href="/contact">Contact us</a></li><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms of service</a></li><li><a href="/refund">Refund &amp; cancellation</a></li><li><a href="/delivery">Service delivery</a></li></ul></div>
   </div>

@@ -773,3 +773,7 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
 .fp-box code { background: none; font-size: .85rem; }
 .file-box { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
 .feat-grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px 18px; margin: 0; }
+.upd-offer { border: 1px solid var(--border); border-left: 4px solid var(--accent, #B8893B); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--bg); }
+.upd-notes { white-space: pre-wrap; font-family: inherit; font-size: .85rem; margin: 6px 0 0; max-height: 220px; overflow: auto; }
+.upd-bar { height: 8px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin: 6px 0; }
+.upd-bar span { display: block; height: 100%; background: var(--primary, #1F3A5F); transition: width .4s; }

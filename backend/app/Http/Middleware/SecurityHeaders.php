@@ -15,7 +15,7 @@ final class SecurityHeaders
         $h = $response->headers;
         $h->set('X-Content-Type-Options', 'nosniff');
         $h->set('Referrer-Policy', 'strict-origin-when-cross-origin'); // Sanctum needs same-origin Referer/Origin
-        $h->set('X-Frame-Options', 'DENY');
+        $h->set('X-Frame-Options', $request->path() === 'demo' ? 'SAMEORIGIN' : 'DENY');   // the live demo plays inside "How it works" on the home page
         $h->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
         if ($request->isSecure()) {
             $h->set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');

@@ -59,7 +59,13 @@ final class LicenceClient
                 return strtolower($m[1]);
             }
         }
-        return php_uname('n');
+        return 'weak|' . php_uname('n');   // no machine id: the host name — a rename changes the fingerprint (see weakFingerprint)
+    }
+
+    /** True when no hardware/OS machine id could be read and the fingerprint rests on the host name (shown as a warning). */
+    public static function weakFingerprint(): bool
+    {
+        return !config('ammp.licence.machine_id') && str_starts_with(self::machineId(), 'weak|');
     }
 
     public function row(): InstallationLicence
@@ -85,8 +91,11 @@ final class LicenceClient
     {
         $row = $this->row();
         $this->memo = null;
-        if (!$row->licence_key || $row->source === 'file') {
+        if (!$row->licence_key) {
             return $row;
+        }
+        if ($row->source === 'file') {
+            return $this->revocationCheck($row);
         }
         $url = (string) config('ammp.licence.server_url');
         if ($url === '') {
@@ -201,7 +210,7 @@ final class LicenceClient
         $evaluation = fn (\Illuminate\Support\Carbon $until, string $kind) => ['key' => $row->licence_key, 'kind' => $kind, 'plan' => $kind === 'evaluation' ? 'Evaluation' : 'Key not verified yet',
             'max_users' => 10, 'features' => $all, 'status' => 'active', 'expires_at' => $until->toAtomString(), 'grace_days' => 0];
         return $this->memo = match (true) {
-            in_array($row->status, LicenceAuthority::REASONS, true) && $row->source !== 'file' => ['key' => $row->licence_key, 'kind' => $p['kind'] ?? null, 'plan' => $p['plan'] ?? null,
+            in_array($row->status, LicenceAuthority::REASONS, true) && ($row->source !== 'file' || in_array($row->status, ['licence_revoked', 'licence_suspended'], true)) => ['key' => $row->licence_key, 'kind' => $p['kind'] ?? null, 'plan' => $p['plan'] ?? null,
                 'max_users' => (int) ($p['max_users'] ?? 0), 'features' => $p['features'] ?? [], 'status' => $row->status, 'expires_at' => $p['expires_at'] ?? null, 'grace_days' => (int) ($p['grace_days'] ?? 0)],
             $p !== null && $this->stale($p) => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'features' => $p['features'] ?? [],
                 'status' => 'stale', 'expires_at' => $p['expires_at'], 'grace_days' => (int) $p['grace_days']],
@@ -215,6 +224,32 @@ final class LicenceClient
                 => $evaluation($row->installed_at->copy()->addDays((int) config('ammp.licence.evaluation_days')), 'evaluation'),
             default => ['key' => $row->licence_key, 'kind' => null, 'plan' => null, 'max_users' => 0, 'features' => [], 'status' => 'unlicensed', 'expires_at' => null, 'grace_days' => 0],
         };
+    }
+
+    /**
+     * A licence file is never overruled by a check-in — except that a revoked or suspended licence is honoured when the
+     * server happens to be online (otherwise a revoked perpetual file would run forever). Offline / outages change nothing.
+     */
+    private function revocationCheck(InstallationLicence $row): InstallationLicence
+    {
+        $url = (string) config('ammp.licence.server_url');
+        if ($url === '') {
+            return $row;
+        }
+        try {
+            $j = Http::timeout(10)->acceptJson()->post($url . '/api/v1/license/validate', ['key' => $row->licence_key, 'fingerprint' => self::fingerprint()])->json();
+        } catch (\Throwable) {
+            return $row;
+        }
+        $reason = is_array($j) ? ($j['reason'] ?? null) : null;
+        $row->fill(['last_checked_at' => now()]);
+        if (in_array($reason, ['licence_revoked', 'licence_suspended'], true)) {
+            $row->fill(['status' => $reason, 'last_error' => (string) ($j['message'] ?? $reason)]);
+        } elseif (is_array($j) && ($j['ok'] ?? false) === true && in_array($row->status, ['licence_revoked', 'licence_suspended'], true)) {
+            $row->fill(['status' => 'active', 'last_error' => null]);   // resumed on the licence server
+        }
+        $row->save();
+        return $row;
     }
 
     /** An online-verified licence not confirmed for offline_days (from its signed issue time, which the customer can't edit). */

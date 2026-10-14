@@ -29,6 +29,14 @@ return [
         'machine_id' => env('LICENCE_MACHINE_ID'),   // optional override (containers without a stable machine id)
     ],
 
+    // On-premises self-update (Licence page → Check for update). Paths only needed when they can't be found automatically.
+    'updates' => [
+        'php_binary' => env('ROVEXY_PHP_BINARY'),   // PHP CLI, e.g. C:\laragon\bin\php\php-8.3\php.exe
+        'mysqldump' => env('ROVEXY_MYSQLDUMP'),     // database backup before an update
+        'mysql' => env('ROVEXY_MYSQL'),             // database restore if an update fails
+        'auto_check' => (bool) env('ROVEXY_UPDATE_AUTO_CHECK', true),   // ask once a day and show "update available"
+    ],
+
     'sessions' => [
         'device_token_ttl' => 900,          // 15 min
         'work_access_ttl' => 900,           // 15 min

@@ -1,0 +1,14 @@
+# /etc/systemd/system/rovexy-reverb.service   (live updates: screen/camera sessions, chat, dashboard)
+[Unit]
+Description=ROVEXY Reverb websocket server
+After=network.target
+
+[Service]
+User=www-data
+Restart=always
+RestartSec=3
+WorkingDirectory=/var/www/rovexy/backend
+ExecStart=/usr/bin/php artisan reverb:start --host=127.0.0.1 --port=8080
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# /etc/systemd/system/rovexy-worker.service   (queue: e-mails, push, recordings, integrations)
+[Unit]
+Description=ROVEXY queue worker
+After=network.target redis-server.service mysql.service
+
+[Service]
+User=www-data
+Restart=always
+RestartSec=3
+WorkingDirectory=/var/www/rovexy/backend
+ExecStart=/usr/bin/php artisan queue:work --sleep=2 --tries=3 --max-time=3600
+
+[Install]
+WantedBy=multi-user.target

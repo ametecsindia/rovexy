@@ -34,8 +34,10 @@ export function LicencePage() {
   const check = () => a.run(async () => { const r: any = await post('/licence/check'); setMsg(r.verdict === 'active' ? 'Licence checked: active.' : r.error ?? r.verdict); await l.reload(); });
   return (
     <Page title="Licence" subtitle={x?.mode === 'onprem' ? 'Key, plan, users and daily validation' : 'Plan, users, renewal and receipts'}
-      actions={x?.mode === 'onprem' && x.licence_key && x.source !== 'file' && can('settings.storage')
-        ? <button className="secondary" disabled={a.busy} onClick={() => void check()}>{a.busy ? 'Checking…' : '↻ Check now'}</button> : undefined}>
+      actions={x?.mode === 'onprem' && can('settings.storage') ? <div className="row" style={{ gap: 8 }}>
+        <a className="button" href="#software-update" onClick={() => document.getElementById('software-update')?.scrollIntoView({ behavior: 'smooth' })}>⬆ Check for update</a>
+        {x.licence_key && x.source !== 'file' && <button className="secondary" disabled={a.busy} onClick={() => void check()}>{a.busy ? 'Checking…' : '↻ Check now'}</button>}
+      </div> : undefined}>
       <ErrorBox error={l.error ?? a.error} />
       {msg && <Notice tone={msg.startsWith('Licence checked') ? 'ok' : 'warn'}>{msg}</Notice>}
       {x?.message && <Notice tone={x.state === 'grace' ? 'warn' : 'bad'}>{x.message}</Notice>}
@@ -238,6 +240,61 @@ function AddKey({ reload }: { reload: () => Promise<void> }) {
   );
 }
 
+type UpdState = { current_version: string; channel: string; phase: string; percent: number; message: string | null; available: any; checked_at: string | null;
+  downloaded: boolean; log: string[]; can_install: boolean; install_problem: string | null; poll_url?: string };
+
+/**
+ * On-premises self-update: Check → Download (hash + Ametecs signature verified) → Install (a separate updater process backs
+ * up files and database, installs, migrates, health-checks, and rolls back on any failure). Progress is polled from
+ * /update-status.php because the console itself is in maintenance mode while the updater runs.
+ */
+function SoftwareUpdate() {
+  const st = useAsync(() => get<UpdState>('/licence/update'));
+  const [live, setLive] = useState<UpdState | null>(null);
+  const a = useAction();
+  const s = live ?? st.data;
+  const run = (step: 'check' | 'download' | 'install') => a.run(async () => {
+    const r = await post<UpdState>(`/licence/update/${step}`);
+    setLive(r);
+    if (step === 'install' && r.poll_url) poll(r.poll_url);
+  });
+  const poll = (url: string) => {
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(url, { cache: 'no-store' }).then((x) => x.json());
+        if (!r.ok) return;
+        setLive((p) => ({ ...(p as UpdState), phase: r.phase, percent: r.percent, message: r.message, log: r.log, current_version: r.current_version ?? p?.current_version }));
+        if (r.phase === 'done') { clearInterval(t); setTimeout(() => { location.href = location.pathname + '?v=' + Date.now(); }, 1500); }
+        if (r.phase === 'failed') { clearInterval(t); void st.reload(); }
+      } catch { /* the server restarts during the install — keep polling */ }
+    }, 2000);
+  };
+  const busy = ['downloading', 'installing', 'verifying', 'backup', 'maintenance', 'migrating', 'checking', 'finishing', 'rolling_back'].includes(s?.phase ?? '');
+  const av = s?.available;
+  return (
+    <Card title="Software update" actions={<span className="muted small">Version {s?.current_version ?? '…'}{s?.channel === 'beta' ? ' · beta channel' : ''}{s?.checked_at ? ` · last checked ${fmtDate(s.checked_at)}` : ''}</span>}>
+      <span id="software-update" />
+      <ErrorBox error={st.error ?? a.error} />
+      {s?.phase === 'done' && <Notice tone="ok">{s.message}</Notice>}
+      {s?.phase === 'failed' && <Notice tone="bad">{s.message}</Notice>}
+      {av && s?.phase !== 'done' ? <div className="upd-offer">
+        <div><b>Version {av.version} is available</b>{av.title ? ` — ${av.title}` : ''} <span className="muted small">({(av.size_bytes / 1048576).toFixed(1)} MB{av.released_at ? `, released ${fmtDate(av.released_at)}` : ''})</span></div>
+        {av.notes && <pre className="upd-notes">{av.notes}</pre>}
+      </div> : s?.message && !['done', 'failed'].includes(s.phase) && <p className="muted small" style={{ marginTop: 0 }}>{s.message}</p>}
+      {busy && <div className="upd-bar" role="progressbar" aria-valuenow={s?.percent ?? 0}><span style={{ width: `${s?.percent ?? 0}%` }} /></div>}
+      {busy && <p className="small" style={{ margin: '6px 0' }}>{s?.message} Do not close this page; the console comes back by itself.</p>}
+      <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+        <button className={av ? 'secondary' : ''} disabled={a.busy || busy} onClick={() => void run('check')}>{a.busy ? 'Working…' : 'Check for update'}</button>
+        {av && !s?.downloaded && <button disabled={a.busy || busy} onClick={() => void run('download')}>Download {av.version}</button>}
+        {av && s?.downloaded && <button disabled={a.busy || busy || !s.can_install} onClick={() => void run('install')}>Install {av.version} now</button>}
+      </div>
+      {s && !s.can_install && av && <p className="small bad" style={{ marginBottom: 0 }}>Can't install from here: {s.install_problem}</p>}
+      <p className="muted small" style={{ marginBottom: 0 }}>Installing takes a few minutes. ROVEXY backs up its files and database first, shows a maintenance page to users, and puts everything back automatically if anything fails. Updates need an active licence; perpetual licences need active updates &amp; support (AMC).</p>
+      {(s?.log?.length ?? 0) > 0 && <details style={{ marginTop: 8 }}><summary className="small">Details</summary><pre className="upd-notes">{s!.log.join('\n')}</pre></details>}
+    </Card>
+  );
+}
+
 /** SmartEPT-style offline activation: copy the fingerprint → Ametecs returns a signed .lic locked to it → import. */
 function OfflineFile({ x, reload }: { x: any; reload: () => Promise<void> }) {
   const cloud = x.mode !== 'onprem';
@@ -260,6 +317,7 @@ function OfflineFile({ x, reload }: { x: any; reload: () => Promise<void> }) {
       <ErrorBox error={a.error} />
       {ok && <Notice tone="ok">Licence file installed.</Notice>}
       <p className="muted small" style={{ marginTop: 0 }}>Send this {what}'s fingerprint to Ametecs. They return a <code>.lic</code> file locked to this {what} — import it below to activate.{cloud ? '' : ' Works fully offline.'}</p>
+      {x.weak_fingerprint && !cloud && <Notice tone="warn">This server's hardware ID could not be read, so the fingerprint uses its computer name — renaming the server will change it. Tell Ametecs before renaming.</Notice>}
       <Field label={`This ${what}'s fingerprint`}>
         <div className="fp-box"><code>{x.server_id}</code></div>
       </Field>
@@ -299,6 +357,7 @@ function OnPrem({ x, reload }: { x: any; reload: () => Promise<void> }) {
           Without a key this server runs a 14-day free evaluation, then stops until a key is entered.</p>
       </> : <p className="muted">Only an administrator can change the licence key.</p>}
     </Card>
+    {manage && <SoftwareUpdate />}
     {manage && <OfflineFile x={x} reload={reload} />}
     <Purchase x={x} reload={reload} />
   </>;
