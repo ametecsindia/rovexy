@@ -30,28 +30,7 @@ final class BuildUpdate extends Command
             $this->error('version.json is missing or invalid.');
             return self::FAILURE;
         }
-        $files = [];
-        foreach (self::INCLUDE as $top) {
-            $p = "{$base}/{$top}";
-            if (is_file($p)) {
-                $files[] = $top;
-            } elseif (is_dir($p)) {
-                $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($p, \FilesystemIterator::SKIP_DOTS));
-                foreach ($it as $f) {
-                    if ($f->isLink() || !$f->isFile()) {
-                        continue;
-                    }
-                    $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($base) + 1));
-                    foreach (self::SKIP as $rx) {
-                        if (preg_match($rx, $rel)) {
-                            continue 2;
-                        }
-                    }
-                    $files[] = $rel;
-                }
-            }
-        }
-        sort($files);
+        $files = self::files($base);
         $out = rtrim((string) ($this->option('out') ?: storage_path('app/updates')), '/\\');
         @mkdir($out, 0755, true);
         $zipPath = "{$out}/ROVEXY-Update-{$ver['version']}.zip";
@@ -82,6 +61,34 @@ final class BuildUpdate extends Command
             $this->line("version.json is now {$next} for the next release.");
         }
         return self::SUCCESS;
+    }
+
+    /** Every file of a release (relative paths, sorted). The on-prem install package (rovexy:build-client) ships this same list. */
+    public static function files(string $base): array
+    {
+        $files = [];
+        foreach (self::INCLUDE as $top) {
+            $p = "{$base}/{$top}";
+            if (is_file($p)) {
+                $files[] = $top;
+            } elseif (is_dir($p)) {
+                $it = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($p, \FilesystemIterator::SKIP_DOTS));
+                foreach ($it as $f) {
+                    if ($f->isLink() || !$f->isFile()) {
+                        continue;
+                    }
+                    $rel = str_replace('\\', '/', substr($f->getPathname(), strlen($base) + 1));
+                    foreach (self::SKIP as $rx) {
+                        if (preg_match($rx, $rel)) {
+                            continue 2;
+                        }
+                    }
+                    $files[] = $rel;
+                }
+            }
+        }
+        sort($files);
+        return $files;
     }
 
     /** 1.1 → 1.2, 1.9 → 2.0, 1.5.9 → 1.6.0 (carry at 10). */

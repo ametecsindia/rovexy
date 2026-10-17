@@ -226,15 +226,35 @@ final class AccountsTest extends TestCase
         $sales = $this->as($this->person('sales'));
         $sales->getJson("/api/super/companies/{$company->id}")->assertOk()->assertJsonPath('slug', 'gamma')->assertJsonPath('licences', []);
         $sales->putJson("/api/super/companies/{$company->id}", ['name' => 'Gamma Recoveries'])->assertOk();
-        $sales->postJson("/api/super/companies/{$company->id}/licence", ['plan_id' => $plan->id, 'kind' => 'subscription'])->assertStatus(403);   // free paid access: super only
+        $sales->postJson("/api/super/companies/{$company->id}/licence", ['plan_id' => $plan->id, 'kind' => 'internal', 'reason' => 'x'])->assertStatus(403); // free access: super only
         $sales->postJson("/api/super/companies/{$company->id}/licence", ['plan_id' => $plan->id, 'kind' => 'trial'])->assertCreated();
         $sales->postJson("/api/super/companies/{$company->id}/licence", ['plan_id' => $plan->id, 'kind' => 'trial'])->assertStatus(422);     // already has one
-        $sales->postJson('/api/super/companies', ['name' => 'Free', 'slug' => 'free-co', 'admin_name' => 'F', 'admin_email' => 'f@free.test', 'admin_password' => 'Free-pass-123',
-            'plan_id' => $plan->id, 'kind' => 'subscription'])->assertStatus(403);
         $l = Licence::query()->where('company_id', $company->id)->first();
         $sales->patchJson("/api/super/licences/{$l->id}", ['expires_at' => null])->assertStatus(403);                                         // never-expiring: super only
         $sales->patchJson("/api/super/licences/{$l->id}", ['expires_at' => now()->addMonth()->toDateString()])->assertOk();
         $this->assertSame('23:59', $l->fresh()->expires_at->setTimezone(Ledger::TZ)->format('H:i'));                                            // end of that Indian day
         $this->assertSame('Gamma Recoveries', $company->fresh()->name);
+        // "Subscription" by hand is never free: a trial now + an unpaid order; the subscription starts only when the order is paid
+        $r = $sales->postJson('/api/super/companies', ['name' => 'Paid Co', 'slug' => 'paid-co', 'admin_name' => 'P', 'admin_email' => 'p@paid.test', 'admin_password' => 'Paid-pass-123',
+            'plan_id' => $plan->id, 'kind' => 'subscription', 'users' => 10, 'billing' => 'annual'])->assertCreated()->json();
+        $paid = Company::query()->where('slug', 'paid-co')->firstOrFail();
+        $trial = Licence::query()->where('company_id', $paid->id)->sole();
+        $this->assertSame(['trial', 'active'], [$trial->kind, $trial->status]);
+        $order = \App\Models\Platform\SalesOrder::query()->findOrFail($r['order']['id']);
+        $this->assertSame(['upgrade', 'created', $trial->id, 10], [$order->kind, $order->status, $order->licence_id, $order->users]);
+        $this->assertNotEmpty($r['order']['pay_url']);
+        $super = $this->as($this->person('super'));
+        $super->postJson("/api/super/orders/{$order->id}/payment", ['method' => 'bank', 'reference' => 'NEFT-123'])->assertOk();
+        $this->assertSame('superseded', $trial->fresh()->status);
+        $sub = Licence::query()->where('company_id', $paid->id)->where('status', 'active')->sole();
+        $this->assertSame(['subscription', 10], [$sub->kind, $sub->max_users]);
+        $this->assertNotNull($order->fresh()->invoice_number);
+        // internal (free) needs super and a reason, kept in the licence history
+        $super->postJson('/api/super/companies', ['name' => 'Ours', 'slug' => 'ours-co', 'admin_name' => 'O', 'admin_email' => 'o@ours.test', 'admin_password' => 'Ours-pass-123',
+            'plan_id' => $plan->id, 'kind' => 'internal'])->assertStatus(422);
+        $super->postJson('/api/super/companies', ['name' => 'Ours', 'slug' => 'ours-co', 'admin_name' => 'O', 'admin_email' => 'o@ours.test', 'admin_password' => 'Ours-pass-123',
+            'plan_id' => $plan->id, 'kind' => 'internal', 'reason' => 'Ametecs demo workspace'])->assertCreated();
+        $int = Licence::query()->where('company_id', Company::query()->where('slug', 'ours-co')->value('id'))->sole();
+        $this->assertSame('Ametecs demo workspace', $int->events()->where('type', 'free_access')->value('data')['reason']);
     }
 }

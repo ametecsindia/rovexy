@@ -26,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->statefulApi(); // Sanctum SPA cookies + CSRF for /api/admin
         $middleware->append(SecurityHeaders::class);
+        $middleware->web(prepend: [\App\Http\Middleware\BindFixedCompany::class]);   // on-prem: every page belongs to the one company
         $middleware->alias([
             'company' => ResolveCompany::class,
             'device.signed' => VerifyDeviceSignature::class,

@@ -102,19 +102,15 @@ final class ConsoleController extends Controller
     {
         $d = $r->validate(['name' => 'required|string|max:150', 'slug' => 'nullable|string|max:40', 'admin_name' => 'required|string|max:150',
             'admin_email' => 'required|email|max:190', 'admin_password' => 'nullable|string|min:10|max:200', 'plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal',
-            'users' => 'nullable|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly', 'send_email' => 'boolean']);
+            'users' => 'nullable|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly', 'send_email' => 'boolean', 'reason' => 'nullable|string|max:255']);
         // Workspace (= sub-domain) is made from the company name when not given, always unique.
         $d['slug'] = ($d['slug'] ?? '') !== '' ? strtolower($d['slug']) : Workspaces::slugFrom($d['name']);
         $plan = Plan::query()->findOrFail($d['plan_id']);
-        if ($d['kind'] !== 'trial') {
-            $this->superOnly();   // a paid package or internal licence without an order is free access: super admins only
-        }
-        $company = DB::transaction(function () use ($d, $plan) {
+        $this->checkFreeAccess($d);
+        [$company, $order] = DB::transaction(function () use ($d, $plan) {
             // No password typed: a random one nobody knows; the admin chooses their own from the e-mailed link.
             $c = Workspaces::create($d['slug'], $d['name'], $d['admin_email'], $d['admin_name'], ($d['admin_password'] ?? '') !== '' ? $d['admin_password'] : \Illuminate\Support\Str::password(24));
-            LicenceIssuer::issue($plan, $d['name'], $d['admin_email'], $c->id, $d['kind'], (int) ($d['users'] ?? ($d['kind'] === 'trial' ? PlatformSettings::get('trial_users') : $plan->min_users)),
-                'cloud', $d['billing'] ?? 'annual', $this->actor());
-            return $c;
+            return [$c, $this->licenceFor($c, $plan, $d, $d['admin_name'], $d['admin_email'])[1]];
         });
         PlatformAudit::record('company.created', $company, ['plan' => $plan->code, 'kind' => $d['kind'], 'slug' => $company->slug]);
         $link = null;
@@ -124,7 +120,7 @@ final class ConsoleController extends Controller
             PlatformAudit::record('company.welcome_sent', $company, ['to' => $admin->email]);
         }
         return response()->json(['id' => $company->id, 'slug' => $company->slug, 'console_url' => Workspaces::consoleUrl($company), 'admin_email' => strtolower($d['admin_email']),
-            'email_sent' => $link !== null, 'mail_ready' => PlatformSettings::mailReady(), 'set_password_url' => $link], 201);
+            'email_sent' => $link !== null, 'mail_ready' => PlatformSettings::mailReady(), 'set_password_url' => $link, 'order' => $this->orderSummary($order)], 201);
     }
 
     /** E-mail the workspace's main admin a fresh "set your password" link (lost the first one, or it expired). */
@@ -625,20 +621,57 @@ final class ConsoleController extends Controller
     {
         $d = $r->validate(['plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal', 'users' => 'nullable|integer|min:1|max:100000',
             'billing' => 'nullable|in:annual,half_yearly,quarterly', 'reason' => 'nullable|string|max:255']);
-        if ($d['kind'] !== 'trial') {
-            $this->superOnly();
-        }
+        $this->checkFreeAccess($d);
         $c = Company::query()->findOrFail($id);
         if (Licence::query()->where('company_id', $id)->whereIn('status', ['active', 'suspended'])->exists()) {
             throw new DomainException('has_licence', 'This workspace already has a licence. Edit it under Licences, or raise a renewal order.');
         }
         $plan = Plan::query()->findOrFail($d['plan_id']);
-        $l = DB::transaction(function () use ($plan, $c, $d) {
-            return LicenceIssuer::issue($plan, $c->name, DB::table('users')->where('company_id', $c->id)->where('employee_code', 'admin')->value('email'), $c->id, $d['kind'],
-                (int) ($d['users'] ?? ($d['kind'] === 'trial' ? PlatformSettings::get('trial_users') : $plan->min_users)), 'cloud', $d['billing'] ?? 'annual', $this->actor());
-        });
-        PlatformAudit::record('licence.issued', $l, ['company' => $c->slug, 'kind' => $d['kind'], 'plan' => $plan->code, 'reason' => $d['reason'] ?? null]);
-        return response()->json(['id' => $l->id], 201);
+        $admin = DB::table('users')->where('company_id', $c->id)->where('employee_code', 'admin')->first(['name', 'email']);
+        [$l, $order] = DB::transaction(fn () => $this->licenceFor($c, $plan, $d, (string) ($admin->name ?? $c->name), (string) ($c->billing_email ?: ($admin->email ?? ''))));
+        PlatformAudit::record('licence.issued', $l, ['company' => $c->slug, 'kind' => $l->kind, 'plan' => $plan->code, 'reason' => $d['reason'] ?? null, 'order' => $order?->number]);
+        return response()->json(['id' => $l->id, 'order' => $this->orderSummary($order)], 201);
+    }
+
+    /** Free access (internal: no expiry, no user limit) is for super admins only, and always with a written reason. */
+    private function checkFreeAccess(array $d): void
+    {
+        if ($d['kind'] === 'internal') {
+            $this->superOnly();
+            if (trim((string) ($d['reason'] ?? '')) === '') {
+                throw new DomainException('reason_required', 'Internal (free) access needs a reason. It is kept in the licence history.');
+            }
+        }
+    }
+
+    /**
+     * The licence a hand-made workspace starts with. "Subscription" is never free: the workspace runs on a trial and gets an
+     * unpaid upgrade order for the chosen plan, users and period; only when that order is paid (online, or Record payment)
+     * does Sales::markPaid turn the trial into the subscription, with the tax invoice and the entry in the books.
+     * @return array{0:Licence,1:?SalesOrder}
+     */
+    private function licenceFor(Company $c, Plan $plan, array $d, string $buyerName, string $buyerEmail): array
+    {
+        $kind = $d['kind'];
+        $users = (int) ($d['users'] ?? ($kind === 'trial' ? PlatformSettings::get('trial_users') : $plan->min_users));
+        $l = LicenceIssuer::issue($plan, $c->name, $buyerEmail, $c->id, $kind === 'internal' ? 'internal' : 'trial', $users, 'cloud', null, $this->actor());
+        if ($kind === 'internal') {
+            $l->log('free_access', ['reason' => trim((string) $d['reason'])], $this->actor());
+            return [$l, null];
+        }
+        if ($kind === 'trial') {
+            return [$l, null];
+        }
+        $o = Sales::createOrder('upgrade', ['plan_id' => $plan->id, 'users' => $users, 'billing' => $d['billing'] ?? 'annual'],
+            ['buyer_company' => $c->name, 'buyer_name' => $buyerName, 'buyer_email' => $buyerEmail, 'state_code' => $c->state_code ?? null, 'buyer_gstin' => $c->gstin ?? null], $l, $this->actor());
+        $l->log('order_raised', ['order' => $o->number, 'total' => $o->total, 'note' => 'subscription starts when this order is paid'], $this->actor());
+        PlatformAudit::record('order.created', $o, ['total' => $o->total, 'kind' => 'upgrade']);
+        return [$l, $o];
+    }
+
+    private function orderSummary(?SalesOrder $o): ?array
+    {
+        return $o ? ['id' => $o->id, 'number' => $o->number, 'total' => $o->total, 'valid_until' => $o->valid_until, 'pay_url' => $o->payUrl()] : null;
     }
 
     /** Company admin locked out: super admins set a new password for the workspace's main admin (they must change it after). */

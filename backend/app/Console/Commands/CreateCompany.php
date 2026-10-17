@@ -14,7 +14,7 @@ use Illuminate\Console\Command;
 /** Provision a company with system roles, default policy and a first Company Administrator (MFA enrolled at first sign-in). */
 final class CreateCompany extends Command
 {
-    protected $signature = 'ammp:create-company {slug} {name} {admin_email} {--timezone=Asia/Kolkata} {--country=IN} {--domain=}';
+    protected $signature = 'ammp:create-company {slug} {name} {admin_email} {--timezone=Asia/Kolkata} {--country=IN} {--domain=} {--password= : first admin password (asked when left out)}';
     protected $description = 'Create a company and its first administrator.';
 
     public function handle(CurrentCompany $current): int
@@ -23,13 +23,13 @@ final class CreateCompany extends Command
             $this->error('Invalid slug.');
             return self::FAILURE;
         }
-        $company = Company::query()->create(['slug' => $this->argument('slug'), 'name' => $this->argument('name'),
-            'timezone' => $this->option('timezone'), 'default_country' => strtoupper($this->option('country'))]);
-        $password = $this->secret('Initial admin password (min 12 chars)');
+        $password = $this->option('password') ?: $this->secret('Initial admin password (min 12 chars)');
         if (strlen((string) $password) < 12) {
             $this->error('Password too short.');
             return self::FAILURE;
         }
+        $company = Company::query()->create(['slug' => $this->argument('slug'), 'name' => $this->argument('name'),
+            'timezone' => $this->option('timezone'), 'default_country' => strtoupper($this->option('country'))]);
         $current->run($company, function () use ($company, $password) {
             CompanyDefaults::apply($company);
             if ($d = $this->option('domain')) {

@@ -44,6 +44,8 @@ const alpha = (hex, a) => hex + Math.round(a * 255).toString(16).padStart(2, '0'
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const WD = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const p2 = (n) => String(n).padStart(2, '0');
+// ponytail: sample numbers always masked, like the app (last 4 digits only)
+const maskNo = (n) => n ? '•••••• ' + String(n).slice(-4) : n;
 const toD = (s) => s == null ? null : s instanceof Date ? s : typeof s === 'number' ? new Date(s) : new Date(s.length === 10 ? s + 'T00:00:00' : s);
 const isoDay = (d) => { d = toD(d); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
 const todayIso = () => isoDay(new Date());
@@ -500,7 +502,7 @@ function CaseCard({ r, enabled, onOpen, onCall }) {
     r.c.pool && ['Group pool', Ds.Muted]].filter(Boolean);
   return html`<div class="pad-card"><${SurfaceCard} onClick=${onOpen}><div class="card-in">
     <div class="row-c"><${Avatar} name=${r.c.name} size=${40}/>
-      <div class="grow ell" style=${{ marginLeft: 10 }}><div class="cc-name ell">${r.c.name}</div><div class="small ell">${[r.c.ref, r.c.portfolio, '••' + r.c.phone.slice(-4)].join(' · ')}</div></div>
+      <div class="grow ell" style=${{ marginLeft: 10 }}><div class="cc-name ell">${r.c.name}</div><div class="small ell">${[r.c.ref, r.c.portfolio, maskNo(r.c.phone)].join(' · ')}</div></div>
       <button type="button" class="call-fab" disabled=${!enabled} aria-label=${'Call ' + r.c.name} onClick=${(e) => { e.stopPropagation(); onCall(); }}><${Icon} n="Call" s=${20} c="#fff"/></button></div>
     <div class="row" style=${{ marginTop: 10 }}>
       <${Metric} label="Overdue" value=${money(r.overdue)} color=${(r.dpd || 0) > 0 ? Ds.Red : Ds.Ink}/>
@@ -570,7 +572,7 @@ function SimDialer() {
   const tog = (k) => set({ dialer: { ...S.dialer, [k]: !S.dialer[k] } });
   return html`<div class="dialer">
     <div class="dhint top">Your phone's own Phone app (simulated) · the call goes out on the company SIM</div>
-    <div class="dl-who"><${Avatar} name=${call.name} size=${84}/><div class="dl-name">${call.name}</div><div class="dl-num">Mobile ${call.number.replace(/(\d{5})(\d{5})/, '$1 $2')}</div>
+    <div class="dl-who"><${Avatar} name=${call.name} size=${84}/><div class="dl-name">${call.name}</div><div class="dl-num">Mobile ${maskNo(call.number)}</div>
       <div class="dl-state">${d.phase === 'active' ? mmss(secs) : d.phase === 'ringing' ? 'Ringing…' : 'Calling…'}</div>
       ${d.phase === 'active' && html`<div class="dl-rec"><i></i>Recording</div>`}</div>
     <div class="dl-grid">${[['MicOff', 'Mute', 'mute'], ['Keypad', 'Keypad', 'keypad'], ['Speaker', 'Speaker', 'speaker']].map(([n, l, k]) => html`
@@ -844,8 +846,8 @@ function Timeline({ items }) {
   });
 }
 function DetailsTab({ c }) {
-  return html`<${Section} title="Customer"><${Kv} label="Name" value=${c.name}/><${Kv} label="Case ID" value=${c.ref}/><${Kv} label="Phone" value=${c.phone}/>
-      <${Kv} label="Alternate" value=${c.alt}/><${Kv} label="Email" value=${c.email}/><${Kv} label="Preferred contact time" value=${c.preferred}/><//>
+  return html`<${Section} title="Customer"><${Kv} label="Name" value=${c.name}/><${Kv} label="Case ID" value=${c.ref}/><${Kv} label="Phone" value=${maskNo(c.phone)}/>
+      <${Kv} label="Alternate" value=${maskNo(c.alt)}/><${Kv} label="Email" value=${c.email}/><${Kv} label="Preferred contact time" value=${c.preferred}/><//>
     <${Section} title="Assignment"><${Kv} label="Portfolio" value=${c.portfolio || 'Added by hand'}/><${Kv} label="Campaign" value=${c.campaign}/>
       <${Kv} label="Assigned employee" value=${c.pool ? 'Group pool' : `${D.EMPLOYEE.name} (${D.EMPLOYEE.code})`}/><${Kv} label="Group" value=${c.team}/>
       <${Kv} label="Assigned on" value=${fmtWhen(c.assignedAt)}/><${Kv} label="Case status" value=${c.status.replace(/_/g, ' ')}/><//>

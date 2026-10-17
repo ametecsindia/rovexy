@@ -219,13 +219,13 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
             <Field label="Billing address"><input value={det.address} onChange={(e) => setDet({ ...det, address: e.target.value })} maxLength={300} /></Field>
           </div>
           <div className="row"><button disabled={a.busy}>Save details</button><button type="button" className="secondary" onClick={() => setMode('')}>Cancel</button></div></form>}
-        {mode === 'licence' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { await post(`/companies/${id}/licence`, { ...lic, plan_id: Number(lic.plan_id), users: lic.users ? Number(lic.users) : null }); await done('Licence issued'); }); }}>
+        {mode === 'licence' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { const r: any = await post(`/companies/${id}/licence`, { ...lic, plan_id: Number(lic.plan_id), users: lic.users ? Number(lic.users) : null }); await done(r.order ? `Trial started. Order ${r.order.number} (${inr(r.order.total)}) raised: the subscription starts when it is paid (Orders & payments)` : 'Licence issued'); }); }}>
           <div className="form-grid">
             <Field label="Plan"><select value={lic.plan_id} onChange={(e) => setLic({ ...lic, plan_id: e.target.value })} required><option value="">Choose…</option>{(plans.data?.plans ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
-            <Field label="Type"><select value={lic.kind} onChange={(e) => setLic({ ...lic, kind: e.target.value })}><option value="trial">Trial</option>{isSuper && <option value="subscription">Subscription without an order (free)</option>}{isSuper && <option value="internal">Internal</option>}</select></Field>
+            <Field label="Type"><select value={lic.kind} onChange={(e) => setLic({ ...lic, kind: e.target.value })}><option value="trial">Trial</option><option value="subscription">Subscription (trial until its order is paid)</option>{isSuper && <option value="internal">Internal (free)</option>}</select></Field>
             {lic.kind !== 'internal' && <Field label="Users" hint={lic.kind === 'trial' ? 'Blank = the trial default' : undefined}><input type="number" min={1} value={lic.users} onChange={(e) => setLic({ ...lic, users: e.target.value })} required={lic.kind === 'subscription'} /></Field>}
             {lic.kind === 'subscription' && <Field label="Period"><select value={lic.billing} onChange={(e) => setLic({ ...lic, billing: e.target.value })}>{Object.entries(CYCLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>}
-            <Field label="Reason (audit log)"><input value={lic.reason} onChange={(e) => setLic({ ...lic, reason: e.target.value })} /></Field>
+            <Field label={lic.kind === 'internal' ? 'Reason for free access (licence history)' : 'Reason (audit log)'}><input value={lic.reason} onChange={(e) => setLic({ ...lic, reason: e.target.value })} required={lic.kind === 'internal'} /></Field>
           </div>
           <div className="row"><button disabled={a.busy}>Issue licence</button><button type="button" className="secondary" onClick={() => setMode('')}>Cancel</button></div></form>}
         {mode === 'password' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { const r: any = await post(`/companies/${id}/admin-password`, pw); setPw({ password: '', reason: '' }); await done(`New password set for ${r.email}`); }); }}>
@@ -253,7 +253,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
 
 function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; onClose: () => void; onDone: (made?: any) => void; prefill?: { name?: string; admin_name?: string; admin_email?: string } }) {
   const plans = usePlans();
-  const [f, setF] = useState({ name: prefill?.name ?? '', slug: prefill?.name ? slugFrom(prefill.name) : '', admin_name: prefill?.admin_name ?? '', admin_email: prefill?.admin_email ?? '', admin_password: '', plan_id: '', kind: 'trial', users: '', billing: 'annual', send_email: true });
+  const [f, setF] = useState({ name: prefill?.name ?? '', slug: prefill?.name ? slugFrom(prefill.name) : '', admin_name: prefill?.admin_name ?? '', admin_email: prefill?.admin_email ?? '', admin_password: '', plan_id: '', kind: 'trial', users: '', billing: 'annual', send_email: true, reason: '' });
   const [ownPassword, setOwnPassword] = useState(false);
   const [slugTouched, setSlugTouched] = useState(false);
   const [done, setDone] = useState<any | null>(null);
@@ -272,6 +272,9 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
         <dt>Admin sign-in</dt><dd>{done.admin_email}</dd>
         <dt>Welcome e-mail</dt><dd>{done.email_sent ? (done.mail_ready ? `Sent to ${done.admin_email} with a link to set their password (valid 72 hours).` : 'Not delivered: e-mail sending is not set up (Settings → Outgoing e-mail). Share the link below instead.') : 'Not sent (you set the password yourself).'}</dd>
       </dl>
+      {done.order && <><Notice tone="warn">Runs on a <b>trial</b> until order <b>{done.order.number}</b> ({inr(done.order.total)}) is paid. Pay link valid until {day(done.order.valid_until)}; or record the payment in Orders &amp; payments.</Notice>
+        <div className="row"><input readOnly value={done.order.pay_url} onFocus={(e) => e.target.select()} aria-label="Pay link" />
+          <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(done.order.pay_url).then(() => toast('Pay link copied'), () => toast('Select the link and copy it', 'bad'))}>Copy pay link</button></div></>}
       {done.set_password_url && <><p className="muted small">Set-password link (works once, 72 hours). Share it only with {done.admin_email}:</p>
         <div className="row"><input readOnly value={done.set_password_url} onFocus={(e) => e.target.select()} aria-label="Set-password link" />
           <button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(done.set_password_url).then(() => toast('Link copied'), () => toast('Select the link and copy it', 'bad'))}>Copy</button></div></>}
@@ -295,11 +298,12 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
           {ownPassword && <label className="check"><input type="checkbox" checked={f.send_email} onChange={(e) => set('send_email', e.target.checked)} /> Also e-mail a welcome with a set-password link</label>}
           <Field label="Plan"><select value={f.plan_id} onChange={(e) => set('plan_id', e.target.value)} required><option value="">Choose…</option>{(plans.data?.plans ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
           <Field label="Licence type"><select value={f.kind} onChange={(e) => set('kind', e.target.value)}>
-            <option value="trial">Trial</option>{isSuper && <option value="subscription">Subscription without an order (free)</option>}{isSuper && <option value="internal">Internal (no expiry, no user limit)</option>}</select></Field>
+            <option value="trial">Trial</option><option value="subscription">Subscription (trial until its order is paid)</option>{isSuper && <option value="internal">Internal - free, no expiry, no user limit</option>}</select></Field>
           {f.kind !== 'internal' && <Field label="Users" hint={f.kind === 'trial' ? 'Blank = the trial default' : undefined}><input type="number" min={1} value={f.users} onChange={(e) => set('users', e.target.value)} required={f.kind === 'subscription'} /></Field>}
           {f.kind === 'subscription' && <Field label="Period"><select value={f.billing} onChange={(e) => set('billing', e.target.value)}>{Object.entries(CYCLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>}
+          {f.kind === 'internal' && <Field label="Reason for free access" hint="Kept in the licence history"><input value={f.reason} onChange={(e) => set('reason', e.target.value)} maxLength={255} required /></Field>}
         </div>
-        <p className="muted small">Start with a trial; the client buys from Plan &amp; licence (or you raise an order on the licence), which issues the tax invoice. A subscription created here has no invoice.</p>
+        <p className="muted small">{f.kind === 'subscription' ? 'The workspace starts on a trial and an order is raised for this plan, users and period. The client pays with the pay link, or you record a bank / UPI / cheque payment in Orders & payments; only then the subscription starts, with the tax invoice and the entry in the books.' : 'A trial; the client buys from Plan & licence, or you raise an order on the licence.'}</p>
         <button disabled={a.busy} type="submit">Create company</button>
       </form>
     </Modal>

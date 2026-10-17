@@ -22,6 +22,11 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->guardProductionConfig();
+        // Links built from a request (set-password, console, payment) keep https even when a proxy (Cloudflare "Flexible",
+        // a load balancer) reaches PHP over plain http.
+        if (str_starts_with((string) config('app.url'), 'https://')) {
+            \Illuminate\Support\Facades\URL::forceScheme('https');
+        }
         // SMTP from Super Admin → Settings, applied only when something actually sends mail.
         $this->app->afterResolving('mail.manager', fn () => \App\Services\Platform\PlatformSettings::applyMail());
 

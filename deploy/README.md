@@ -74,3 +74,22 @@ It pulls, installs packages, builds the console, migrates, caches, health-checks
 - Super Admin → Plans & pricing: real prices.
 - Phones: server URL `https://rovexy.app` (rebuild the app with it).
 - On-prem customers: their `.env` gets `LICENCE_SERVER_URL=https://rovexy.app` (they get the right public key with the code).
+
+## 7. On-premises client installer (one setup.exe for every client)
+On your PC, in the project folder: double-click **`build-client.bat`** (needs PHP 8.3, Composer, npm and Inno Setup 6 —
+`winget install -e --id JRSoftware.InnoSetup`). It builds the console, copies the backend to `build\client-stage`, installs
+production PHP packages there, packs **`dist\ROVEXY-OnPrem-<version>.zip`** (+ `.sha256`) and test-installs it in a temp folder,
+downloads the Windows runtime once into `build\cache` (PHP 8.3 NTS, Caddy, WinSW, VC++ runtime, CA list — pinned SHA-256 /
+Microsoft signature; versions at the top of the .bat), and compiles **`dist\ROVEXY-Setup-<version>.exe`** (+ `.sha256`) from
+`deploy\windows\rovexy-setup.iss`. Your working copy is not changed (apart from the console build in `backend\public\admin`).
+- Windows clients: the setup.exe (wizard → `deploy\windows\configure.php` → `rovexy:setup`, services, firewall, health check;
+  details in INSTALL.md). Linux clients / manual installs: the ZIP, as below.
+- Not signed: Windows SmartScreen shows "unknown publisher" until the setup.exe is code-signed (add `SignTool=` to the .iss).
+- The setup.exe and the ZIP have no client name, licence, `.env`, app key, password or private key: the same file for every client.
+- Before building for real clients, `backend/resources/licence/public.pem` must be the **live** server's public key (section 2).
+  The build warns when it is this PC's test key.
+- Client: unzip → `install.bat` (Windows, as Administrator) or `install.sh` (Linux) → sends you the **Server ID** it shows.
+- You: Super Admin → Licences → the client's on-prem licence → **Licence file…** with that Server ID → send the `.lic`.
+- Client: drag the `.lic` onto `activate-licence.bat` (or `./activate-licence.sh file.lic`, or Console → Plan & licence → Import).
+- Later versions: publish the update ZIP (`rovexy:build-update`) — installs update themselves; no new client package needed.
+Commands inside an install: `php artisan rovexy:setup`, `rovexy:licence id|import <file>|key <key>|status`.
