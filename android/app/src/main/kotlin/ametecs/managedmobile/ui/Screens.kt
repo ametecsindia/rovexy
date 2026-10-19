@@ -65,6 +65,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import ametecs.managedmobile.R
+import ametecs.managedmobile.BuildConfig
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -464,7 +465,7 @@ private fun RecorderSetupDialog(open: () -> Unit, close: () -> Unit) {
         title = { Text("Switch on the call recorder") }, text = {
             Text("Company calls are recorded. Android only lets this app hear the call after you switch its recorder on — once:\n\n" +
                 "1. Tap Open settings.\n2. Open Downloaded apps (or Installed apps).\n3. Tap Company call recorder → On → Allow.\n4. Come back and tap Call again.\n\n" +
-                "Switch greyed out? Settings → Apps → Ametecs Managed Mobile → ⋮ → Allow restricted settings.", style = MaterialTheme.typography.bodyMedium)
+                "Switch greyed out? Settings → Apps → ROVEXY → ⋮ → Allow restricted settings.", style = MaterialTheme.typography.bodyMedium)
         }, confirmButton = { PrimaryButton("Open settings", onClick = open) }, dismissButton = { TextButton(onClick = close) { Text("Not now") } })
 }
 
@@ -485,11 +486,12 @@ private fun DisclosureDialog(d: Disclosure, close: () -> Unit) {
         confirmButton = { TextButton(onClick = close) { Text("OK") } }, title = { Text("What your company can see") },
         text = { Text(listOfNotNull(
             if (d.recorded) "Calls are recorded. ${d.notice}" else "Calls are not recorded.",
-            "Call duration comes from this phone's call log; recorded calls are uploaded to your company.",
+            if (BuildConfig.PLAY) "Call duration comes from the call recording; recorded calls are uploaded to your company."
+            else "Call duration comes from this phone's call log; recorded calls are uploaded to your company.",
             d.location?.let { "Location: $it." } ?: "Location is not collected.",
             if (d.liveView) "Screen sharing can be requested; you must accept and Android asks for permission each time." else null,
             if (d.camera) "Camera sessions can be requested; you must accept and the camera indicator is shown." else null,
-            "Nothing is captured in the background or without your knowledge.").joinToString("\n\n"), style = MaterialTheme.typography.bodyMedium) })
+            "Nothing is captured without your knowledge: a ROVEXY notification is shown whenever location, a call or a session is active.").joinToString("\n\n"), style = MaterialTheme.typography.bodyMedium) })
 }
 
 // ───────────────────────────── chat ─────────────────────────────

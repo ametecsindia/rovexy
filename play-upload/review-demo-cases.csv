@@ -1,0 +1,17 @@
+Customer ID,Customer Name,Phone Number,Alternate Number,Campaign,Assigned Employee,Notes,Status,Follow-up Date,Area,City,Latitude,Longitude,Overdue Amount,Total Outstanding,EMI Amount,DPD,Due Date
+AX-220781,Ravi Kumar,9000098801,9849012345,Axis Q3 Oct,REVIEW01,Asked to call after 4 pm,follow_up,2026-10-20,Madhapur,Hyderabad,17.4483,78.3915,12400,48900,6200,34,2026-10-24
+AX-220812,Meena Reddy,9000098802,,Axis Q3 Oct,REVIEW01,,in_progress,,Kothaguda,Hyderabad,17.4647,78.3659,7850,31200,3925,21,2026-10-19
+HD-551203,Suresh Babu,9000098803,,HDFC Cards Sep,REVIEW01,"Promised Rs 8,000 today",follow_up,2026-10-20,Kondapur,Hyderabad,17.4604,78.3574,8000,26500,4000,18,2026-10-22
+AX-220655,Lakshmi Kanth,9000098804,,Axis Q3 Oct,REVIEW01,Refused to pay on last call,in_progress,,Gachibowli,Hyderabad,17.4401,78.3489,21300,92400,7100,61,2026-10-21
+BJ-90311,Anil Verma,9000098805,,Bajaj PL Aug,REVIEW01,Broken promise,follow_up,2026-10-20,Hitech City,Hyderabad,17.4435,78.3772,15600,64000,5200,92,2026-10-28
+HD-551344,Farhana Begum,9000098806,9700011223,HDFC Cards Sep,REVIEW01,,new,,Miyapur,Hyderabad,17.4969,78.3548,4300,18800,2150,9,2026-10-20
+AX-220903,Venkatesh Rao,9000098807,,Axis Q3 Oct,REVIEW01,Paid EMI by UPI,in_progress,,Kukatpally,Hyderabad,17.4948,78.3996,0,54200,5400,0,2026-10-25
+BJ-90455,Swathi Naidu,9000098808,,Bajaj PL Aug,REVIEW01,,new,,Manikonda,Hyderabad,17.4045,78.3866,9800,41000,4900,45,2026-10-23
+HD-551398,Mohammed Irfan,9000098809,,HDFC Cards Sep,REVIEW01,Wants settlement figure,in_progress,,Jubilee Hills,Hyderabad,17.4325,78.4071,26750,118000,8900,75,2026-10-19
+AX-221010,Kavitha Rani,9000098810,,Axis Q3 Oct,REVIEW01,,new,,Nallagandla,Hyderabad,17.471,78.311,3100,12600,3100,6,2026-10-26
+BJ-90502,Rajesh Gupta,9000098811,,Bajaj PL Aug,REVIEW01,Dispute raised,in_progress,,Chandanagar,Hyderabad,17.493,78.327,11200,47300,5600,38,2026-10-19
+HD-551477,Deepika Joshi,9000098812,,HDFC Cards Sep,REVIEW01,Paid in cash,closed,,Banjara Hills,Hyderabad,17.4156,78.4347,0,22000,2750,0,2026-10-31
+AX-221077,Srinivas Goud,9000098813,,Axis Q3 Oct,REVIEW01,Phone switched off,in_progress,,Ameerpet,Hyderabad,17.4375,78.4482,18900,76500,6300,120,2026-10-22
+BJ-90588,Naveen Chandra,9000098814,,Bajaj PL Aug,REVIEW01,Spoke to family,new,,Lingampally,Hyderabad,,,6700,29900,3350,27,2026-10-24
+HD-551530,Padma Priya,9000098815,,HDFC Cards Sep,REVIEW01,,new,,Serilingampally,Hyderabad,,,5200,20800,2600,14,2026-10-21
+AX-221142,Arjun Mehta,9000098816,,Axis Q3 Oct,REVIEW01,Not reachable,in_progress,,T. Nagar,Chennai,13.0418,80.2341,9400,38000,4700,52,2026-10-27

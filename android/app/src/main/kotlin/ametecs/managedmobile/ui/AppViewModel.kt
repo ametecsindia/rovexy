@@ -354,7 +354,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         if (callingRoute == "sim" && SimCalls.missing(ctx).isNotEmpty()) {
             permissionAsk.value++
-            throw ApiException(0, "permissions", "Allow Phone, Call log and Music/Audio permissions, then tap Call again.")
+            throw ApiException(0, "permissions", "Allow ${SimCalls.missingLabels(ctx).joinToString(", ")} permissions, then tap Call again.")
         }
         if (callingRoute == "sim" && SimCalls.ownDialerBlocking(ctx)) {
             SimCalls.openDefaultApps(ctx)
@@ -425,7 +425,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 while (SimCalls.inCall(ctx)) { show("on_sim_call", "On call. Come back here after hanging up."); delay(2000) }
                 show("saving", "Reading the call log…")
                 var log: SimCalls.LogEntry? = null
-                for (i in 0 until 8) { log = SimCalls.callLog(ctx, number, since); if (log != null) break; delay(1500) }
+                if (BuildConfig.PLAY) { show("saving", "Looking for the call recording…"); log = SimCalls.logFromRecording(ctx, number, since) }
+                else for (i in 0 until 8) { log = SimCalls.callLog(ctx, number, since); if (log != null) break; delay(1500) }
                 val missing = SimCalls.missingLabels(ctx)
                 val stale = System.currentTimeMillis() - since > 30 * 60_000
                 if (log == null && !stale) {
@@ -457,7 +458,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val r = g.session.work("POST", "/api/mobile/v1/calls/$id/sim-result", buildJsonObject {
                     put("talk_seconds", talk)
                     put("diagnostics", buildJsonObject {
-                        put("call_log_entry", log != null); put("missing_permissions", missing.joinToString(","))
+                        put("call_log_entry", log != null); put("talk_source", if (BuildConfig.PLAY) "recording_file" else "call_log")
+                        put("missing_permissions", missing.joinToString(","))
                         put("phone", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE}")
                         file?.let { put("recording_file", it.name) }
                         put("in_app_recorder", when { SimCalls.phoneRecorder -> "off (phone's own recorder mode)"; !CallRecordService.accessibilityOn(ctx) -> "accessibility_off"; own.length() > 2_000 -> "recorded ${own.length() / 1024} KB, speaker ${when (CallRecordService.speakerOn) { true -> "on"; false -> "could not switch on"; null -> "n/a" }}, ${CallRecordService.lastInfo ?: "no level info"}"; else -> CallRecordService.lastError ?: "no_audio" })

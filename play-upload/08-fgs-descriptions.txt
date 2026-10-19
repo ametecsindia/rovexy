@@ -1,0 +1,11 @@
+LOCATION (video: videos\V1-location.mp4)
+Shows the field employee's position on the company map and verifies customer visits during a work session started by the employee. A ROVEXY notification is shown the whole time.
+
+MICROPHONE (video: videos\V2-voice-call.mp4)
+Internet voice call between employee and supervisor that continues when the screen is off.
+
+MEDIA PROJECTION (video: videos\V3-screen-share.mp4)
+Screen sharing with the supervisor, only after the employee accepts and Android's own screen-capture prompt.
+
+CAMERA (video: videos\V4-camera.mp4)
+Live camera session with the supervisor, only after the employee accepts; camera indicator shown.

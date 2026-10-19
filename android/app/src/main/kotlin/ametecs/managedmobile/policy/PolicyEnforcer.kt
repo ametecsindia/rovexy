@@ -54,7 +54,8 @@ class PolicyEnforcer(private val context: Context) {
             screenCaptureDisabled = runCatching { dpm.getScreenCaptureDisabled(null) }.getOrNull(),
             userRestrictions = restrictions,
             locationEnabled = if (Build.VERSION.SDK_INT >= 28) lm.isLocationEnabled else null,
-            backgroundLocationGranted = context.checkSelfPermission(if (Build.VERSION.SDK_INT >= 29) Manifest.permission.ACCESS_BACKGROUND_LOCATION else Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
+            // Play build has no background permission: location runs in a visible foreground service, so "fine" is what counts.
+            backgroundLocationGranted = context.checkSelfPermission(if (Build.VERSION.SDK_INT >= 29 && !ametecs.managedmobile.BuildConfig.PLAY) Manifest.permission.ACCESS_BACKGROUND_LOCATION else Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED,
         )
     }
 

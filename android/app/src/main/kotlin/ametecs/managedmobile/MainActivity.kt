@@ -11,6 +11,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import ametecs.managedmobile.ui.AmmpTheme
 import ametecs.managedmobile.calls.CallSession
 import ametecs.managedmobile.calls.SimCalls
@@ -45,15 +52,28 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        notifPermission.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) + SimCalls.required)
+        val prefs = getSharedPreferences("rovexy_ui", MODE_PRIVATE)
+        val askAll = { notifPermission.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS, Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION) + SimCalls.required) }
+        if (prefs.getBoolean("disclosure_ok", false)) askAll()
         handle(intent)
         setContent {
             AmmpTheme {
+                // Play "prominent disclosure": shown before the first permission prompt; nothing is asked until Continue.
+                var disclosed by remember { mutableStateOf(prefs.getBoolean("disclosure_ok", false)) }
+                if (!disclosed) AlertDialog(onDismissRequest = {}, title = { Text("Before you start") },
+                    text = { Text("ROVEXY is a work app managed by your employer. It collects:\n\n" +
+                        "\u2022 Location \u2014 to show your position on your company's field map and verify customer visits, " +
+                        "including while the app is closed or not in use during your work session. A ROVEXY notification is always shown while this is on.\n\n" +
+                        "\u2022 Phone and call recordings \u2014 to place customer calls from your phone and upload the recording your phone's dialer makes of those calls.\n\n" +
+                        "\u2022 Notifications \u2014 for messages and call requests from your supervisor.\n\n" +
+                        "This data is sent only to your company's ROVEXY workspace. Camera, microphone and screen sharing are asked separately, each time.") },
+                    confirmButton = { TextButton(onClick = { prefs.edit().putBoolean("disclosure_ok", true).apply(); disclosed = true; askAll() }) { Text("Continue") } },
+                    dismissButton = { TextButton(onClick = { disclosed = true }) { Text("Not now") } })
                 AppRoot(vm,
                     requestScreenConsent = { screenConsent.launch((getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent()) },
                     requestCameraConsent = { cameraConsent.launch(Manifest.permission.CAMERA) },
                     requestMicConsent = { micConsent.launch(Manifest.permission.RECORD_AUDIO) },
-                    requestCallPermissions = { notifPermission.launch(SimCalls.required) },
+                    requestCallPermissions = { if (prefs.getBoolean("disclosure_ok", false)) notifPermission.launch(SimCalls.required) else disclosed = false },
                     requestDialerRole = { CallSession.roleRequestIntent(this)?.let { runCatching { dialerRole.launch(it) } } })
             }
         }

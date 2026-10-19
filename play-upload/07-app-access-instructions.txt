@@ -1,0 +1,7 @@
+Name: Reviewer login
+Server URL: https://rovexy.app
+Company workspace: review
+User ID: REVIEW01
+Password: 3GgPSbi1B6
+
+Tap Connect / Register, then sign in. The phone is auto-approved. Tap Continue on the "Before you start" screen and allow permissions. Calls are not recorded in this demo workspace. Works on emulators.

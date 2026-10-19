@@ -1,0 +1,21 @@
+ROVEXY is a work app for collection agencies and field teams. Your company signs you in; the app works only with your company's ROVEXY workspace.
+
+For field staff
+• See your assigned cases with dues, address and history.
+• Call customers from your own phone; your phone's recorder keeps the call on record.
+• Save the outcome: promise to pay, payment collected (with slip photo), callback, not reachable and more.
+• Field map: customers near you, routes and one-tap navigation.
+• Visits are verified at the customer's address.
+• Chat and internet voice calls with your supervisor.
+
+For supervisors and managers (web console)
+• Live team status and location during work hours.
+• Call recordings, outcomes and payments in one place.
+• Allocate and transfer cases, verify payment slips.
+
+Transparent by design
+• A ROVEXY notification is always shown while location, a call or a session is active.
+• Screen and camera sessions start only after you accept them, every time.
+• "What my company can see" shows exactly what is collected.
+
+ROVEXY needs an account from your employer. Companies can request a demo at https://rovexy.app.

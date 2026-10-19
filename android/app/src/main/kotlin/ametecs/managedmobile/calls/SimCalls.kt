@@ -12,6 +12,7 @@ import android.provider.CallLog
 import android.provider.MediaStore
 import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
+import ametecs.managedmobile.BuildConfig
 
 /**
  * SIM calling route: the phone dials from its own SIM. Afterwards the app reads the duration from the system call log
@@ -24,12 +25,14 @@ object SimCalls {
     data class RecorderFile(val uri: Uri, val name: String, val mime: String?, val durationSeconds: Int?, val size: Long)
 
     val audioPermission = if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
-    /** Permanently true: the phone's dialer (ODialer where supported, else the default Phone app) places every SIM call and its recorder's file is uploaded. Smart caller's own dialer is retired. */
+    /** Permanently true: the phone's dialer (ODialer where supported, else the default Phone app) places every SIM call and its recorder's file is uploaded. ROVEXY's own dialer is retired. */
     @Volatile var phoneRecorder = true
 
-    val required = arrayOf(Manifest.permission.CALL_PHONE, Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE, audioPermission, Manifest.permission.RECORD_AUDIO)
+    /** Play build: no call log (Play policy) — talk time comes from the recorder file. Microphone is asked only for internet voice calls. */
+    val required = listOfNotNull(Manifest.permission.CALL_PHONE, Manifest.permission.READ_CALL_LOG.takeUnless { BuildConfig.PLAY },
+        Manifest.permission.READ_PHONE_STATE, audioPermission).toTypedArray()
 
-    fun missing(ctx: Context) = required.filter { !(phoneRecorder && it == Manifest.permission.RECORD_AUDIO) && ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
+    fun missing(ctx: Context) = required.filter { ContextCompat.checkSelfPermission(ctx, it) != PackageManager.PERMISSION_GRANTED }
 
     /** Phone-recorder mode uses OPPO/OnePlus/Realme ODialer — its built-in recorder captures both voices. */
     const val ODIALER = "com.oplus.dialer"
@@ -109,6 +112,17 @@ object SimCalls {
             }
         }
         return null
+    }
+
+    /** Play build stand-in for [callLog]: the phone recorder writes a file only for an answered call, and its length is the
+     *  talk time. No file within ~20 s → reported as not answered. ponytail: with auto-record off every call reads as
+     *  unanswered; the off-hook time (READ_PHONE_STATE) could bound it if that ever matters. */
+    suspend fun logFromRecording(ctx: Context, number: String, sinceMs: Long): LogEntry {
+        repeat(10) {
+            findRecording(ctx, number, sinceMs)?.let { return LogEntry(it.durationSeconds ?: 1, sinceMs) }
+            kotlinx.coroutines.delay(2000)
+        }
+        return LogEntry(0, sinceMs)
     }
 
     /** Newest audio file created since the call started that looks like a call recording of this number. */

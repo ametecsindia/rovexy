@@ -982,4 +982,13 @@ final class AcceptanceTest extends TestCase
         $this->admin('bravo')->getJson("/api/admin/customers/{$l1['id']}")->assertNotFound();
         $this->assertSame('closed', $m->work('GET', "/api/mobile/v1/customers/{$l1['id']}")->json('status'));
     }
+
+    public function test_auto_approve_employee_setting_approves_new_phones(): void
+    {
+        $this->a->forceFill(['settings' => ['devices' => ['auto_approve_employee' => 'EMP1']]])->save();
+        $m = new MobileClient($this, 'alpha');
+        $m->register()->assertCreated()->assertJsonPath('state', 'approved')->assertJsonPath('approval_code', null);
+        $m->signed('POST', '/api/mobile/v1/device/session')->assertOk()->assertJsonStructure(['device_token']);
+        (new MobileClient($this, 'bravo'))->register()->assertCreated()->assertJsonPath('state', 'pending');   // other companies unchanged
+    }
 }

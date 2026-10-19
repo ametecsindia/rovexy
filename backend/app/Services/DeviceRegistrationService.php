@@ -13,6 +13,7 @@ use App\Events\AdminFeed;
 use App\Models\DeviceApprovalEvent;
 use App\Models\DeviceCredential;
 use App\Models\ManagedDevice;
+use App\Models\User;
 use App\Support\Audit;
 use App\Support\CurrentCompany;
 use Illuminate\Database\QueryException;
@@ -39,7 +40,7 @@ final class DeviceRegistrationService
         $amapiName = isset($in['amapi_device_name']) && preg_match('#^enterprises/[\w-]+/devices/[\w-]+$#', (string) $in['amapi_device_name'])
             ? (string) $in['amapi_device_name'] : null;
 
-        return DB::transaction(function () use ($installation, $key, $info, $amapiName) {
+        $device = DB::transaction(function () use ($installation, $key, $info, $amapiName) {
             $existing = ManagedDevice::query()->where('installation_id', $installation)->lockForUpdate()->first();
             if ($existing !== null) {
                 $latest = $existing->credentials()->latest('id')->first();
@@ -81,6 +82,23 @@ final class DeviceRegistrationService
             AdminFeed::dispatchFor(app(CurrentCompany::class)->id(), 'device.pending', ['device_id' => $device->id]);
             return $device;
         });
+        return $this->autoApprove($device);
+    }
+
+    /**
+     * Demo / Play-review workspaces only: company setting devices.auto_approve_employee = an employee code.
+     * New phones are approved to that employee at once (reviewers can't wait for an admin). Unset = normal approval.
+     */
+    private function autoApprove(ManagedDevice $device): ManagedDevice
+    {
+        $code = app(CurrentCompany::class)->get()->setting('devices.auto_approve_employee');
+        $employee = $code && $device->approval_state === ApprovalState::Pending
+            ? User::query()->where('employee_code', $code)->first() : null;
+        if ($employee === null) {
+            return $device;
+        }
+        app(DeviceApprovalService::class)->approve($device, $employee, $employee->id, null, null, null, $device->approval_code);
+        return $device->refresh();
     }
 
     private function uniqueCode(): string

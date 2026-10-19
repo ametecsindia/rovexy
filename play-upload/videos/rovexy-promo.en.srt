@@ -1,0 +1,87 @@
+1
+00:00:01,300 --> 00:00:02,630
+Meet ROVEXY.
+
+2
+00:00:04,780 --> 00:00:08,590
+The work app for collection agencies and their field teams.
+
+3
+00:00:08,340 --> 00:00:11,130
+Calls, visits and payments, all on record.
+
+4
+00:00:12,130 --> 00:00:15,040
+Each day starts with prioritised cases.
+
+5
+00:00:14,790 --> 00:00:17,970
+Dues, follow-ups and progress, at a glance.
+
+6
+00:00:18,970 --> 00:00:22,120
+Open a case to call the customer, set a callback,
+
+7
+00:00:21,870 --> 00:00:24,250
+record a payment, or get directions.
+
+8
+00:00:25,250 --> 00:00:27,950
+Calls go out from the employee's own phone.
+
+9
+00:00:27,700 --> 00:00:31,030
+The recording and the call outcome are saved together.
+
+10
+00:00:32,030 --> 00:00:34,850
+Collect payments on the spot, with the mode,
+
+11
+00:00:34,600 --> 00:00:36,430
+reference and a slip photo,
+
+12
+00:00:36,180 --> 00:00:37,890
+for the office to verify.
+
+13
+00:00:38,890 --> 00:00:41,580
+Customers near me shows who to visit next.
+
+14
+00:00:41,330 --> 00:00:44,130
+Navigate there, and check in at the address.
+
+15
+00:00:45,130 --> 00:00:48,390
+Supervisors can message, call over the internet,
+
+16
+00:00:48,140 --> 00:00:49,960
+or ask to see the screen,
+
+17
+00:00:49,710 --> 00:00:51,910
+only when the employee accepts.
+
+18
+00:00:52,910 --> 00:00:54,610
+Transparent by design.
+
+19
+00:00:54,360 --> 00:00:56,050
+Built for collections.
+
+20
+00:00:55,800 --> 00:00:58,620
+Connected to your office, in real time.
+
+21
+00:00:59,620 --> 00:01:00,350
+ROVEXY.
+
+22
+00:01:00,100 --> 00:01:02,120
+Your workforce, in motion.
