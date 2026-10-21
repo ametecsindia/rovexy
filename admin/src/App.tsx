@@ -13,6 +13,7 @@ import { DevicesPage } from './pages/Devices';
 import { PoliciesPage } from './pages/Policies';
 import { ImportsPage, CustomersPage, CustomerDetailPage } from './pages/Customers';
 import { CallingConfigPage, CallsPage, FollowUpsPage } from './pages/Calls';
+import { CallingOptionsPage, CallingSetupPage, CompanyNumbersPage, PeopleAccessPage } from './pages/CallingConfig';
 import { LocationPage, MediaPage, ChatPage } from './pages/Supervision';
 import { AuditPage, BrandingPage, HealthPage, ReportsPage, RetentionPage } from './pages/Settings';
 import { IntegrationsPage } from './pages/Integrations';
@@ -31,7 +32,11 @@ export const NAV: NavItem[] = [
   { to: '/calls', icon: 'call', label: 'Calls & recordings', perm: 'calls.view', group: 'Calling' },
   { to: '/follow-ups', icon: 'event', label: 'Follow-ups', perm: 'calls.view', group: 'Calling' },
   { to: '/payments', icon: 'chart', label: 'Payments & slips', perm: 'calls.view', group: 'Calling' },
-  { to: '/calling', icon: 'settings', label: 'Configuration', perm: 'telephony.configure', group: 'Calling' },
+  { to: '/calling/setup', icon: 'check', label: 'Setup', perm: 'telephony.configure', group: 'Calling configuration' },
+  { to: '/calling/options', icon: 'call', label: 'Calling options', perm: 'telephony.configure', group: 'Calling configuration' },
+  { to: '/calling/numbers', icon: 'contacts', label: 'Company numbers', perm: 'telephony.configure', group: 'Calling configuration' },
+  { to: '/calling/people', icon: 'people', label: 'People & access', perm: 'telephony.configure', group: 'Calling configuration' },
+  { to: '/calling/outcomes', icon: 'settings', label: 'Call outcome codes', perm: 'telephony.configure', group: 'Calling configuration' },
   { to: '/imports', icon: 'upload', label: 'Portfolios', perm: 'customers.view', group: 'Customers' },
   { to: '/allocation', icon: 'people', label: 'Assignment', perm: 'customers.assign', group: 'Customers' },
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
@@ -50,7 +55,7 @@ export const NAV: NavItem[] = [
   { to: '/integrations', icon: 'settings', label: 'Integrations (PRS / EPT / Maps)', perm: 'system.health', group: 'Administration' },
   { to: '/health', icon: 'warning', label: 'System health', perm: 'system.health', group: 'Administration' },
 ];
-const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', Administration: 'settings' };
+const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', Administration: 'settings' };
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -219,7 +224,15 @@ export function App() {
           <Route path="/allocation" element={<AllocationPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/address-report" element={<AddressReportPage />} />
-          <Route path="/calling" element={<CallingConfigPage />} />
+          <Route path="/calling" element={<Navigate to="/calling/setup" replace />} />
+          <Route path="/calling/setup" element={<CallingSetupPage />} />
+          <Route path="/calling/options" element={<CallingOptionsPage />} />
+          <Route path="/calling/numbers" element={<CompanyNumbersPage />} />
+          <Route path="/calling/people" element={<PeopleAccessPage />} />
+          {['click2call', 'sim'].map((p) => <Route key={p} path={`/calling/${p}`} element={<Navigate to="/calling/options" replace />} />)}
+          <Route path="/calling/smart31" element={<Navigate to="/calling/numbers" replace />} />
+          {['users', 'access'].map((p) => <Route key={p} path={`/calling/${p}`} element={<Navigate to="/calling/people" replace />} />)}
+          <Route path="/calling/outcomes" element={<CallingConfigPage />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/follow-ups" element={<FollowUpsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />

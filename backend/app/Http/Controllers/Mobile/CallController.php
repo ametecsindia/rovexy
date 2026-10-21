@@ -17,8 +17,10 @@ final class CallController extends Controller
             'customer_id' => 'nullable|integer',
             'which' => 'required|in:primary,alternate',
             'number' => 'nullable|string|max:20',   // only meaningful for manual dialling; otherwise must match the record
+            'route' => 'nullable|in:sim,server',   // employee's choice: SIM call or Click2Call (server checks it is offered)
+            'vmn' => 'nullable|string|max:20',     // Click2Call: company number picked by the employee (checked server-side)
         ]);
-        $call = $svc->start($r->user(), $this->device($r), $data['customer_id'] ?? null, $data['which'], $data['number'] ?? null);
+        $call = $svc->start($r->user(), $this->device($r), $data['customer_id'] ?? null, $data['which'], $data['number'] ?? null, $data['route'] ?? null, $data['vmn'] ?? null);
         return response()->json($this->body($call), 201);
     }
 
@@ -74,7 +76,13 @@ final class CallController extends Controller
             'ring_seconds' => $c->ring_seconds, 'talk_seconds' => $c->talk_seconds, 'total_seconds' => $c->total_seconds,
             'failure_reason' => $c->failure_reason, 'disposition_status' => $c->disposition_status, 'agent_leg' => $c->agent_leg,
             'route' => $c->calling_mode === 'sim' ? 'sim' : 'server', 'dial' => $c->calling_mode === 'sim' && !$c->isTerminal() ? $c->destination : null,
-            // Exotel rings the employee from this number first; the app auto-answers it (see CallSession.expectCallback).
-            'callback_from' => $c->provider === 'exotel' && !$c->isTerminal() ? config('ammp.telephony.exotel.caller_id') : null];
+            // Click-to-call rings the employee from this number first; the app auto-answers it (see CallSession.expectCallback).
+            'callback_from' => in_array($c->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) && !$c->isTerminal() ? $this->callbackNumber($c) : null];
+    }
+
+    private function callbackNumber(Call $c): ?string
+    {
+        $a = app(\App\Telephony\TelephonyManager::class)->adapter();
+        return $a instanceof \App\Telephony\Click2CallAdapter ? $a->callbackNumberFor($c) : ($a instanceof \App\Telephony\PolledTelephony ? $a->callbackNumber() : null);
     }
 }

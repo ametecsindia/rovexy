@@ -178,6 +178,12 @@ Route::prefix('mobile/v1')->middleware('company')->group(function () {
             Route::post('customers/{id}/location', [Mobile\FieldMapController::class, 'setLocation'])->whereNumber('id')->middleware(['throttle:maps', 'feature:field_map']);
             Route::post('customers/{id}/visit', [Mobile\FieldMapController::class, 'visit'])->whereNumber('id')->middleware(['throttle:maps', 'feature:field_map']);
             Route::post('calls', [Mobile\CallController::class, 'store'])->middleware(['perm:calls.make', 'throttle:calls']);
+            // Crash note from the app's previous run (stack trace + phone model); read it in the audit log (action app.crash).
+            Route::post('diagnostics/crash', function (\Illuminate\Http\Request $r) {
+                $d = $r->validate(['report' => 'required|string|max:12000']);
+                \App\Support\Audit::record('app.crash', $r->user(), ['report' => $d['report']]);
+                return response()->json(['ok' => true]);
+            })->middleware('throttle:10,1');
             Route::get('calls/{uuid}', [Mobile\CallController::class, 'show']);
             Route::post('calls/{uuid}/hangup', [Mobile\CallController::class, 'hangup']);
             Route::post('calls/{uuid}/sim-result', [Mobile\CallController::class, 'simResult']);
@@ -315,6 +321,29 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('health', [Admin\SettingsController::class, 'health'])->middleware('perm:system.health');
         // SmartPRS2 / SmartEPT field-force integration (6 Oct 2026).
         Route::get('integrations', [Admin\IntegrationController::class, 'index'])->middleware('perm:system.health');
+        Route::prefix('calling')->middleware('perm:telephony.configure')->group(function () {
+            $cc = Admin\CallingConfigController::class;
+            Route::get('access', [$cc, 'access']);
+            Route::put('access/{feature}', [$cc, 'setAccessMode'])->whereIn('feature', ['sim', 'click2call', 'smart31']);
+            Route::post('access/{feature}', [$cc, 'grant'])->whereIn('feature', ['sim', 'click2call', 'smart31']);
+            Route::delete('access/{feature}/{id}', [$cc, 'revoke'])->whereIn('feature', ['sim', 'click2call', 'smart31'])->whereNumber('id');
+            Route::put('sim', [$cc, 'setSim']);
+            Route::get('numbers', [$cc, 'numbers']);
+            Route::post('vouchers', [$cc, 'addVoucher'])->middleware(['feature:click2call', 'throttle:20,1']);
+            Route::patch('numbers/{id}', [$cc, 'updateNumberVmn'])->whereNumber('id');
+            Route::post('numbers/bulk', [$cc, 'bulkNumbers']);
+            Route::delete('numbers/{id}', [$cc, 'deleteVmn'])->whereNumber('id');
+            Route::get('users', [$cc, 'users']);
+            Route::patch('users/{id}', [$cc, 'updateUser'])->whereNumber('id');
+            Route::get('smart31', [$cc, 'smart31']);
+            Route::put('smart31', [$cc, 'setSmart31'])->middleware('feature:smart31');
+            Route::post('smart31/numbers', [$cc, 'addNumber'])->middleware('feature:smart31');
+            Route::patch('smart31/numbers/{id}', [$cc, 'updateNumber'])->whereNumber('id')->middleware('feature:smart31');
+            Route::delete('smart31/numbers/{id}', [$cc, 'deleteNumber'])->whereNumber('id');
+        });
+        Route::get('calling/click2call', [Admin\IntegrationController::class, 'click2call'])->middleware('perm:telephony.configure');
+        Route::put('calling/click2call', [Admin\IntegrationController::class, 'saveClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
+        Route::post('calling/click2call/test', [Admin\IntegrationController::class, 'testClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
         Route::get('integrations/maps', [Admin\IntegrationController::class, 'maps'])->middleware('perm:system.health');
         Route::put('integrations/maps', [Admin\IntegrationController::class, 'saveMaps'])->middleware('perm:telephony.configure');
         Route::put('integrations/{system}', [Admin\IntegrationController::class, 'save'])->whereIn('system', ['smartprs', 'smartept'])->middleware(['perm:telephony.configure', 'feature:integrations']);
@@ -339,5 +368,31 @@ Route::post('telephony/v1/exotel/{uuid}', function (string $uuid, \App\Services\
     }
     return response()->json(['ok' => true]);
 })->name('telephony.exotel')->middleware(['signed', 'throttle:telephony']);
+// Click2Call provider callback (kit: /api/click2call/webhook; also the older /api/telephony/v1/click2call). Matched only by
+// ref_id (= our call uuid) or the provider call id. Optional IP allow-list (C2C_WEBHOOK_IPS).
+//  - C2C_WEBHOOK_SECRET set: the secret is REQUIRED (Secret-Key / X-Webhook-Secret / X-Api-Key header, or ?secret=) and the
+//    posted result is applied as the call's final result (kit / LeadGER processWebhook).
+//  - not set: the body is ignored and only triggers a read from the gateway.
+$c2cWebhook = function (\Illuminate\Http\Request $r, \App\Services\CallService $svc) {
+    $ips = (array) config('ammp.telephony.click2call.webhook_ips');
+    abort_if($ips && !in_array($r->ip(), $ips, true), 403);
+    $secret = (string) config('ammp.telephony.click2call.webhook_secret');
+    $given = (string) ($r->header('Secret-Key') ?? $r->header('X-Webhook-Secret') ?? $r->header('X-Api-Key') ?? $r->query('secret') ?? '');
+    abort_if($secret !== '' && !hash_equals($secret, $given), 401);
+    $p = $r->json()->all() ?: $r->except('secret');
+    $ref = (string) ($p['ref_id'] ?? $p['REF_ID'] ?? $p['reference_id'] ?? $p['refId'] ?? '');
+    $pid = (string) ($p['call_id'] ?? $p['CALL_ID'] ?? $p['CallId'] ?? $p['uniqueid'] ?? $p['unique_id'] ?? $p['uuid'] ?? '');
+    $ctx = app(\App\Support\CurrentCompany::class);
+    $call = $ctx->withoutScope(fn () => \App\Models\Call::query()->where('provider', 'click2call')
+        ->where(fn ($q) => $q->when($ref !== '', fn ($w) => $w->where('uuid', $ref))->when($pid !== '', fn ($w) => $w->orWhere('provider_call_id', $pid)))
+        ->when($ref === '' && $pid === '', fn ($q) => $q->whereRaw('1 = 0'))->first());
+    if (!$call) {
+        return response()->json(['status' => 'ignored', 'message' => 'Unknown call']);   // 200: no endless retries
+    }
+    $call = $ctx->run(\App\Models\Company::query()->findOrFail($call->company_id), fn () => $svc->syncProvider($call, $secret !== '' ? $p : null));
+    return response()->json(['status' => 'success', 'call_state' => $call->state]);
+};
+Route::match(['get', 'post'], 'telephony/v1/click2call', $c2cWebhook)->name('telephony.click2call')->middleware('throttle:telephony');
+Route::match(['get', 'post'], 'click2call/webhook', $c2cWebhook)->name('click2call.webhook')->middleware('throttle:telephony');
 // AMAPI Pub/Sub push notifications (OIDC-verified).
 Route::post('amapi/v1/notifications', [AmapiNotificationController::class, 'store']);

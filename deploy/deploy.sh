@@ -3,7 +3,7 @@
 # First time: see deploy/README.md. Every later release: just run   sudo -u www-data bash /var/www/rovexy/deploy/deploy.sh
 set -euo pipefail
 
-APP=/var/www/rovexy          # the git checkout (repo root: backend/, admin/, deploy/ …)
+APP=${APP:-/var/www/ametecs_apps/rovexy}   # the git checkout (repo root: backend/, admin/, deploy/ …)
 BRANCH=${BRANCH:-main}
 PHP=${PHP:-php8.3}
 

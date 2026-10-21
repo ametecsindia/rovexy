@@ -34,8 +34,16 @@ abstract class VisibleMediaService(private val kind: String, private val fgsType
             .setOngoing(true)
             .addAction(Notification.Action.Builder(null, if (kind == "voice") "Hang up" else "Stop", stop).build())
             .build()
-        // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+).
-        ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
+        // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+). Android can refuse (app in the
+        // background, permission revoked, OEM limits): that threw and restarted the app — now the session just ends.
+        try {
+            ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
+        } catch (e: Exception) {
+            g.media.lastError.value = "Android did not allow sharing to start. Open ROVEXY and try again."
+            g.media.onForegroundFailed()
+            stopSelf()
+            return START_NOT_STICKY
+        }
         val projection: Intent? = intent?.let { IntentCompat.getParcelableExtra(it, EXTRA_PROJECTION, Intent::class.java) }
         g.media.onForegroundReady(kind, projection)
         return START_NOT_STICKY

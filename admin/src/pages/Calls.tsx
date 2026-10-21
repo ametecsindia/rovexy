@@ -111,24 +111,13 @@ function CallDetail({ id, onClose }: { id: number; onClose: () => void }) {
 
 export function CallingConfigPage() {
   const codes = useAsync(() => get<any[]>('/disposition-codes'));
-  const health = useAsync(() => get('/health'));
   const [rows, setRows] = useState<any[] | null>(null);
   const a = useAction();
   const list = rows ?? codes.data ?? [];
   return (
-    <Page title="Calling configuration" subtitle="Calling hours, prefixes, recording mode and failure behaviour are policy settings (Policy profiles). Telephony credentials live only on the server.">
+    <Page title="Call outcome codes" subtitle="The outcomes employees pick after each call. Calling hours, prefixes and recording mode are policy settings (Policy profiles).">
       <ErrorBox error={codes.error ?? a.error} />
-      <Card title="Telephony connection">
-        {health.data && (
-          <>
-            {health.data.telephony.route === 'sim' && <Notice tone="info"><strong>SIM calling is active.</strong> Phones dial from their own SIM; talk time comes from the phone's call log and the recording is the file made by the phone's own call recorder. Ask employees to switch on <em>automatic call recording</em> in the phone's dialer settings (Xiaomi/Redmi: Phone → Settings → Call recording; Samsung: Phone → ⋮ → Settings → Record calls; OPPO/Realme/OnePlus: Phone → Settings → Call recording). Google Pixel and some others keep recordings private, so they cannot be uploaded. Set <span className="code">CALLING_ROUTE=server</span> to use FreeSWITCH instead.</Notice>}
-            {health.data.telephony.route !== 'sim' && health.data.telephony.driver === 'exotel' && <Notice tone="info"><strong>Exotel click-to-call is active.</strong> When an employee taps Call, Exotel rings the employee's <em>work phone number</em> (set it under Employees &amp; teams), then the customer, who sees your ExoPhone. Both sides are recorded on Exotel and copied here automatically after the call.</Notice>}
-            <p>Driver <strong>{health.data.telephony.driver}</strong> · <Badge value={health.data.telephony.ok} label={health.data.telephony.ok ? 'reachable' : 'unreachable'} /> <span className="muted">{health.data.telephony.detail}</span></p>
-            {health.data.telephony.route !== 'sim' && health.data.telephony.simulated && <Notice tone="warn">SIMULATOR — development only. No real calls are placed and no audio is recorded.</Notice>}
-          </>
-        )}
-      </Card>
-      <Card title="Disposition codes" actions={<button className="secondary" onClick={() => setRows([...list, { code: '', label: '', requires_follow_up: false, active: true, captures: 'none' }])}>Add code</button>}>
+      <Card title="Outcome codes" actions={<button className="secondary" onClick={() => setRows([...list, { code: '', label: '', requires_follow_up: false, active: true, captures: 'none' }])}>Add code</button>}>
         <Table rows={list.map((r, i) => ({ ...r, id: i }))} columns={[
           { key: 'code', label: 'Code', render: (r: any) => <input value={r.code} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, code: e.target.value.toUpperCase() } : x))} /> },
           { key: 'label', label: 'Label', render: (r: any) => <input value={r.label} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, label: e.target.value } : x))} /> },

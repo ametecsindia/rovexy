@@ -35,6 +35,10 @@ class WebRtcSession(
 ) {
     private val egl = EglBase.create()
     private lateinit var factory: PeerConnectionFactory
+    /** Teardown and remote signals run here, never on WebRTC's own callback threads (closing a PeerConnection from its
+     *  observer, or disposing the capturer from the MediaProjection callback, deadlocks/aborts and the app restarts). */
+    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var videoSource: org.webrtc.VideoSource? = null
     private var pc: PeerConnection? = null
     private var capturer: VideoCapturer? = null
     private var helper: SurfaceTextureHelper? = null
@@ -46,7 +50,7 @@ class WebRtcSession(
     val eglContext: EglBase.Context get() = egl.eglBaseContext
 
     fun start(projectionData: Intent?, width: Int, height: Int, fps: Int) {
-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
+        initOnce(context)
         factory = PeerConnectionFactory.builder()
             .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
@@ -74,9 +78,15 @@ class WebRtcSession(
             en.createCapturer(name, null)
         }
         helper = SurfaceTextureHelper.create("ammp-capture", egl.eglBaseContext)
-        val source = factory.createVideoSource(kind == "screen")
+        val source = factory.createVideoSource(kind == "screen").also { videoSource = it }
         capturer!!.initialize(helper, context, source.capturerObserver)
-        capturer!!.startCapture(width, height, fps)
+        if (kind == "screen") {
+            // Capture at the screen's own shape (portrait), long side ≤ 1280: a fixed 1280×720 box squeezed a portrait
+            // screen into a small, blurry picture.
+            val m = context.resources.displayMetrics
+            val scale = minOf(1f, 1280f / maxOf(m.widthPixels, m.heightPixels))
+            capturer!!.startCapture((m.widthPixels * scale).toInt() / 2 * 2, (m.heightPixels * scale).toInt() / 2 * 2, fps)
+        } else capturer!!.startCapture(width, height, fps)
         localTrack = factory.createVideoTrack("ammp-$kind", source)
     }
 
@@ -85,7 +95,7 @@ class WebRtcSession(
         pc = factory.createPeerConnection(cfg, object : PeerConnection.Observer {
             override fun onIceCandidate(c: IceCandidate) = sendSignal("candidate", mapOf("candidate" to c.sdp, "sdpMid" to c.sdpMid, "sdpMLineIndex" to c.sdpMLineIndex))
             override fun onConnectionChange(state: PeerConnection.PeerConnectionState) {
-                if (state == PeerConnection.PeerConnectionState.FAILED) end("connection_failed")
+                if (state == PeerConnection.PeerConnectionState.FAILED) end("connection_failed")   // end() hops to the worker
             }
             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
@@ -108,28 +118,53 @@ class WebRtcSession(
         }, MediaConstraints())
     }
 
-    fun onRemoteSignal(type: String, payload: Map<String, Any?>) {
-        when (type) {
-            "answer" -> pc?.setRemoteDescription(SimpleSdp(), SessionDescription(SessionDescription.Type.ANSWER, payload["sdp"] as String))
-            "candidate" -> pc?.addIceCandidate(IceCandidate(payload["sdpMid"] as String?, (payload["sdpMLineIndex"] as Number).toInt(), payload["candidate"] as String))
-            "bye" -> end("supervisor_stopped")
+    @Volatile private var answered = false
+    fun onRemoteSignal(type: String, payload: Map<String, Any?>) = post {
+        if (ended) return@post
+        runCatching {   // a malformed signal must never take the app down
+            when (type) {
+                // The answer can arrive twice (WebSocket + mailbox poll); applying it again fails, so apply it once.
+                "answer" -> if (!answered) { answered = true; pc?.setRemoteDescription(SimpleSdp(), SessionDescription(SessionDescription.Type.ANSWER, payload["sdp"].toString())) }
+                "candidate" -> pc?.addIceCandidate(IceCandidate(payload["sdpMid"]?.toString(), payload["sdpMLineIndex"].toString().toDouble().toInt(), payload["candidate"].toString()))
+                "bye" -> end("supervisor_stopped")
+            }
         }
     }
 
     fun attachPreview(sink: VideoSink) { localTrack?.addSink(sink) }
 
+    /** Runs on the worker; after the session ended the worker is shut down and late signals are simply dropped. */
+    private fun post(block: () -> Unit) { runCatching { worker.execute(block) } }
+
     @Volatile private var ended = false
     fun end(reason: String) {
         if (ended) return
         ended = true
-        runCatching { capturer?.stopCapture() }
-        capturer?.dispose()
-        pc?.close()
-        audioSource?.dispose()
-        if (kind == "voice") { audio.isSpeakerphoneOn = false; audio.mode = android.media.AudioManager.MODE_NORMAL }
-        helper?.dispose()
-        egl.release()
-        onEnded(reason)
+        post {
+            // Every native object is freed: leaked factories/sources piled up session after session (slow, then killed).
+            runCatching { capturer?.stopCapture() }
+            runCatching { capturer?.dispose() }
+            runCatching { pc?.dispose() }   // closes it too
+            runCatching { localTrack?.dispose() }
+            runCatching { videoSource?.dispose() }
+            runCatching { audioTrack?.dispose() }
+            runCatching { audioSource?.dispose() }
+            if (kind == "voice") runCatching { audio.isSpeakerphoneOn = false; audio.mode = android.media.AudioManager.MODE_NORMAL }
+            runCatching { helper?.dispose() }
+            runCatching { if (::factory.isInitialized) factory.dispose() }
+            runCatching { egl.release() }
+            runCatching { onEnded(reason) }
+            worker.shutdown()
+        }
+    }
+
+    companion object {
+        @Volatile private var initialised = false
+        @Synchronized private fun initOnce(ctx: Context) {
+            if (initialised) return
+            PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions())
+            initialised = true
+        }
     }
 
     private open class SimpleSdp : SdpObserver {

@@ -7,7 +7,7 @@ After=network.target
 User=www-data
 Restart=always
 RestartSec=3
-WorkingDirectory=/var/www/rovexy/backend
+WorkingDirectory=/var/www/ametecs_apps/rovexy/backend
 ExecStart=/usr/bin/php artisan reverb:start --host=127.0.0.1 --port=8080
 
 [Install]

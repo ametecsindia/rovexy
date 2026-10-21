@@ -13,7 +13,7 @@ class Call extends Model
 
     protected $table = 'calls';
 
-    protected $fillable = ['uuid','provider','provider_call_id','user_id','device_id','customer_id','destination','which_number','calling_mode','agent_leg','state','hangup_cause','failure_reason','initiated_at','agent_answered_at','ringing_at','answered_at','ended_at','ring_seconds','talk_seconds','total_seconds','recording_required','recording_status','disposition_status'];
+    protected $fillable = ['uuid','provider','provider_call_id','user_id','device_id','customer_id','destination','which_number','calling_mode','agent_leg','state','hangup_cause','failure_reason','initiated_at','agent_answered_at','ringing_at','answered_at','ended_at','ring_seconds','talk_seconds','total_seconds','recording_required','recording_status','disposition_status','caller_number'];
 
     protected function casts(): array
     {

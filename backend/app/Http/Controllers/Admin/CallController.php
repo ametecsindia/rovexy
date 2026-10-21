@@ -28,8 +28,8 @@ final class CallController extends Controller
 
     public function index(Request $r)
     {
-        // Pull results/recordings for a few still-open Exotel calls (no scheduler needed on a dev PC).
-        $this->scoped($r)->where('provider', 'exotel')->where('initiated_at', '>', now()->subHours(3))
+        // Pull results/recordings for a few still-open click-to-call calls (no scheduler needed on a dev PC).
+        $this->scoped($r)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
             ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))
             ->latest('initiated_at')->limit(5)->get()->each(fn ($c) => app(\App\Services\CallService::class)->syncProvider($c));
         return response()->json($this->scoped($r)->where('provider', '!=', 'manual')
@@ -62,7 +62,7 @@ final class CallController extends Controller
 
     public function show(Request $r, int $id)
     {
-        $pending = $this->scoped($r)->whereKey($id)->where('provider', 'exotel')->first();
+        $pending = $this->scoped($r)->whereKey($id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->first();
         if ($pending) {
             app(\App\Services\CallService::class)->syncProvider($pending);
         }

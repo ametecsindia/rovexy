@@ -61,6 +61,76 @@ final class IntegrationController extends Controller
         return response()->json($ff->test($c));
     }
 
+    /** Calling → Configuration → Click2Call: current settings (the secret only as its last 4 characters). */
+    public function click2call(\App\Support\CurrentCompany $current)
+    {
+        $s = \App\Telephony\Click2CallSettings::stored($current->get());
+        $secret = \App\Telephony\Click2CallSettings::effective($current->get())['gateway_secret'] ?? null;
+        if ($secret === null && !empty($s['secret'])) {
+            try { $secret = \Illuminate\Support\Facades\Crypt::decryptString($s['secret']); } catch (\Throwable) { $secret = null; }
+        }
+        return response()->json([
+            'mode' => $s['mode'] ?? null, 'did' => $s['did'] ?? null, 'agent_caller_id' => $s['agent_caller_id'] ?? null,
+            'secret_hint' => $secret ? '••••' . mb_substr($secret, -4) : null,
+            'callback_url' => url('/api/telephony/v1/click2call'),
+            'server_driver' => config('ammp.telephony.driver'),
+            'in_plan' => \App\Telephony\Click2CallSettings::inPlan('click2call'),
+            'crm_id' => $s['crm_id'] ?? null, 'lc_secret_set' => (bool) \App\Telephony\VoucherService::licenceSecret(), 'daily_limit' => (int) ($s['daily_limit'] ?? config('ammp.telephony.click2call.daily_limit')),
+            'voucher_numbers' => \App\Models\C2c\Vmn::query()->count(),
+            'webhook_secret_set' => !empty(config('ammp.telephony.click2call.webhook_secret')),
+        ]);
+    }
+
+    /** Save Click2Call (blank secret = keep the stored one). Takes effect on the next call. */
+    public function saveClick2call(Request $r, \App\Support\CurrentCompany $current)
+    {
+        $company = $current->get();
+        abort_if($r->input('mode') !== 'off' && !\App\Telephony\Click2CallSettings::inPlan('click2call'), 403,
+            'Click2Call is not part of your ROVEXY plan. Upgrade under Administration → Plan & licence.');
+        $old = \App\Telephony\Click2CallSettings::stored($company);
+        $d = $r->validate([
+            'mode' => 'required|in:off,only,choice',
+            // Company number: optional once numbers come from a voucher (Numbers & vouchers); the fallback otherwise.
+            'did' => ['nullable', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && !\App\Models\C2c\Vmn::query()->exists()), 'regex:/^\+?[0-9 ]{6,15}$/'],
+            'crm_id' => 'nullable|string|max:60', 'lc_secret' => 'nullable|string|max:200', 'daily_limit' => 'nullable|integer|min:1|max:1000',
+            'agent_caller_id' => ['nullable', 'regex:/^\+?[0-9 ]{6,15}$/'],
+            'gateway_secret' => ['nullable', 'string', 'max:200', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && empty($old['secret']))],
+        ]);
+        $new = ['mode' => $d['mode'], 'did' => isset($d['did']) ? preg_replace('/\D/', '', $d['did']) : ($old['did'] ?? null),
+            'agent_caller_id' => isset($d['agent_caller_id']) ? preg_replace('/\D/', '', $d['agent_caller_id']) : null,
+            'secret' => filled($d['gateway_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString($d['gateway_secret']) : ($old['secret'] ?? null),
+            'crm_id' => array_key_exists('crm_id', $d) ? ($d['crm_id'] ?: null) : ($old['crm_id'] ?? null),
+            'lc_secret' => filled($d['lc_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString($d['lc_secret']) : ($old['lc_secret'] ?? null),
+            'daily_limit' => array_key_exists('daily_limit', $d) ? ($d['daily_limit'] ?: null) : ($old['daily_limit'] ?? null)];
+        $company->forceFill(['settings' => array_replace($company->settings ?? [], ['click2call' => $new])])->save();
+        Audit::record('click2call.saved', $company, ['mode' => $new['mode'], 'did' => $new['did'], 'secret_changed' => filled($d['gateway_secret'] ?? null)]);
+        return $this->testClick2call($current);
+    }
+
+    /** Checks the settings and asks the gateway once (a made-up call id: "not found" still proves the secret is accepted). */
+    public function testClick2call(\App\Support\CurrentCompany $current)
+    {
+        $cfg = \App\Telephony\Click2CallSettings::effective($current->get());
+        if ($cfg === null) {
+            return response()->json(['ok' => true, 'detail' => 'Click2Call is off. Phones use SIM calling.']);
+        }
+        $cfg['did'] = $cfg['did'] ?: \App\Models\C2c\Vmn::query()->where('click2call', true)->value('virtual_number');
+        $h = (new \App\Telephony\Click2CallAdapter($cfg))->health();
+        if (!$h['ok']) {
+            return response()->json($h);
+        }
+        try {
+            $res = \Illuminate\Support\Facades\Http::timeout(8)->acceptJson()->withHeaders(['Secret-Key' => (string) $cfg['gateway_secret']])
+                ->get(rtrim((string) $cfg['cdr_url'], '/') . '/connection-test/' . \App\Telephony\Click2CallAdapter::normalize($cfg['did']));
+        } catch (\Throwable $e) {
+            return response()->json(['ok' => false, 'detail' => 'Call-record gateway unreachable: ' . mb_substr($e->getMessage(), 0, 150)]);
+        }
+        $ok = !in_array($res->status(), [401, 403], true) && $res->status() < 500;
+        return response()->json(['ok' => $ok, 'detail' => $ok
+            ? 'Saved. The call-record gateway answered (HTTP ' . $res->status() . '). Place a test call to confirm the call itself.'
+            : 'The call-record gateway refused the secret or failed (HTTP ' . $res->status() . '). Check the gateway secret.']);
+    }
+
     /** Integrations → Google Maps: which keys are stored (last 4 characters only). */
     public function maps()
     {

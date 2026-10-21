@@ -56,10 +56,15 @@ class LocationService : Service() {
         val n: Notification = Notification.Builder(this, AmmpApp.CHANNEL_WORK)
             .setSmallIcon(R.drawable.ic_app).setContentTitle("Work session active")
             .setContentText("Location is shared with your company while you are signed in.").setOngoing(true).build()
-        ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        // Must call startForeground before stopping (else Android crashes the app). Denied permission → stop cleanly.
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+        // Android 14+ refuses a location foreground service it considers started from the background (e.g. the system
+        // re-creating this sticky service while the dialer is in front during a call) or without location permission.
+        // That refusal is an exception — uncaught, it killed and restarted the whole app. Now the service just stops;
+        // it is started again when ROVEXY is opened (onResumed).
+        val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        val inForeground = granted && runCatching { ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess
+        if (!inForeground) {
+            started = false
             stopSelf()
             return START_NOT_STICKY
         }

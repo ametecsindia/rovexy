@@ -13,7 +13,7 @@ class User extends Authenticatable
 {
     use BelongsToCompany;
 
-    protected $fillable = ['employee_code', 'email', 'name', 'phone', 'password', 'status', 'totp_secret', 'totp_last_step', 'mfa_enabled_at', 'last_login_at'];
+    protected $fillable = ['employee_code', 'email', 'name', 'phone', 'password', 'status', 'totp_secret', 'totp_last_step', 'mfa_enabled_at', 'last_login_at', 'click_agent_number', 'c2c_default_number'];
 
     protected $hidden = ['password', 'remember_token', 'totp_secret', 'totp_last_step'];
 

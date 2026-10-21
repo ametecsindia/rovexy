@@ -69,10 +69,14 @@ return [
         //             phone's built-in call-recorder file. Needs no telephony server. Recording quality depends on the OEM recorder.
         //  'server' — server-originated calls through the driver below (Exotel cloud telephony or FreeSWITCH), recorded centrally.
         'route' => env('CALLING_ROUTE', 'sim'),
+        // Routes the employee may choose between on each call, e.g. "sim,server" (SIM call or Click2Call). The first is
+        // the default for app builds that don't offer a choice. Empty = only CALLING_ROUTE (see CallService::routes()).
+        'routes' => array_values(array_filter(array_map('trim', explode(',', (string) env('CALLING_ROUTES', ''))),
+            fn ($v) => in_array($v, ['sim', 'server'], true))),
         // SIM route recorder: 'phone' = the phone's own dialer auto-records (both voices, after answer) and the app uploads
         // that file; 'app' = this app is the dialer and records the mic itself (Android blocks the customer's voice).
         'sim_recorder' => env('SIM_RECORDER', 'phone'),
-        // 'exotel' | 'freeswitch' | 'simulator' (refuses to run unless APP_ENV=local or testing)
+        // 'click2call' | 'exotel' | 'freeswitch' | 'simulator' (refuses to run unless APP_ENV=local or testing)
         'driver' => env('TELEPHONY_DRIVER', 'freeswitch'),
         // Exotel click-to-call: rings the employee's work number, then the customer; recorded on Exotel, copied here.
         'exotel' => [
@@ -86,6 +90,26 @@ return [
             'ring_timeout' => (int) env('EXOTEL_RING_TIMEOUT', 30),
             'time_limit' => (int) env('EXOTEL_TIME_LIMIT', 3600),
             'timezone' => env('EXOTEL_TIMEZONE', 'Asia/Kolkata'),            // timezone of Exotel's StartTime/EndTime
+        ],
+        // Click2Call (Telozar start + Ametecs OBD gateway for result/recording, as in LeadGER): rings the employee's work
+        // number, then the customer from the company VMN; recorded by the provider, copied here.
+        'click2call' => [
+            'start_url' => env('C2C_START_URL', 'https://sip.telozar.com/api/webrtc/c2c_call'),
+            'cdr_url' => env('C2C_CDR_URL', 'https://obd.ametecsindia.com/admin/click2call_data'),
+            'gateway_secret' => env('C2C_GATEWAY_SECRET'),
+            'did' => env('C2C_DID'),                                     // the company VMN shown to customers
+            'agent_caller_id' => env('C2C_AGENT_CALLER_ID'),             // number the employee is rung from, if not the VMN
+            'webhook_secret' => env('C2C_WEBHOOK_SECRET'),               // required on the provider callback when set
+            'timeout' => (int) env('C2C_TIMEOUT', 15),
+            'timezone' => env('C2C_TIMEZONE', 'Asia/Kolkata'),           // timezone of the gateway's dmYHis times
+            // Add Voucher: vouchers/LCs are created in the Ametecs CRM (lc.ametecsindia.com). GET {licence_url}/api/did_voucher/{code}/{crm_id}, header Secret-Key.
+            'licence_url' => env('C2C_LICENSE_URL', 'https://lc.ametecsindia.com'),
+            'licence_secret' => env('C2C_LICENSE_SECRET'),
+            'crm_id' => env('C2C_CRM_ID'),                                 // default; a company can set its own in Calling options
+            'daily_limit' => (int) env('C2C_DAILY_LIMIT_PER_NUMBER', 100), // Click2Call attempts per customer number per day (LeadGER)
+            'max_users' => (int) env('C2C_MAX_USERS', 0),                  // licensed Click2Call users per company, 0 = no limit
+            'webhook_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('C2C_WEBHOOK_IPS', ''))))),
+            'recording_wait_minutes' => 60,                                // no recording this long after the call → failed (LeadGER 60)
         ],
         'freeswitch' => [
             'host' => env('FREESWITCH_ESL_HOST', '127.0.0.1'),

@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonArray
@@ -82,6 +83,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** SIM-calling permissions still missing (shown as a banner on the dashboard). */
     val missingPermissions = MutableStateFlow<List<String>>(emptyList())
     private var callingRoute = "server"
+    /** Routes the company offers: "sim" (this phone's SIM) and/or "server" (Click2Call). Two = the employee picks per call. */
+    private var callingRoutes = listOf("server")
+    /** Set when the employee must choose SIM call or Click2Call for this call. */
+    val routeAsk = MutableStateFlow<Pair<CachedCustomer, String>?>(null)
+    fun cancelRouteAsk() { routeAsk.value = null }
+    /** Calling options this employee may use (server decides from Calling configuration); shown in the call dialog. */
+    val routeOptions = MutableStateFlow(listOf("server"))
+    /** Click2Call: company numbers this employee may call from (picked in the dialog), their default, and whether
+     *  Smart31 picks the number automatically (then no picker). */
+    val c2cNumbers = MutableStateFlow<List<String>>(emptyList())
+    val c2cDefault = MutableStateFlow<String?>(null)
+    private var c2cSmart31 = false
     /** True while the "switch on the call recorder" guide is shown (recording is required and Accessibility is off). */
     val recorderSetup = MutableStateFlow(false)
     fun openRecorderSettings() { CallRecordService.openAccessibilitySettings(getApplication()) }
@@ -199,6 +212,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ack = g.work.syncPolicy()
         val me = g.session.work("GET", "/api/mobile/v1/me").obj()
         applyMe(me)
+        sendCrashNote()
         me["realtime"]?.let { rt -> if (rt is JsonObject) { g.realtimeUrl = rt.str("ws_url"); g.realtimeChannel = rt.str("channel") } }
         me["disclosure"]?.jsonObject?.let { d ->
             disclosure.value = Disclosure(d.str("calls_recorded") == "true", d.str("recording_notice") ?: "",
@@ -219,8 +233,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         onResumed()   // a SIM call placed before the app was closed is reported now
     }
 
+    /** Uploads the crash note left by the previous run (see AmmpApp), once. */
+    private fun sendCrashNote() = viewModelScope.launch {
+        val f = File(getApplication<Application>().filesDir, "last_crash.txt")
+        if (!f.exists()) return@launch
+        runCatching { g.session.work("POST", "/api/mobile/v1/diagnostics/crash", buildJsonObject { put("report", f.readText().take(12_000)) }) }
+            .onSuccess { f.delete() }
+    }
+
     private fun applyMe(me: JsonObject) {
         callingRoute = me.str("calling_route") ?: "server"
+        callingRoutes = (me["calling_routes"] as? JsonArray)?.mapNotNull { it.toString().trim('"').takeIf { r -> r == "sim" || r == "server" } }
+            ?: listOf(callingRoute)   // empty list = no calling option allowed (server says so on Call)
+        routeOptions.value = callingRoutes
+        (me["click2call"] as? JsonObject).let { o ->
+            c2cNumbers.value = (o?.get("numbers") as? JsonArray)?.mapNotNull { (it as? JsonObject)?.str("number") } ?: emptyList()
+            c2cDefault.value = o?.str("default")
+            c2cSmart31 = o?.str("smart31") == "true"
+        }
         me["employee"]?.jsonObject?.str("name")?.let { employeeName.value = it }
         me["employee"]?.jsonObject?.str("id")?.toLongOrNull()?.let { myUserId = it }
         me["today"]?.jsonObject?.let { t -> today.value = Today(t.str("calls")?.toIntOrNull() ?: 0, t.str("connected")?.toIntOrNull() ?: 0, t.str("talk_seconds")?.toIntOrNull() ?: 0, t.str("follow_ups_due")?.toIntOrNull() ?: 0) }
@@ -349,7 +379,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else if (!CallRecordService.accessibilityOn(ctx)) CallRecordService.openAccessibilitySettings(ctx)
     }
 
-    fun placeCall(c: CachedCustomer, which: String) = act {
+    /** True when the employee picks the Click2Call company number in the dialog (several numbers, Smart31 not deciding). */
+    fun c2cPicker() = "server" in callingRoutes && !c2cSmart31 && c2cNumbers.value.size > 1
+
+    fun placeCall(c: CachedCustomer, which: String, route: String? = null, vmn: String? = null) = act {
+        routeAsk.value = null
+        if (callingRoutes.isEmpty()) throw ApiException(0, "no_calling_option", "No calling option is enabled for you. Ask your administrator.")
+        // Ask when there is a choice: SIM or Click2Call, and/or which company number Click2Call uses.
+        if (route == null && (callingRoutes.size > 1 || c2cPicker())) { routeAsk.value = c to which; return@act }
+        val callingRoute = route ?: callingRoutes.first()
         if (!g.session.lease.isValid(System.currentTimeMillis()) && !sync.value.online) throw ApiException(0, "offline", "Calling needs a connection to the company server.")
         val ctx = getApplication<Application>()
         if (callingRoute == "sim" && SimCalls.missing(ctx).isNotEmpty()) {
@@ -377,7 +415,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             return@act
         }
         if (g.store.getString("sim_pending") != null) throw ApiException(0, "pending", "The previous call is still being saved. Tap \"Finish call\" first.")
-        val r = g.session.work("POST", "/api/mobile/v1/calls", buildJsonObject { put("customer_id", c.id); put("which", which) }).obj()
+        val r = g.session.work("POST", "/api/mobile/v1/calls", buildJsonObject { put("customer_id", c.id); put("which", which); put("route", callingRoute); if (callingRoute == "server" && vmn != null) put("vmn", vmn) }).obj()
         val id = r.str("call_id")!!
         val dial = r.str("dial")
         if (r.str("route") == "sim" && dial != null) {
@@ -390,6 +428,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val ownRec = r.str("recording_status") == "pending" && !SimCalls.phoneRecorder
             CallSession.wantSpeaker = ownRec   // speaker on when connected, so the customer is recorded
             if (ownRec) CallRecordService.start(ctx, id)   // must start while this app is in front
+            trackSimCall()
             SimCalls.dial(ctx, dial)
             return@act
         }
@@ -398,11 +437,35 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         watchCall()
     }
 
+    // Off-hook window of the current SIM call, polled from dialling (ring + talk; the app can't tell them apart without the call log).
+    @Volatile private var offhookFrom: Long? = null
+    @Volatile private var offhookTo: Long? = null
+    /** Play build, no recorder file: the employee's answer to "Did the customer answer?" (null = not asked yet). */
+    @Volatile private var answeredOverride: Boolean? = null
+    private var tracker: kotlinx.coroutines.Job? = null
+
+    private fun trackSimCall() {
+        tracker?.cancel(); offhookFrom = null; offhookTo = null; answeredOverride = null
+        val ctx = getApplication<Application>()
+        tracker = viewModelScope.launch {
+            val start = System.currentTimeMillis()
+            while (System.currentTimeMillis() - start < 3 * 3_600_000) {
+                val now = System.currentTimeMillis()
+                if (SimCalls.inCall(ctx)) { if (offhookFrom == null) offhookFrom = now; offhookTo = now }
+                else if (offhookTo != null && now - offhookTo!! > 5_000) break
+                delay(1000)
+            }
+        }
+    }
+
+    /** Employee's Yes/No when no recording file shows the call was answered. */
+    fun answered(yes: Boolean) { answeredOverride = yes; onResumed() }
+
     /** Activity resumed (back from the dialer) or the employee tapped "Finish call": report the SIM call once. */
     fun onResumed() {
         if (recorderSetup.value && CallRecordService.accessibilityOn(getApplication())) recorderSetup.value = false
         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
-        if (callingRoute == "sim") missingPermissions.value = SimCalls.missingLabels(getApplication())
+        if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
         finishing = true
@@ -422,10 +485,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         try {
             var stage = p.str("stage")
             if (stage == "result") {
-                while (SimCalls.inCall(ctx)) { show("on_sim_call", "On call. Come back here after hanging up."); delay(2000) }
+                if (answeredOverride == null && call.value?.state == "ask_answered") return   // waiting for the employee's Yes/No
+                // The dialer may not have connected yet: wait up to 20 s for the call to show up before judging it.
+                while (offhookFrom == null && !SimCalls.inCall(ctx) && System.currentTimeMillis() - since < 20_000) { show("on_sim_call", "Calling…"); delay(1000) }
+                while (SimCalls.inCall(ctx) || (offhookTo != null && System.currentTimeMillis() - offhookTo!! < 3_000)) { show("on_sim_call", "On call. Come back here after hanging up."); delay(2000) }
+                val offhook = offhookFrom?.let { from -> offhookTo?.let { ((it - from) / 1000).toInt() } }
                 show("saving", "Reading the call log…")
                 var log: SimCalls.LogEntry? = null
-                if (BuildConfig.PLAY) { show("saving", "Looking for the call recording…"); log = SimCalls.logFromRecording(ctx, number, since) }
+                if (BuildConfig.PLAY) {
+                    val ans = answeredOverride
+                    if (ans != null) log = SimCalls.LogEntry(if (ans) maxOf(offhook ?: 1, 1) else 0, since)
+                    else {
+                        show("saving", "Looking for the call recording…")
+                        val found = SimCalls.logFromRecording(ctx, number, since)
+                        log = found
+                        // No recorder file is not proof of "not answered" (auto-record off, or recording not used): ask.
+                        if (found.talkSeconds == 0) { show("ask_answered", "No call recording was found on this phone."); return }
+                    }
+                }
                 else for (i in 0 until 8) { log = SimCalls.callLog(ctx, number, since); if (log != null) break; delay(1500) }
                 val missing = SimCalls.missingLabels(ctx)
                 val stale = System.currentTimeMillis() - since > 30 * 60_000
@@ -447,7 +524,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in 0 until 15) { if (!CallRecordService.running) break; delay(700) }
                     // Without the accessibility switch Android feeds silence to the mic during calls — never upload that as a recording.
                     if (!SimCalls.phoneRecorder && own.length() > 2_000 && CallRecordService.accessibilityOn(ctx)) file = SimCalls.RecorderFile(android.net.Uri.fromFile(own), own.name, "audio/wav", talk, own.length())
-                    else if (talk > 0) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
+                    else if (talk > 0 && answeredOverride == null) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
                     bytes = file?.let { SimCalls.read(ctx, it) }
                     // An answered call with no recorder file means auto-record is off: block the next call until a recording shows up.
                     if (SimCalls.phoneRecorder && talk > 0) {
@@ -458,7 +535,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val r = g.session.work("POST", "/api/mobile/v1/calls/$id/sim-result", buildJsonObject {
                     put("talk_seconds", talk)
                     put("diagnostics", buildJsonObject {
-                        put("call_log_entry", log != null); put("talk_source", if (BuildConfig.PLAY) "recording_file" else "call_log")
+                        put("call_log_entry", log != null)
+                        put("talk_source", when { !BuildConfig.PLAY -> "call_log"; answeredOverride == true -> "employee_yes_offhook"; answeredOverride == false -> "employee_no"; else -> "recording_file" })
+                        offhook?.let { put("offhook_seconds", it) }
                         put("missing_permissions", missing.joinToString(","))
                         put("phone", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE}")
                         file?.let { put("recording_file", it.name) }

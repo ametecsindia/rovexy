@@ -93,9 +93,9 @@ final class FetchRecording extends TenantJob
 
     private function readSource(string $relative): ?string
     {
-        if (str_starts_with($relative, 'https://')) {   // provider-hosted recording (Exotel)
+        if (str_starts_with($relative, 'https://')) {   // provider-hosted recording (Exotel / Click2Call)
             $adapter = app(\App\Telephony\TelephonyManager::class)->adapter();
-            return $adapter instanceof \App\Telephony\ExotelAdapter ? $adapter->fetchRecording($relative) : null;
+            return $adapter instanceof \App\Telephony\PolledTelephony ? $adapter->fetchRecording($relative) : null;
         }
         if ($relative === '' || str_contains($relative, '..')) {
             return null;

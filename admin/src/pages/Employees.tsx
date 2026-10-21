@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, del, get, patch, post, put, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Modal, Notice, Page, Table, useAction, useAsync } from '../components/ui';
@@ -222,7 +223,8 @@ function PersonModal({ person, roles, teams, people, onClose, onDone }: { person
           <input value={f.employee_code} disabled={!isNew} onChange={(e) => setF({ ...f, employee_code: e.target.value })} placeholder={isNew ? suggest() : ''} />
         </Field>
         <Field label={console ? 'E-mail (admin console login) *' : 'E-mail (optional)'}><input type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-        <Field label="Phone"><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        <Field label="Phone (work number)" hint="Click2Call rings this number first."><input value={f.phone} onChange={(e) => setF({ ...f, phone: e.target.value })} /></Field>
+        {!isNew && <small className="muted">Who may use Click2Call and Smart31: <Link to="/calling/people">Calling configuration → People &amp; access</Link>.</small>}
         <Field label={isManager ? 'Manager of group' : 'Group'} hint={isManager ? 'They will see only this group’s data.' : undefined}>
           <select value={f.team} onChange={(e) => setF({ ...f, team: e.target.value })}>
             <option value="">— no group —</option>{teams.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.managers?.length ? ` (manager: ${t.managers.map((m: any) => m.name).join(', ')})` : ''}</option>)}

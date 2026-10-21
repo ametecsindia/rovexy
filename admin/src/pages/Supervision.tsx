@@ -111,11 +111,9 @@ function Viewer({ session, kind, onEnd }: { session: any; kind: string; onEnd: (
 
   useEffect(() => {
     if (!ready || !me) return;
-    const echo = realtime(me);
     let pc: RTCPeerConnection | null = null;
     let poll: ReturnType<typeof setInterval> | null = null;
     let after = 0;
-    const channel = `company.${me.company.id}.media.${session.uuid}`;
     const signal = (type: string, payload: unknown) => post(`/media-sessions/${session.uuid}/signal`, { type, payload });
     (async () => {
       const { ice_servers } = await get(`/media-sessions/${session.uuid}/ice`);
@@ -133,22 +131,22 @@ function Viewer({ session, kind, onEnd }: { session: any; kind: string; onEnd: (
         } else if (m.type === 'candidate') await pc.addIceCandidate(m.payload).catch(() => undefined);
         else if (m.type === 'bye') setStatus('Ended by the employee');
       };
-      if (echo) echo.private(channel).listen('.signal', handle);
-      else {
-        // No WebSocket (Reverb) running: fetch the phone's signals over HTTP every second.
-        let busy = false;
-        poll = setInterval(async () => {
-          if (busy) return; busy = true;
-          try {
-            const r = await get(`/media-sessions/${session.uuid}/signals${qs({ after })}`);
-            for (const m of r.signals) { after = m.id; await handle(m); }
-            if (['ended', 'expired', 'declined'].includes(r.state)) setStatus('Session ended');
-          } catch { /* transient — next tick retries */ } finally { busy = false; }
-        }, 1000);
-      }
+      // Always poll the signal mailbox (ordered, from the start): a WebSocket-only listener misses the phone's offer
+      // when it was sent before this page subscribed, and the video never opens.
+      let busy = false;
+      const tick = async () => {
+        if (busy) return; busy = true;
+        try {
+          const r = await get(`/media-sessions/${session.uuid}/signals${qs({ after })}`);
+          for (const m of r.signals) { after = m.id; await handle(m); }
+          if (['ended', 'expired', 'declined'].includes(r.state)) setStatus('Session ended');
+        } catch { /* transient — next tick retries */ } finally { busy = false; }
+      };
       setStatus('Waiting for the phone to start sharing…');
+      void tick();
+      poll = setInterval(tick, 500);
     })().catch((e) => setStatus(`Could not connect: ${e}`));
-    return () => { pc?.close(); if (poll) clearInterval(poll); echo?.leave(channel); };
+    return () => { pc?.close(); if (poll) clearInterval(poll); };
   }, [ready, me, session.uuid]);
 
   const screenshot = () => a.run(async () => {
@@ -377,8 +375,6 @@ function VoiceCall({ session, mic: firstMic, name, onEnd, onRedial, onLog }: { s
     let pc: RTCPeerConnection | null = null;
     let closed = false;
     let after = 0;
-    const echo = realtime(me);
-    const channel = `company.${me.company.id}.media.${uuid}`;
     const signal = (type: string, payload: unknown) => post(`/media-sessions/${uuid}/signal`, { type, payload });
     const ice = get(`/media-sessions/${uuid}/ice`).then((r) => r.ice_servers).catch(() => []);
     const handle = async (m: any) => {
@@ -409,17 +405,17 @@ function VoiceCall({ session, mic: firstMic, name, onEnd, onRedial, onLog }: { s
       } else if (m.type === 'candidate' && pc) await pc.addIceCandidate(m.payload).catch(() => undefined);
       else if (m.type === 'bye') setStatus('Ended by the employee');
     };
-    if (echo) echo.private(channel).listen('.signal', handle);
+    // Always read the ordered mailbox: a WebSocket-only listener misses an offer sent before it subscribed.
     let busy = false;
     const poll = setInterval(async () => {
       if (busy || closed) return; busy = true;
       try {
         const r = await get(`/media-sessions/${uuid}/signals${qs({ after })}`);
-        if (!echo) for (const m of r.signals) { after = m.id; await handle(m); }
+        for (const m of r.signals) { after = m.id; await handle(m); }
         if (r.state) setState(r.state);
       } catch { /* transient — next tick retries */ } finally { busy = false; }
-    }, 700);
-    return () => { closed = true; clearInterval(poll); pc?.close(); echo?.leave(channel); };
+    }, 500);
+    return () => { closed = true; clearInterval(poll); pc?.close(); };
   }, [me, uuid]);
 
   const retryMic = async () => {

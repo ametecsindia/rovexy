@@ -64,7 +64,7 @@ After any `.env` change: `php artisan config:cache`.
 ## 5. Every new release
 On your PC: commit → `git push`. On the server:
 ```bash
-sudo -u www-data bash /var/www/rovexy/deploy/deploy.sh
+sudo -u www-data bash /var/www/ametecs_apps/rovexy/deploy/deploy.sh
 ```
 It pulls, installs packages, builds the console, migrates, caches, health-checks and restarts the workers, with a maintenance page while it runs.
 

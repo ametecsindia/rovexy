@@ -28,6 +28,17 @@ class AmmpApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Crash note: written on the way down, sent to the server on the next start (AppViewModel.sendCrashNote), so a
+        // restart on an employee's phone can be diagnosed from the console instead of guessed.
+        val previous = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            runCatching {
+                java.io.File(filesDir, "last_crash.txt").writeText("${java.time.Instant.now()} ${BuildConfig.VERSION_NAME} " +
+                    "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} Android ${android.os.Build.VERSION.RELEASE} thread=${t.name}\n" +
+                    android.util.Log.getStackTraceString(e).take(12_000))
+            }
+            previous?.uncaughtException(t, e)
+        }
         graph = AppGraph(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CHANNEL_WORK, getString(R.string.notif_channel_work), NotificationManager.IMPORTANCE_LOW))

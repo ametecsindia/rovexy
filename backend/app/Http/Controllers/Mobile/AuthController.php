@@ -41,7 +41,14 @@ final class AuthController extends Controller
             'employee' => ['id' => $u->id, 'name' => $u->name, 'employee_code' => $u->employee_code],
             'device' => ['id' => $d->id, 'asset_tag' => $d->asset_tag, 'compliant' => $d->compliant, 'policy_state' => $d->policy_state,
                 'failing_mandatory' => data_get($d->compliance_detail, 'failing_mandatory', [])],
-            'calling_route' => config('ammp.telephony.route') === 'sim' ? 'sim' : 'server',
+            'calling_route' => \App\Services\CallService::routes($u)[0] ?? 'sim',   // default (older app builds use only this)
+            'calling_routes' => \App\Services\CallService::routes($u),             // options this employee may use; two = they choose
+            // Click2Call: company numbers this employee may call from (picked in the call dialog), and their default.
+            'click2call' => in_array('server', \App\Services\CallService::routes($u), true) && \App\Telephony\Click2CallSettings::active() ? [
+                'numbers' => array_values(array_filter(\App\Telephony\Click2CallSettings::numbersFor($u), fn ($n) => $n['available'])),
+                'default' => \App\Telephony\Click2CallAdapter::normalize($u->c2c_default_number) ?: null,
+                'smart31' => \App\Telephony\Click2CallSettings::smart31On() && \App\Telephony\Click2CallSettings::allows($u, 'smart31'),
+            ] : null,
             'sim_recorder' => config('ammp.telephony.sim_recorder') === 'app' ? 'app' : 'phone',
             'today' => (function () use ($u) {
                 $q = \App\Models\Call::query()->where('provider', '!=', 'manual')->where('user_id', $u->id)->where('initiated_at', '>=', now()->startOfDay());

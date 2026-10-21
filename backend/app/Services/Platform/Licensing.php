@@ -22,6 +22,8 @@ final class Licensing
 {
     public const FEATURES = [
         'calling' => 'Calling from the app with outcomes and follow-ups',
+        'click2call' => 'Click2Call: the provider rings the employee, then the customer from the company number',
+        'smart31' => 'Smart31: rotating company numbers so calls are not tagged as spam',
         'recording' => 'Automatic call recording',
         'customers' => 'Lead upload, portfolios and assignment',
         'payments' => 'Payment capture with slips',

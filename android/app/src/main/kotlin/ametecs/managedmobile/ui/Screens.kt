@@ -54,6 +54,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -118,6 +119,33 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
         }
     }
     pending?.let { MediaRequestDialog(it, onAccept = vm::acceptMedia, onDecline = vm::declineMedia) }
+    val routeAsk by vm.routeAsk.collectAsState()
+    val options by vm.routeOptions.collectAsState()
+    val numbers by vm.c2cNumbers.collectAsState()
+    val defaultNumber by vm.c2cDefault.collectAsState()
+    routeAsk?.let { (c, which) ->
+        // Only the options this employee is allowed (Calling configuration); Click2Call may also need a company number.
+        var pick by remember(c.id) { mutableStateOf(defaultNumber?.takeIf { it in numbers } ?: numbers.firstOrNull()) }
+        AlertDialog(onDismissRequest = vm::cancelRouteAsk, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Call, Ds.Green, 48) },
+            title = { Text("Call ${c.name}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if ("sim" in options) Text("SIM call: dials from this phone's SIM.", fontSize = 14.sp)
+                    if ("server" in options) Text("Click2Call: this phone rings first; answer it and the customer is connected from the company number. Recorded by the company.", fontSize = 14.sp)
+                    if (vm.c2cPicker()) {
+                        Text("Company number for Click2Call", fontSize = 13.sp, color = Ds.Muted)
+                        numbers.forEach { n ->
+                            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { pick = n }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = pick == n, onClick = { pick = n })
+                                Text("+91 $n", fontSize = 15.sp)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = { if ("server" in options) TextButton(onClick = { vm.placeCall(c, which, "server", pick) }) { Text("Click2Call") } },
+            dismissButton = { if ("sim" in options) TextButton(onClick = { vm.placeCall(c, which, "sim") }) { Text("SIM call") } else TextButton(onClick = vm::cancelRouteAsk) { Text("Cancel") } })
+    }
 }
 
 // ───────────────────────────── shared pieces ─────────────────────────────
@@ -567,7 +595,7 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
     val ctx = LocalContext.current
     val title = c.customer?.name ?: "Call"
     val headline = when (c.state) {
-        "dialing" -> "Calling…"; "on_sim_call" -> "On call"; "saving" -> "Saving the call…"
+        "dialing" -> "Calling…"; "on_sim_call" -> "On call"; "saving" -> "Saving the call…"; "ask_answered" -> "Did the customer answer?"
         "initiated", "agent_ringing" -> if (c.agentLeg == "pstn_callback") "Your work phone will ring — answer it" else "Connecting…"
         "agent_connected", "ringing" -> "Ringing the customer…"; "answered" -> "Connected · ${mmss(c.talk)}"
         "completed" -> "Call completed · ${mmss(c.talk)}"; "no_answer" -> "Not answered"
@@ -582,7 +610,7 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                     Text(title, style = MaterialTheme.typography.titleMedium, color = Ds.Ink)
                     Text(headline, color = if (c.state == "completed") Ds.Green else Ds.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
-                if (!ended) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Ds.Navy)
+                if (!ended && c.state != "ask_answered") CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Ds.Navy)
             }
             c.note?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp)) }
             if (c.recording.isNotBlank() && c.recording != "not_required") {
@@ -670,6 +698,10 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                     amount = amount.takeIf { captures != "none" }, mode = mode.takeIf { captures == "payment" }, ref = ref.takeIf { captures == "payment" },
                     paidOn = paidOn.toString().takeIf { captures == "payment" }, slip = slip.takeIf { captures == "payment" })
             }
+        }
+        else if (c.state == "ask_answered") Row {
+            TextButton(onClick = { vm.answered(false) }) { Text("No answer") }
+            TextButton(onClick = { vm.answered(true) }) { Text("Yes, answered") }
         }
         else if (c.route == "sim") TextButton(onClick = vm::onResumed) { Text("Finish call") }
     }, dismissButton = {

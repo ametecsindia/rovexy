@@ -74,7 +74,8 @@ object SimCalls {
     @Suppress("DEPRECATION")
     fun inCall(ctx: Context): Boolean =
         runCatching { (ctx.getSystemService(Context.TELECOM_SERVICE) as TelecomManager).isInCall }.getOrDefault(false) ||
-            runCatching { (ctx.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager).callState != android.telephony.TelephonyManager.CALL_STATE_IDLE }.getOrDefault(false)
+            runCatching { (ctx.getSystemService(Context.TELEPHONY_SERVICE) as android.telephony.TelephonyManager).callState != android.telephony.TelephonyManager.CALL_STATE_IDLE }.getOrDefault(false) ||
+            runCatching { (ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).mode == android.media.AudioManager.MODE_IN_CALL }.getOrDefault(false)
 
     /** Permission names the employee still has to allow, in plain words. */
     fun missingLabels(ctx: Context) = missing(ctx).map {

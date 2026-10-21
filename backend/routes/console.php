@@ -23,9 +23,9 @@ Schedule::call(function () {
 })->everyMinute()->name('media:expire');
 
 Schedule::call(function () {
-    // Exotel results/recordings for calls still open (covers servers that Exotel's callback cannot reach, e.g. a LAN PC).
+    // Click-to-call results/recordings for calls still open (covers servers the provider's callback cannot reach, e.g. a LAN PC).
     $ctx = app(CurrentCompany::class);
-    $ctx->withoutScope(fn () => \App\Models\Call::query()->where('provider', 'exotel')->where('initiated_at', '>', now()->subHours(3))
+    $ctx->withoutScope(fn () => \App\Models\Call::query()->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
         ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))->get())
         ->each(fn ($call) => $ctx->run(Company::query()->findOrFail($call->company_id), fn () => app(\App\Services\CallService::class)->syncProvider($call)));
 })->everyMinute()->name('exotel:sync')->withoutOverlapping();

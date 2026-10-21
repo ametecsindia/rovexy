@@ -367,6 +367,261 @@ final class AcceptanceTest extends TestCase
         $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk();
     }
 
+    public function test_click2call_employee_chooses_route_result_and_recording(): void
+    {
+        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
+            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
+            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => 'wh', 'timeout' => 15, 'timezone' => 'Asia/Kolkata']]);
+        app(TelephonyManager::class)->swap(new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call')));
+        $cdr = ['A_DIAL_STATUS' => 'ANSWERED'];
+        $url = null;
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ1']),
+            'obd.gateway.test/*' => function ($req) use (&$cdr, &$url) {
+                return $req->header('Secret-Key')[0] === 'gs'
+                    ? \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => $url, 'duration' => 82]])
+                    : \Illuminate\Support\Facades\Http::response(['status' => 401], 401);
+            },
+            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000)),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim', 'server'])->assertJsonPath('calling_route', 'sim');
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+
+        // Employee picks Click2Call: rings the work number, then the customer, from the VMN; ref_id = our call uuid.
+        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()
+            ->assertJsonPath('route', 'server')->assertJsonPath('callback_from', '8047000000')->json('call_id');
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['did'] === '8047000000'
+            && $req['a_party_no'] === '9811111111' && $req['b_party_no'] === '9876543210' && $req['ref_id'] === $uuid && $req['record'] === 1);
+        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'ringing');   // employee answered, customer ringing
+
+        $cdr = ['A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED', 'B_PARTY_CONNECTED_TIME' => '21102026103015',
+            'B_PARTY_END_TIME' => '21102026103130', 'EVENT_TYPE' => 'call_end', 'DURATION' => 82];
+        $url = 'https://rec.gateway.test/r/TZ1.wav';
+        $this->postJson('/api/telephony/v1/click2call', ['ref_id' => $uuid])->assertStatus(401);   // secret required when set
+        \Illuminate\Support\Facades\Cache::flush();   // per-call sync throttle
+        // With the secret, the provider's posted end-of-call result is applied (kit); the gateway read gives the same answer.
+        $this->postJson('/api/telephony/v1/click2call?secret=wh', ['ref_id' => $uuid] + $cdr + ['recording_url' => $url])->assertJsonPath('status', 'success');
+        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'completed')->assertJsonPath('talk_seconds', 75)
+            ->assertJsonPath('ring_seconds', 7)->assertJsonPath('recording_status', 'available')->assertJsonPath('callback_from', null);
+        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
+        $this->assertSame('2026-10-21 05:01:30', $call->ended_at->utc()->format('Y-m-d H:i:s'));   // 10:31:30 IST
+        $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk();
+
+        // Next call, employee picks SIM: the phone dials itself.
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'sim'])->assertCreated()
+            ->assertJsonPath('route', 'sim')->assertJsonPath('dial', '+919876543210');
+
+        // A route the company does not offer is refused.
+        config(['ammp.telephony.routes' => ['sim']]);
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'route_not_allowed');
+    }
+
+    public function test_app_crash_note_lands_in_audit_log(): void
+    {
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $m->work('POST', '/api/mobile/v1/diagnostics/crash', ['report' => "1.0.3 OPPO CPH2359\njava.lang.SecurityException: x"])->assertOk();
+        $this->assertStringContainsString('SecurityException', $this->admin('alpha')->getJson('/api/admin/audit?action=app.crash')->json('data.0.meta'));
+    }
+
+    public function test_click2call_set_up_in_console_per_company_and_per_employee(): void
+    {
+        config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch']);
+        app(TelephonyManager::class)->swap(null);   // no test double: the company's Click2Call setting must pick the adapter
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.com/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ9']),
+            'obd.ametecsindia.com/*' => fn ($req) => $req->header('Secret-Key')[0] === 'co-secret'
+                ? \Illuminate\Support\Facades\Http::response(['status' => 404], 404) : \Illuminate\Support\Facades\Http::response(['status' => 401], 401),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim']);
+        $adm = $this->admin('alpha');
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '080 4700 0001'])->assertStatus(422);   // secret needed first time
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '080 4700 0001', 'gateway_secret' => 'co-secret'])
+            ->assertOk()->assertJsonPath('ok', true);
+        $adm->getJson('/api/admin/calling/click2call')->assertJsonPath('mode', 'choice')->assertJsonPath('did', '08047000001')
+            ->assertJsonPath('secret_hint', '••••cret')->assertJsonMissingPath('secret');
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim', 'server']);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()
+            ->assertJsonPath('callback_from', '08047000001');
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['did'] === '08047000001');
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+
+        // Access: only selected people/groups. EMP1 is in no grant → SIM only, Click2Call refused.
+        $emp = $this->users['alpha']['emp'];
+        $adm->putJson('/api/admin/calling/access/click2call', ['mode' => 'selected'])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim']);
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422);
+        // Grant his group → allowed again; remove the grant → refused.
+        $team = app(CurrentCompany::class)->run($this->a, function () use ($emp) {
+            $t = \App\Models\Team::query()->create(['code' => 'G1', 'name' => 'Gulab Group']);
+            $emp->teams()->attach($t->id, ['company_id' => $this->a->id, 'membership' => 'member']);
+            return $t;
+        });
+        $gid = collect($adm->postJson('/api/admin/calling/access/click2call', ['team_ids' => [$team->id]])->assertOk()->json('click2call.grants'))->firstWhere('type', 'group')['id'];
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim', 'server']);
+
+        // Smart31: two numbers for his group, one for nobody's group → round-robin over his two.
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '+91 1600 111 001', 'team_ids' => [$team->id]])->assertOk();
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '1600111002', 'team_ids' => [$team->id]])->assertOk();
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '1600111003', 'team_ids' => [999999]])->assertOk();   // unknown group dropped = every group
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '1600111001'])->assertStatus(422);   // duplicate
+        $adm->putJson('/api/admin/calling/smart31', ['enabled' => true])->assertOk()->assertJsonCount(3, 'numbers');
+        $used = [];
+        foreach (range(1, 3) as $i) {
+            $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated();
+            $used[] = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->latest('id')->value('caller_number'));
+            app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+        }
+        $this->assertSame(['1600111001', '1600111002', '1600111003'], $used);   // each number once, in turn
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['did'] === '1600111002');
+
+        // Smart31 for selected people only, and he isn't one → company VMN.
+        $adm->putJson('/api/admin/calling/access/smart31', ['mode' => 'selected'])->assertOk();
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->assertJsonPath('callback_from', '08047000001');
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+
+        $adm->deleteJson("/api/admin/calling/access/click2call/{$gid}")->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim']);
+
+        // Plan (LC): a licence whose plan lacks Smart31 / Click2Call switches them off whatever the settings say.
+        app(CurrentCompany::class)->run($this->a, fn () => \App\Models\Platform\Licence::query()->create(['key' => \App\Services\Platform\LicenceIssuer::newKey(),
+            'company_id' => $this->a->id, 'holder_name' => 'Alpha', 'kind' => 'subscription', 'max_users' => 50, 'features' => ['calling', 'recording', 'customers'],
+            'status' => 'active', 'starts_at' => now(), 'expires_at' => now()->addYear(), 'grace_days' => 7]));
+        $adm->putJson('/api/admin/calling/access/click2call', ['mode' => 'everyone'])->assertOk();
+        $adm->getJson('/api/admin/calling/access')->assertJsonPath('smart31.in_plan', false)->assertJsonPath('click2call.in_plan', false);
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '1600111009'])->assertForbidden();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim']);
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '08047000001'])->assertForbidden();
+
+        // Wrong secret is reported; switching off is always allowed.
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'off'])->assertOk();
+    }
+
+    public function test_click2call_kit_vouchers_numbers_limits_webhook_and_sim_access(): void
+    {
+        config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch',
+            'ammp.telephony.click2call.webhook_secret' => 'wh-secret',
+            'ammp.telephony.click2call.max_users' => 0]);
+        app(TelephonyManager::class)->swap(null);
+        $today = now()->toDateString();
+        $voucherAnswer = ['status' => 200, 'data' => ['click2call_did' => '918047000101,8047000102', 'obd_did' => '8047000103', 'tc_verified' => '8047000101',
+            'expiry' => now()->addMonth()->toDateString(), 'smart_groups' => [
+                ['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'type' => '1600', 'group_name' => 'S31-A'],
+                ['vmn' => '1600222009', 'usage_date' => '2020-01-01', 'c2c' => 1],   // not today: ignored
+            ]]];
+        $started = [];
+        $cdr = null;
+        \Illuminate\Support\Facades\Http::fake([
+            'lc.ametecsindia.com/api/did_voucher/GOOD1/CRM77' => fn ($req) => $req->header('Secret-Key')[0] === 'lic-secret' ? \Illuminate\Support\Facades\Http::response($voucherAnswer) : \Illuminate\Support\Facades\Http::response([], 401),
+            'lc.ametecsindia.com/api/did_voucher/BAD12/*' => \Illuminate\Support\Facades\Http::response(['status' => 404, 'message' => 'Voucher already used.']),
+            'lc.ametecsindia.com/api/did_voucher_used/*' => \Illuminate\Support\Facades\Http::response(['status' => 200]),
+            'sip.telozar.com/*' => function ($req) use (&$started) {
+                $started[] = $req->data();
+                return $req['b_party_no'] === '9876500000' ? \Illuminate\Support\Facades\Http::response(['error' => 'down'], 500) : \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ' . count($started)]);
+            },
+            'obd.ametecsindia.com/*' => fn () => $cdr ? \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => $cdr]]) : \Illuminate\Support\Facades\Http::response(['status' => 404]),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $adm = $this->admin('alpha');
+        $emp = $this->users['alpha']['emp'];
+        $team = app(CurrentCompany::class)->run($this->a, function () use ($emp) {
+            $t = \App\Models\Team::query()->create(['code' => 'G9', 'name' => 'Field team']);
+            $emp->teams()->attach($t->id, ['company_id' => $this->a->id, 'membership' => 'member']);
+            return $t;
+        });
+
+        // Click2Call on, no company number typed: CRM id set for vouchers.
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'gateway_secret' => 'gw', 'crm_id' => 'CRM77', 'daily_limit' => 2])->assertStatus(422);   // needs a number or vouchers
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '8047000999', 'gateway_secret' => 'gw', 'crm_id' => 'CRM77', 'daily_limit' => 2])->assertOk();
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertStatus(422)->assertJsonPath('message', 'Enter the CRM secret key first (Calling configuration → Calling options → Click2Call connection).');
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '8047000999', 'lc_secret' => 'lic-secret'])->assertOk();   // secret typed in the console, not .env
+        $adm->getJson('/api/admin/calling/click2call')->assertJsonPath('lc_secret_set', true)->assertJsonMissing(['lic-secret']);
+
+        // Add Voucher: bad code refused with the server's message; good code → numbers + today's Smart31 number.
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'BAD12'])->assertStatus(422)->assertJsonPath('message', 'Voucher already used.');
+        $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
+        $this->assertSame(['8047000101', '8047000102', '8047000103'], collect($res['numbers'])->pluck('virtual_number')->all());
+        $this->assertSame([true, true, false], collect($res['numbers'])->pluck('click2call')->all());
+        $this->assertSame(1, $res['smart31_from_voucher']);
+        // Numbers start with no group → the employee has none (company number no longer used once vouchers exist).
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.numbers', []);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'c2c_no_number');
+        $ids = collect($res['numbers'])->pluck('id', 'virtual_number');
+        $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => [$ids['8047000101'], $ids['8047000102']], 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.numbers.*.number', ['8047000101', '8047000102']);
+
+        // Agent number override + default number; picking a number not his is refused.
+        $adm->patchJson("/api/admin/calling/users/{$emp->id}", ['click_agent_number' => '+91 99999 11111', 'c2c_default_number' => '8047000102'])->assertOk();
+        $adm->patchJson("/api/admin/calling/users/{$emp->id}", ['c2c_default_number' => '8047000103'])->assertStatus(422);
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000103'])->assertStatus(422)->assertJsonPath('error', 'c2c_number_not_yours');
+        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
+        $this->assertSame(['8047000102', '9999911111', '9876543210', $uuid], [end($started)['did'], end($started)['a_party_no'], end($started)['b_party_no'], end($started)['ref_id']]);
+
+        // Webhook with the secret: missing → 401; correct → the posted result is applied as final.
+        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid])->assertStatus(401);
+        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid, 'A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED',
+            'B_PARTY_CONNECTED_TIME' => '21102026103015', 'B_PARTY_END_TIME' => '21102026103045'], ['Secret-Key' => 'wh-secret'])
+            ->assertOk()->assertJsonPath('call_state', 'completed');
+        $this->assertSame(30, app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->value('talk_seconds')));
+        $this->postJson('/api/click2call/webhook', ['ref_id' => 'unknown'], ['Secret-Key' => 'wh-secret'])->assertOk()->assertJsonPath('status', 'ignored');
+
+        // Daily limit per customer number (2): this was attempt 1; attempt 2 ok; attempt 3 refused.
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000101'])->assertCreated();
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'retry_limit');
+        $this->assertSame(1, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('audit_events')->where('action', 'call.blocked')->count()));
+
+        // SIM calling: switched off → Click2Call only; SIM for selected people only (none) → same; Click2Call off too → no option.
+        $adm->putJson('/api/admin/calling/sim', ['enabled' => false])->assertOk()->assertJsonPath('sim.on', false);
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['server']);
+        $adm->putJson('/api/admin/calling/sim', ['enabled' => true])->assertOk();
+        $adm->putJson('/api/admin/calling/access/sim', ['mode' => 'selected'])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['server']);
+        $adm->postJson('/api/admin/calling/access/sim', ['team_ids' => [$team->id]])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim', 'server']);
+        $adm->putJson('/api/admin/calling/access/click2call', ['mode' => 'selected'])->assertOk();
+        $adm->putJson('/api/admin/calling/access/sim', ['mode' => 'selected'])->assertOk();
+        $gid = collect($adm->getJson('/api/admin/calling/access')->json('sim.grants'))->first()['id'];
+        $adm->deleteJson("/api/admin/calling/access/sim/{$gid}")->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', [])->assertJsonPath('click2call', null);
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary'])->assertStatus(422)->assertJsonPath('error', 'no_calling_option');
+
+        // Click2Call users page: switch him on personally; licensed limit 1 blocks a second person.
+        config(['ammp.telephony.click2call.max_users' => 1]);
+        $adm->patchJson("/api/admin/calling/users/{$emp->id}", ['click2call' => true])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['server']);
+        $adm->patchJson('/api/admin/calling/users/' . $this->users['alpha']['emp2']->id, ['click2call' => true])->assertStatus(422);
+        $adm->getJson('/api/admin/calling/users')->assertJsonPath('limit.in_use', 1)->assertJsonPath('users.0.access.click2call.via', 'person');
+
+        // A second voucher replaces the numbers (history kept).
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk();
+        $this->assertSame(3, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->count()));
+    }
+
+    public function test_click2call_leg_results(): void
+    {
+        $s = fn (array $cdr) => [\App\Telephony\Click2CallAdapter::legState($cdr['A'] ?? null), \App\Telephony\Click2CallAdapter::legState($cdr['B'] ?? null)];
+        $this->assertSame(['answered', 'busy'], $s(['A' => 'ANSWERED', 'B' => 'BUSY']));
+        $this->assertSame(['no_answer', null], $s(['A' => 'NO ANSWER']));
+        $this->assertSame([null, 'failed'], $s(['B' => 'CHANUNAVAIL']));
+        $this->assertSame([null, 'no_answer'], $s(['B' => 'not_answered']));
+    }
+
     public function test_11_and_12_duplicate_events_and_recording_failure_visible(): void
     {
         $this->appOnlyMandatory();

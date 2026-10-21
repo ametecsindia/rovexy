@@ -16,8 +16,8 @@ android {
         applicationId = "in.ametecs.managedmobile"
         minSdk = 28          // Android 9+: required for reliable Keystore EC keys and managed-device APIs used here
         targetSdk = 36
-        versionCode = 2        // +1 on every Play upload
-        versionName = "1.0.1"
+        versionCode = 4        // +1 on every Play upload
+        versionName = "1.0.3"
         // Default cloud server; managed configuration from Android Management overrides it, on-prem users type theirs.
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://rovexy.app\"")
         buildConfigField("String", "PRODUCT_NAME", "\"ROVEXY\"")

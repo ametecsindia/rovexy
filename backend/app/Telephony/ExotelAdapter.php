@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\URL;
  * call-details API (polling) — the status callback only triggers an earlier read, its body is never trusted.
  * https://developer.exotel.com/api/make-a-call-api · https://developer.exotel.com/api/call-details
  */
-final class ExotelAdapter implements TelephonyAdapter
+final class ExotelAdapter implements PolledTelephony
 {
     public function __construct(private readonly array $cfg)
     {
@@ -115,6 +115,11 @@ final class ExotelAdapter implements TelephonyAdapter
         }
         $r = $this->http()->timeout(60)->get($url);
         return $r->successful() ? $r->body() : null;
+    }
+
+    public function callbackNumber(): ?string
+    {
+        return $this->cfg['caller_id'] ?: null;
     }
 
     public function hangup(Call $call, string $cause): void

@@ -1,0 +1,892 @@
+diff --git a/admin/src/pages/Calls.tsx b/admin/src/pages/Calls.tsx
+index 52eb9db..d4dbfa4 100644
+--- a/admin/src/pages/Calls.tsx
++++ b/admin/src/pages/Calls.tsx
+@@ -123,6 +123,7 @@ export function CallingConfigPage() {
+           <>
+             {health.data.telephony.route === 'sim' && <Notice tone="info"><strong>SIM calling is active.</strong> Phones dial from their own SIM; talk time comes from the phone's call log and the recording is the file made by the phone's own call recorder. Ask employees to switch on <em>automatic call recording</em> in the phone's dialer settings (Xiaomi/Redmi: Phone → Settings → Call recording; Samsung: Phone → ⋮ → Settings → Record calls; OPPO/Realme/OnePlus: Phone → Settings → Call recording). Google Pixel and some others keep recordings private, so they cannot be uploaded. Set <span className="code">CALLING_ROUTE=server</span> to use FreeSWITCH instead.</Notice>}
+             {health.data.telephony.route !== 'sim' && health.data.telephony.driver === 'exotel' && <Notice tone="info"><strong>Exotel click-to-call is active.</strong> When an employee taps Call, Exotel rings the employee's <em>work phone number</em> (set it under Employees &amp; teams), then the customer, who sees your ExoPhone. Both sides are recorded on Exotel and copied here automatically after the call.</Notice>}
++            {health.data.telephony.driver === 'click2call' && <Notice tone="info"><strong>Click2Call is active{health.data.telephony.routes?.includes('sim') ? ' (employees choose SIM call or Click2Call on each call)' : ''}.</strong> Click2Call rings the employee's <em>work phone number</em> (set it under Employees &amp; teams) first, then the customer, who sees your company VMN. The provider records the call and the recording is copied here automatically.</Notice>}
+             <p>Driver <strong>{health.data.telephony.driver}</strong> · <Badge value={health.data.telephony.ok} label={health.data.telephony.ok ? 'reachable' : 'unreachable'} /> <span className="muted">{health.data.telephony.detail}</span></p>
+             {health.data.telephony.route !== 'sim' && health.data.telephony.simulated && <Notice tone="warn">SIMULATOR — development only. No real calls are placed and no audio is recorded.</Notice>}
+           </>
+diff --git a/admin/src/pages/Supervision.tsx b/admin/src/pages/Supervision.tsx
+index 6b4a3aa..8d7c4e5 100644
+--- a/admin/src/pages/Supervision.tsx
++++ b/admin/src/pages/Supervision.tsx
+@@ -111,11 +111,9 @@ function Viewer({ session, kind, onEnd }: { session: any; kind: string; onEnd: (
+ 
+   useEffect(() => {
+     if (!ready || !me) return;
+-    const echo = realtime(me);
+     let pc: RTCPeerConnection | null = null;
+     let poll: ReturnType<typeof setInterval> | null = null;
+     let after = 0;
+-    const channel = `company.${me.company.id}.media.${session.uuid}`;
+     const signal = (type: string, payload: unknown) => post(`/media-sessions/${session.uuid}/signal`, { type, payload });
+     (async () => {
+       const { ice_servers } = await get(`/media-sessions/${session.uuid}/ice`);
+@@ -133,22 +131,22 @@ function Viewer({ session, kind, onEnd }: { session: any; kind: string; onEnd: (
+         } else if (m.type === 'candidate') await pc.addIceCandidate(m.payload).catch(() => undefined);
+         else if (m.type === 'bye') setStatus('Ended by the employee');
+       };
+-      if (echo) echo.private(channel).listen('.signal', handle);
+-      else {
+-        // No WebSocket (Reverb) running: fetch the phone's signals over HTTP every second.
+-        let busy = false;
+-        poll = setInterval(async () => {
+-          if (busy) return; busy = true;
+-          try {
+-            const r = await get(`/media-sessions/${session.uuid}/signals${qs({ after })}`);
+-            for (const m of r.signals) { after = m.id; await handle(m); }
+-            if (['ended', 'expired', 'declined'].includes(r.state)) setStatus('Session ended');
+-          } catch { /* transient — next tick retries */ } finally { busy = false; }
+-        }, 1000);
+-      }
++      // Always poll the signal mailbox (ordered, from the start): a WebSocket-only listener misses the phone's offer
++      // when it was sent before this page subscribed, and the video never opens.
++      let busy = false;
++      const tick = async () => {
++        if (busy) return; busy = true;
++        try {
++          const r = await get(`/media-sessions/${session.uuid}/signals${qs({ after })}`);
++          for (const m of r.signals) { after = m.id; await handle(m); }
++          if (['ended', 'expired', 'declined'].includes(r.state)) setStatus('Session ended');
++        } catch { /* transient — next tick retries */ } finally { busy = false; }
++      };
+       setStatus('Waiting for the phone to start sharing…');
++      void tick();
++      poll = setInterval(tick, 500);
+     })().catch((e) => setStatus(`Could not connect: ${e}`));
+-    return () => { pc?.close(); if (poll) clearInterval(poll); echo?.leave(channel); };
++    return () => { pc?.close(); if (poll) clearInterval(poll); };
+   }, [ready, me, session.uuid]);
+ 
+   const screenshot = () => a.run(async () => {
+@@ -377,8 +375,6 @@ function VoiceCall({ session, mic: firstMic, name, onEnd, onRedial, onLog }: { s
+     let pc: RTCPeerConnection | null = null;
+     let closed = false;
+     let after = 0;
+-    const echo = realtime(me);
+-    const channel = `company.${me.company.id}.media.${uuid}`;
+     const signal = (type: string, payload: unknown) => post(`/media-sessions/${uuid}/signal`, { type, payload });
+     const ice = get(`/media-sessions/${uuid}/ice`).then((r) => r.ice_servers).catch(() => []);
+     const handle = async (m: any) => {
+@@ -409,17 +405,17 @@ function VoiceCall({ session, mic: firstMic, name, onEnd, onRedial, onLog }: { s
+       } else if (m.type === 'candidate' && pc) await pc.addIceCandidate(m.payload).catch(() => undefined);
+       else if (m.type === 'bye') setStatus('Ended by the employee');
+     };
+-    if (echo) echo.private(channel).listen('.signal', handle);
++    // Always read the ordered mailbox: a WebSocket-only listener misses an offer sent before it subscribed.
+     let busy = false;
+     const poll = setInterval(async () => {
+       if (busy || closed) return; busy = true;
+       try {
+         const r = await get(`/media-sessions/${uuid}/signals${qs({ after })}`);
+-        if (!echo) for (const m of r.signals) { after = m.id; await handle(m); }
++        for (const m of r.signals) { after = m.id; await handle(m); }
+         if (r.state) setState(r.state);
+       } catch { /* transient — next tick retries */ } finally { busy = false; }
+-    }, 700);
+-    return () => { closed = true; clearInterval(poll); pc?.close(); echo?.leave(channel); };
++    }, 500);
++    return () => { closed = true; clearInterval(poll); pc?.close(); };
+   }, [me, uuid]);
+ 
+   const retryMic = async () => {
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 0004a9c..ba9bed7 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -16,8 +16,8 @@ android {
+         applicationId = "in.ametecs.managedmobile"
+         minSdk = 28          // Android 9+: required for reliable Keystore EC keys and managed-device APIs used here
+         targetSdk = 36
+-        versionCode = 3        // +1 on every Play upload
+-        versionName = "1.0.2"
++        versionCode = 4        // +1 on every Play upload
++        versionName = "1.0.3"
+         // Default cloud server; managed configuration from Android Management overrides it, on-prem users type theirs.
+         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://rovexy.app\"")
+         buildConfigField("String", "PRODUCT_NAME", "\"ROVEXY\"")
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/AmmpApp.kt b/android/app/src/main/kotlin/ametecs/managedmobile/AmmpApp.kt
+index 76d8269..703fc89 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/AmmpApp.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/AmmpApp.kt
+@@ -28,6 +28,17 @@ class AmmpApp : Application() {
+ 
+     override fun onCreate() {
+         super.onCreate()
++        // Crash note: written on the way down, sent to the server on the next start (AppViewModel.sendCrashNote), so a
++        // restart on an employee's phone can be diagnosed from the console instead of guessed.
++        val previous = Thread.getDefaultUncaughtExceptionHandler()
++        Thread.setDefaultUncaughtExceptionHandler { t, e ->
++            runCatching {
++                java.io.File(filesDir, "last_crash.txt").writeText("${java.time.Instant.now()} ${BuildConfig.VERSION_NAME} " +
++                    "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} Android ${android.os.Build.VERSION.RELEASE} thread=${t.name}\n" +
++                    android.util.Log.getStackTraceString(e).take(12_000))
++            }
++            previous?.uncaughtException(t, e)
++        }
+         graph = AppGraph(this)
+         val nm = getSystemService(NotificationManager::class.java)
+         nm.createNotificationChannel(NotificationChannel(CHANNEL_WORK, getString(R.string.notif_channel_work), NotificationManager.IMPORTANCE_LOW))
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
+index dd58985..7b052e0 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
+@@ -160,14 +160,19 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
+         accepted = null
+     }
+ 
+-    fun startScreen(projection: Intent) = ScreenShareService.start(context, projection)
+-    fun startCamera() = CameraSessionService.start(context)
+-    fun startVoice() = VoiceCallService.start(context)
++    // Android can refuse to start a foreground service (ForegroundServiceStartNotAllowedException): end, don't crash.
++    fun startScreen(projection: Intent) = startOrFail { ScreenShareService.start(context, projection) }
++    fun startCamera() = startOrFail { CameraSessionService.start(context) }
++    fun startVoice() = startOrFail { VoiceCallService.start(context) }
++    private fun startOrFail(start: () -> Unit) {
++        runCatching(start).onFailure { lastError.value = "Android did not allow sharing to start. Open ROVEXY and try again."; onForegroundFailed() }
++    }
+ 
+     /** Called by the visible foreground service once it is in the foreground. */
+     fun onForegroundReady(kind: String, projection: Intent?) {
+         val r = accepted ?: return
+         scope.launch {
++            var started: WebRtcSession? = null
+             try {
+                 val ice = session.work("GET", "/api/mobile/v1/media/${r.id}/ice").obj()["ice_servers"]!!.jsonArray.map { s ->
+                     val o = s.jsonObject
+@@ -179,16 +184,25 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
+                 val s = WebRtcSession(context, r.id, kind, ice,
+                     sendSignal = { type, payload -> outbound.trySend(r.id to buildJsonObject { put("type", type); put("payload", toJson(payload)) }) },
+                     onEnded = { reason -> scope.launch { finish(r.id, reason) } })
++                started = s
+                 session.work("POST", "/api/mobile/v1/media/${r.id}/start")
+-                s.start(projection, 1280, 720, 5)
++                // 5 fps made Live View look frozen; screens change less than camera, so 10 vs 15 fps.
++                s.start(projection, 960, 540, if (kind == "screen") 10 else 15)
+                 _active.value = s
+                 pollSignals(s)
+-            } catch (e: Exception) {
+-                finish(r.id, "connection_failed")
++            } catch (e: Throwable) {
++                // A half-started session still holds the camera/projection: end() frees it and then calls finish().
++                started?.end("connection_failed") ?: finish(r.id, "connection_failed")
+             }
+         }
+     }
+ 
++    /** The visible foreground service could not start (Android refused it): end the session instead of crashing. */
++    fun onForegroundFailed() {
++        val r = accepted ?: return
++        scope.launch { finish(r.id, "connection_failed") }
++    }
++
+     /** Fallback when WebSockets are not running: fetch the supervisor's answer/candidates and the session state over HTTP. */
+     private fun pollSignals(s: WebRtcSession) = scope.launch {
+         var after = 0L
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaServices.kt b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaServices.kt
+index b2c3336..0b1514c 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaServices.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaServices.kt
+@@ -34,8 +34,16 @@ abstract class VisibleMediaService(private val kind: String, private val fgsType
+             .setOngoing(true)
+             .addAction(Notification.Action.Builder(null, if (kind == "voice") "Hang up" else "Stop", stop).build())
+             .build()
+-        // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+).
+-        ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
++        // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+). Android can refuse (app in the
++        // background, permission revoked, OEM limits): that threw and restarted the app — now the session just ends.
++        try {
++            ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
++        } catch (e: Exception) {
++            g.media.lastError.value = "Android did not allow sharing to start. Open ROVEXY and try again."
++            g.media.onForegroundFailed()
++            stopSelf()
++            return START_NOT_STICKY
++        }
+         val projection: Intent? = intent?.let { IntentCompat.getParcelableExtra(it, EXTRA_PROJECTION, Intent::class.java) }
+         g.media.onForegroundReady(kind, projection)
+         return START_NOT_STICKY
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt b/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
+index da0d44d..bbaf098 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
+@@ -35,6 +35,10 @@ class WebRtcSession(
+ ) {
+     private val egl = EglBase.create()
+     private lateinit var factory: PeerConnectionFactory
++    /** Teardown and remote signals run here, never on WebRTC's own callback threads (closing a PeerConnection from its
++     *  observer, or disposing the capturer from the MediaProjection callback, deadlocks/aborts and the app restarts). */
++    private val worker = java.util.concurrent.Executors.newSingleThreadExecutor()
++    private var videoSource: org.webrtc.VideoSource? = null
+     private var pc: PeerConnection? = null
+     private var capturer: VideoCapturer? = null
+     private var helper: SurfaceTextureHelper? = null
+@@ -46,7 +50,7 @@ class WebRtcSession(
+     val eglContext: EglBase.Context get() = egl.eglBaseContext
+ 
+     fun start(projectionData: Intent?, width: Int, height: Int, fps: Int) {
+-        PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(context).createInitializationOptions())
++        initOnce(context)
+         factory = PeerConnectionFactory.builder()
+             .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
+             .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+@@ -74,9 +78,15 @@ class WebRtcSession(
+             en.createCapturer(name, null)
+         }
+         helper = SurfaceTextureHelper.create("ammp-capture", egl.eglBaseContext)
+-        val source = factory.createVideoSource(kind == "screen")
++        val source = factory.createVideoSource(kind == "screen").also { videoSource = it }
+         capturer!!.initialize(helper, context, source.capturerObserver)
+-        capturer!!.startCapture(width, height, fps)
++        if (kind == "screen") {
++            // Capture at the screen's own shape (portrait), long side ≤ 1280: a fixed 1280×720 box squeezed a portrait
++            // screen into a small, blurry picture.
++            val m = context.resources.displayMetrics
++            val scale = minOf(1f, 1280f / maxOf(m.widthPixels, m.heightPixels))
++            capturer!!.startCapture((m.widthPixels * scale).toInt() / 2 * 2, (m.heightPixels * scale).toInt() / 2 * 2, fps)
++        } else capturer!!.startCapture(width, height, fps)
+         localTrack = factory.createVideoTrack("ammp-$kind", source)
+     }
+ 
+@@ -85,7 +95,7 @@ class WebRtcSession(
+         pc = factory.createPeerConnection(cfg, object : PeerConnection.Observer {
+             override fun onIceCandidate(c: IceCandidate) = sendSignal("candidate", mapOf("candidate" to c.sdp, "sdpMid" to c.sdpMid, "sdpMLineIndex" to c.sdpMLineIndex))
+             override fun onConnectionChange(state: PeerConnection.PeerConnectionState) {
+-                if (state == PeerConnection.PeerConnectionState.FAILED) end("connection_failed")
++                if (state == PeerConnection.PeerConnectionState.FAILED) end("connection_failed")   // end() hops to the worker
+             }
+             override fun onSignalingChange(p0: PeerConnection.SignalingState?) {}
+             override fun onIceConnectionChange(p0: PeerConnection.IceConnectionState?) {}
+@@ -108,28 +118,53 @@ class WebRtcSession(
+         }, MediaConstraints())
+     }
+ 
+-    fun onRemoteSignal(type: String, payload: Map<String, Any?>) {
+-        when (type) {
+-            "answer" -> pc?.setRemoteDescription(SimpleSdp(), SessionDescription(SessionDescription.Type.ANSWER, payload["sdp"] as String))
+-            "candidate" -> pc?.addIceCandidate(IceCandidate(payload["sdpMid"] as String?, (payload["sdpMLineIndex"] as Number).toInt(), payload["candidate"] as String))
+-            "bye" -> end("supervisor_stopped")
++    @Volatile private var answered = false
++    fun onRemoteSignal(type: String, payload: Map<String, Any?>) = post {
++        if (ended) return@post
++        runCatching {   // a malformed signal must never take the app down
++            when (type) {
++                // The answer can arrive twice (WebSocket + mailbox poll); applying it again fails, so apply it once.
++                "answer" -> if (!answered) { answered = true; pc?.setRemoteDescription(SimpleSdp(), SessionDescription(SessionDescription.Type.ANSWER, payload["sdp"].toString())) }
++                "candidate" -> pc?.addIceCandidate(IceCandidate(payload["sdpMid"]?.toString(), payload["sdpMLineIndex"].toString().toDouble().toInt(), payload["candidate"].toString()))
++                "bye" -> end("supervisor_stopped")
++            }
+         }
+     }
+ 
+     fun attachPreview(sink: VideoSink) { localTrack?.addSink(sink) }
+ 
++    /** Runs on the worker; after the session ended the worker is shut down and late signals are simply dropped. */
++    private fun post(block: () -> Unit) { runCatching { worker.execute(block) } }
++
+     @Volatile private var ended = false
+     fun end(reason: String) {
+         if (ended) return
+         ended = true
+-        runCatching { capturer?.stopCapture() }
+-        capturer?.dispose()
+-        pc?.close()
+-        audioSource?.dispose()
+-        if (kind == "voice") { audio.isSpeakerphoneOn = false; audio.mode = android.media.AudioManager.MODE_NORMAL }
+-        helper?.dispose()
+-        egl.release()
+-        onEnded(reason)
++        post {
++            // Every native object is freed: leaked factories/sources piled up session after session (slow, then killed).
++            runCatching { capturer?.stopCapture() }
++            runCatching { capturer?.dispose() }
++            runCatching { pc?.dispose() }   // closes it too
++            runCatching { localTrack?.dispose() }
++            runCatching { videoSource?.dispose() }
++            runCatching { audioTrack?.dispose() }
++            runCatching { audioSource?.dispose() }
++            if (kind == "voice") runCatching { audio.isSpeakerphoneOn = false; audio.mode = android.media.AudioManager.MODE_NORMAL }
++            runCatching { helper?.dispose() }
++            runCatching { if (::factory.isInitialized) factory.dispose() }
++            runCatching { egl.release() }
++            runCatching { onEnded(reason) }
++            worker.shutdown()
++        }
++    }
++
++    companion object {
++        @Volatile private var initialised = false
++        @Synchronized private fun initOnce(ctx: Context) {
++            if (initialised) return
++            PeerConnectionFactory.initialize(PeerConnectionFactory.InitializationOptions.builder(ctx.applicationContext).createInitializationOptions())
++            initialised = true
++        }
+     }
+ 
+     private open class SimpleSdp : SdpObserver {
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+index 8ceb90b..7f78857 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+@@ -24,6 +24,7 @@ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.StateFlow
+ import kotlinx.coroutines.launch
++import kotlinx.serialization.json.JsonArray
+ import kotlinx.serialization.json.JsonObject
+ import kotlinx.serialization.json.buildJsonObject
+ import kotlinx.serialization.json.jsonArray
+@@ -82,6 +83,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     /** SIM-calling permissions still missing (shown as a banner on the dashboard). */
+     val missingPermissions = MutableStateFlow<List<String>>(emptyList())
+     private var callingRoute = "server"
++    /** Routes the company offers: "sim" (this phone's SIM) and/or "server" (Click2Call). Two = the employee picks per call. */
++    private var callingRoutes = listOf("server")
++    /** Set when the employee must choose SIM call or Click2Call for this call. */
++    val routeAsk = MutableStateFlow<Pair<CachedCustomer, String>?>(null)
++    fun cancelRouteAsk() { routeAsk.value = null }
+     /** True while the "switch on the call recorder" guide is shown (recording is required and Accessibility is off). */
+     val recorderSetup = MutableStateFlow(false)
+     fun openRecorderSettings() { CallRecordService.openAccessibilitySettings(getApplication()) }
+@@ -199,6 +205,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         val ack = g.work.syncPolicy()
+         val me = g.session.work("GET", "/api/mobile/v1/me").obj()
+         applyMe(me)
++        sendCrashNote()
+         me["realtime"]?.let { rt -> if (rt is JsonObject) { g.realtimeUrl = rt.str("ws_url"); g.realtimeChannel = rt.str("channel") } }
+         me["disclosure"]?.jsonObject?.let { d ->
+             disclosure.value = Disclosure(d.str("calls_recorded") == "true", d.str("recording_notice") ?: "",
+@@ -219,8 +226,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         onResumed()   // a SIM call placed before the app was closed is reported now
+     }
+ 
++    /** Uploads the crash note left by the previous run (see AmmpApp), once. */
++    private fun sendCrashNote() = viewModelScope.launch {
++        val f = File(getApplication<Application>().filesDir, "last_crash.txt")
++        if (!f.exists()) return@launch
++        runCatching { g.session.work("POST", "/api/mobile/v1/diagnostics/crash", buildJsonObject { put("report", f.readText().take(12_000)) }) }
++            .onSuccess { f.delete() }
++    }
++
+     private fun applyMe(me: JsonObject) {
+         callingRoute = me.str("calling_route") ?: "server"
++        callingRoutes = (me["calling_routes"] as? JsonArray)?.mapNotNull { it.toString().trim('"').takeIf { r -> r == "sim" || r == "server" } }
++            ?.takeIf { it.isNotEmpty() } ?: listOf(callingRoute)
+         me["employee"]?.jsonObject?.str("name")?.let { employeeName.value = it }
+         me["employee"]?.jsonObject?.str("id")?.toLongOrNull()?.let { myUserId = it }
+         me["today"]?.jsonObject?.let { t -> today.value = Today(t.str("calls")?.toIntOrNull() ?: 0, t.str("connected")?.toIntOrNull() ?: 0, t.str("talk_seconds")?.toIntOrNull() ?: 0, t.str("follow_ups_due")?.toIntOrNull() ?: 0) }
+@@ -349,7 +366,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         else if (!CallRecordService.accessibilityOn(ctx)) CallRecordService.openAccessibilitySettings(ctx)
+     }
+ 
+-    fun placeCall(c: CachedCustomer, which: String) = act {
++    fun placeCall(c: CachedCustomer, which: String, route: String? = null) = act {
++        routeAsk.value = null
++        if (route == null && callingRoutes.size > 1) { routeAsk.value = c to which; return@act }   // employee chooses SIM or Click2Call
++        val callingRoute = route ?: callingRoutes.first()
+         if (!g.session.lease.isValid(System.currentTimeMillis()) && !sync.value.online) throw ApiException(0, "offline", "Calling needs a connection to the company server.")
+         val ctx = getApplication<Application>()
+         if (callingRoute == "sim" && SimCalls.missing(ctx).isNotEmpty()) {
+@@ -377,7 +397,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+             return@act
+         }
+         if (g.store.getString("sim_pending") != null) throw ApiException(0, "pending", "The previous call is still being saved. Tap \"Finish call\" first.")
+-        val r = g.session.work("POST", "/api/mobile/v1/calls", buildJsonObject { put("customer_id", c.id); put("which", which) }).obj()
++        val r = g.session.work("POST", "/api/mobile/v1/calls", buildJsonObject { put("customer_id", c.id); put("which", which); put("route", callingRoute) }).obj()
+         val id = r.str("call_id")!!
+         val dial = r.str("dial")
+         if (r.str("route") == "sim" && dial != null) {
+@@ -427,7 +447,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+     fun onResumed() {
+         if (recorderSetup.value && CallRecordService.accessibilityOn(getApplication())) recorderSetup.value = false
+         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
+-        if (callingRoute == "sim") missingPermissions.value = SimCalls.missingLabels(getApplication())
++        if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
+         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
+         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
+         finishing = true
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/ui/Screens.kt b/android/app/src/main/kotlin/ametecs/managedmobile/ui/Screens.kt
+index 1f36a42..ef0fcaf 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/ui/Screens.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/ui/Screens.kt
+@@ -118,6 +118,14 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
+         }
+     }
+     pending?.let { MediaRequestDialog(it, onAccept = vm::acceptMedia, onDecline = vm::declineMedia) }
++    val routeAsk by vm.routeAsk.collectAsState()
++    routeAsk?.let { (c, which) ->
++        AlertDialog(onDismissRequest = vm::cancelRouteAsk, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Call, Ds.Green, 48) },
++            title = { Text("Call ${c.name}") },
++            text = { Text("SIM call: dials from this phone's SIM.\nClick2Call: this phone rings first; answer it and the customer is connected from the company number. Recorded by the company.", fontSize = 14.sp) },
++            confirmButton = { TextButton(onClick = { vm.placeCall(c, which, "server") }) { Text("Click2Call") } },
++            dismissButton = { TextButton(onClick = { vm.placeCall(c, which, "sim") }) { Text("SIM call") } })
++    }
+ }
+ 
+ // ───────────────────────────── shared pieces ─────────────────────────────
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/work/LocationService.kt b/android/app/src/main/kotlin/ametecs/managedmobile/work/LocationService.kt
+index 1c9f1b1..f8026fe 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/work/LocationService.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/work/LocationService.kt
+@@ -56,10 +56,15 @@ class LocationService : Service() {
+         val n: Notification = Notification.Builder(this, AmmpApp.CHANNEL_WORK)
+             .setSmallIcon(R.drawable.ic_app).setContentTitle("Work session active")
+             .setContentText("Location is shared with your company while you are signed in.").setOngoing(true).build()
+-        ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
+-        // Must call startForeground before stopping (else Android crashes the app). Denied permission → stop cleanly.
+-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+-            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
++        // Android 14+ refuses a location foreground service it considers started from the background (e.g. the system
++        // re-creating this sticky service while the dialer is in front during a call) or without location permission.
++        // That refusal is an exception — uncaught, it killed and restarted the whole app. Now the service just stops;
++        // it is started again when ROVEXY is opened (onResumed).
++        val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
++            checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
++        val inForeground = granted && runCatching { ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess
++        if (!inForeground) {
++            started = false
+             stopSelf()
+             return START_NOT_STICKY
+         }
+diff --git a/backend/.env.example b/backend/.env.example
+index ef1ff5e..9244ca7 100644
+--- a/backend/.env.example
++++ b/backend/.env.example
+@@ -37,8 +37,15 @@ REVERB_HOST=ws.mdm.example.com
+ REVERB_PORT=443
+ REVERB_SCHEME=https
+ 
+-# Telephony: freeswitch (production) | simulator (APP_ENV=local only — refused elsewhere)
++# Telephony: click2call | exotel | freeswitch | simulator (APP_ENV=local only — refused elsewhere)
+ TELEPHONY_DRIVER=freeswitch
++# Click2Call (TELEPHONY_DRIVER=click2call). Provider callback URL to register: https://<server>/api/telephony/v1/click2call
++C2C_START_URL=https://sip.telozar.com/api/webrtc/c2c_call
++C2C_CDR_URL=https://obd.ametecsindia.com/admin/click2call_data
++C2C_GATEWAY_SECRET=
++C2C_DID=                                    # company VMN (caller ID the customer sees)
++C2C_AGENT_CALLER_ID=                        # only if the employee is rung from a number other than the VMN
++C2C_WEBHOOK_SECRET=
+ FREESWITCH_ESL_HOST=10.0.0.10
+ FREESWITCH_ESL_PORT=8021
+ FREESWITCH_ESL_PASSWORD=
+@@ -91,6 +98,7 @@ LICENCE_SERVER_URL=                         # on-prem installs only: https://rov
+ LICENCE_OFFLINE_DAYS=30                     # on-prem: online licence must reach the server this often (0 = off)
+ LICENCE_MACHINE_ID=                         # on-prem: only if the machine id can't be read (containers)
+ CALLING_ROUTE=sim                           # sim = phones dial from their own SIM
++CALLING_ROUTES=                             # e.g. sim,server = employee chooses SIM call or Click2Call on each call
+ 
+ # ── On-prem self-update (only needed when the tools aren't found automatically) ──
+ ROVEXY_PHP_BINARY=
+diff --git a/backend/app/Http/Controllers/Admin/CallController.php b/backend/app/Http/Controllers/Admin/CallController.php
+index 7106cbe..4ba3be4 100644
+--- a/backend/app/Http/Controllers/Admin/CallController.php
++++ b/backend/app/Http/Controllers/Admin/CallController.php
+@@ -28,8 +28,8 @@ final class CallController extends Controller
+ 
+     public function index(Request $r)
+     {
+-        // Pull results/recordings for a few still-open Exotel calls (no scheduler needed on a dev PC).
+-        $this->scoped($r)->where('provider', 'exotel')->where('initiated_at', '>', now()->subHours(3))
++        // Pull results/recordings for a few still-open click-to-call calls (no scheduler needed on a dev PC).
++        $this->scoped($r)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
+             ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))
+             ->latest('initiated_at')->limit(5)->get()->each(fn ($c) => app(\App\Services\CallService::class)->syncProvider($c));
+         return response()->json($this->scoped($r)->where('provider', '!=', 'manual')
+@@ -62,7 +62,7 @@ final class CallController extends Controller
+ 
+     public function show(Request $r, int $id)
+     {
+-        $pending = $this->scoped($r)->whereKey($id)->where('provider', 'exotel')->first();
++        $pending = $this->scoped($r)->whereKey($id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->first();
+         if ($pending) {
+             app(\App\Services\CallService::class)->syncProvider($pending);
+         }
+diff --git a/backend/app/Http/Controllers/Admin/SettingsController.php b/backend/app/Http/Controllers/Admin/SettingsController.php
+index 100de24..20b8ec3 100644
+--- a/backend/app/Http/Controllers/Admin/SettingsController.php
++++ b/backend/app/Http/Controllers/Admin/SettingsController.php
+@@ -127,7 +127,7 @@ final class SettingsController extends Controller
+             'database' => $check(fn () => DB::select('select 1') ? 'reachable' : 'no'),
+             'redis' => $check(fn () => (string) Redis::connection()->ping()),
+             'queue_size' => $check(fn () => Queue::size()),
+-            'telephony' => ['route' => config('ammp.telephony.route'), 'driver' => config('ammp.telephony.driver'), 'simulated' => config('ammp.telephony.driver') === 'simulator'] + ($tel['ok'] ? $tel['detail'] : $tel),
++            'telephony' => ['route' => config('ammp.telephony.route'), 'routes' => \App\Services\CallService::routes(), 'driver' => config('ammp.telephony.driver'), 'simulated' => config('ammp.telephony.driver') === 'simulator'] + ($tel['ok'] ? $tel['detail'] : $tel),
+             'management' => ['driver' => config('ammp.management.driver'), 'configured' => config('ammp.management.driver') === 'amapi' && (bool) config('ammp.management.amapi.service_account_json')],
+             'push' => ['driver' => config('ammp.push.driver'), 'simulated' => config('ammp.push.driver') === 'log'],
+             'websocket' => ['driver' => config('broadcasting.default'), 'host' => config('broadcasting.connections.reverb.options.host')],
+diff --git a/backend/app/Http/Controllers/Mobile/AuthController.php b/backend/app/Http/Controllers/Mobile/AuthController.php
+index e76a609..c622f7f 100644
+--- a/backend/app/Http/Controllers/Mobile/AuthController.php
++++ b/backend/app/Http/Controllers/Mobile/AuthController.php
+@@ -41,7 +41,8 @@ final class AuthController extends Controller
+             'employee' => ['id' => $u->id, 'name' => $u->name, 'employee_code' => $u->employee_code],
+             'device' => ['id' => $d->id, 'asset_tag' => $d->asset_tag, 'compliant' => $d->compliant, 'policy_state' => $d->policy_state,
+                 'failing_mandatory' => data_get($d->compliance_detail, 'failing_mandatory', [])],
+-            'calling_route' => config('ammp.telephony.route') === 'sim' ? 'sim' : 'server',
++            'calling_route' => \App\Services\CallService::routes()[0],     // default (older app builds use only this)
++            'calling_routes' => \App\Services\CallService::routes(),       // the employee chooses when there are two
+             'sim_recorder' => config('ammp.telephony.sim_recorder') === 'app' ? 'app' : 'phone',
+             'today' => (function () use ($u) {
+                 $q = \App\Models\Call::query()->where('provider', '!=', 'manual')->where('user_id', $u->id)->where('initiated_at', '>=', now()->startOfDay());
+diff --git a/backend/app/Http/Controllers/Mobile/CallController.php b/backend/app/Http/Controllers/Mobile/CallController.php
+index 759b12f..914cc5b 100644
+--- a/backend/app/Http/Controllers/Mobile/CallController.php
++++ b/backend/app/Http/Controllers/Mobile/CallController.php
+@@ -17,8 +17,9 @@ final class CallController extends Controller
+             'customer_id' => 'nullable|integer',
+             'which' => 'required|in:primary,alternate',
+             'number' => 'nullable|string|max:20',   // only meaningful for manual dialling; otherwise must match the record
++            'route' => 'nullable|in:sim,server',   // employee's choice: SIM call or Click2Call (server checks it is offered)
+         ]);
+-        $call = $svc->start($r->user(), $this->device($r), $data['customer_id'] ?? null, $data['which'], $data['number'] ?? null);
++        $call = $svc->start($r->user(), $this->device($r), $data['customer_id'] ?? null, $data['which'], $data['number'] ?? null, $data['route'] ?? null);
+         return response()->json($this->body($call), 201);
+     }
+ 
+@@ -74,7 +75,13 @@ final class CallController extends Controller
+             'ring_seconds' => $c->ring_seconds, 'talk_seconds' => $c->talk_seconds, 'total_seconds' => $c->total_seconds,
+             'failure_reason' => $c->failure_reason, 'disposition_status' => $c->disposition_status, 'agent_leg' => $c->agent_leg,
+             'route' => $c->calling_mode === 'sim' ? 'sim' : 'server', 'dial' => $c->calling_mode === 'sim' && !$c->isTerminal() ? $c->destination : null,
+-            // Exotel rings the employee from this number first; the app auto-answers it (see CallSession.expectCallback).
+-            'callback_from' => $c->provider === 'exotel' && !$c->isTerminal() ? config('ammp.telephony.exotel.caller_id') : null];
++            // Click-to-call rings the employee from this number first; the app auto-answers it (see CallSession.expectCallback).
++            'callback_from' => in_array($c->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) && !$c->isTerminal() ? $this->callbackNumber() : null];
++    }
++
++    private function callbackNumber(): ?string
++    {
++        $a = app(\App\Telephony\TelephonyManager::class)->adapter();
++        return $a instanceof \App\Telephony\PolledTelephony ? $a->callbackNumber() : null;
+     }
+ }
+diff --git a/backend/app/Jobs/FetchRecording.php b/backend/app/Jobs/FetchRecording.php
+index cb094e3..81bdabe 100644
+--- a/backend/app/Jobs/FetchRecording.php
++++ b/backend/app/Jobs/FetchRecording.php
+@@ -93,9 +93,9 @@ final class FetchRecording extends TenantJob
+ 
+     private function readSource(string $relative): ?string
+     {
+-        if (str_starts_with($relative, 'https://')) {   // provider-hosted recording (Exotel)
++        if (str_starts_with($relative, 'https://')) {   // provider-hosted recording (Exotel / Click2Call)
+             $adapter = app(\App\Telephony\TelephonyManager::class)->adapter();
+-            return $adapter instanceof \App\Telephony\ExotelAdapter ? $adapter->fetchRecording($relative) : null;
++            return $adapter instanceof \App\Telephony\PolledTelephony ? $adapter->fetchRecording($relative) : null;
+         }
+         if ($relative === '' || str_contains($relative, '..')) {
+             return null;
+diff --git a/backend/app/Services/CallService.php b/backend/app/Services/CallService.php
+index b05b7bf..a3fe44a 100644
+--- a/backend/app/Services/CallService.php
++++ b/backend/app/Services/CallService.php
+@@ -41,9 +41,17 @@ final class CallService
+     ) {
+     }
+ 
+-    /** Validates everything server-side, then asks the telephony system to connect. The client never supplies the route. */
+-    public function start(User $user, ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber): Call
++    /**
++     * Validates everything server-side, then asks the telephony system to connect. The client may only pick a route the
++     * server offers (CALLING_ROUTES: 'sim' = the phone's SIM, 'server' = Click2Call / telephony driver); null = default.
++     */
++    public function start(User $user, ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber, ?string $route = null): Call
+     {
++        $routes = self::routes();
++        $route ??= $routes[0];
++        if (!in_array($route, $routes, true)) {
++            throw new DomainException('route_not_allowed', 'This calling option is not enabled for your company.');
++        }
+         $lock = Cache::lock("call-start:{$user->id}", 10);
+         if (!$lock->get()) {
+             throw new DomainException('call_in_progress', 'A call is already being started.');
+@@ -54,7 +62,7 @@ final class CallService
+             if ($customerId !== null && $customer === null) {
+                 throw new DomainException('customer_not_assigned', 'Customer is not available.');
+             }
+-            if (config('ammp.telephony.route') === 'sim') {
++            if ($route === 'sim') {
+                 // A SIM call whose result never arrived (app killed mid-call) must not block calling for hours.
+                 Call::query()->where('user_id', $user->id)->where('provider', 'sim')->whereNotIn('state', CallLifecycle::TERMINAL)
+                     ->update(['state' => 'cancelled', 'failure_reason' => 'result_not_reported', 'ended_at' => now()]);
+@@ -69,14 +77,15 @@ final class CallService
+                 'compliant' => (bool) $device->compliant, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
+             ], new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
+ 
+-            if (config('ammp.telephony.route') === 'sim') {
++            if ($route === 'sim') {
+                 return $this->startSim($user, $device, $customer, $which, $decision);
+             }
+-            $agentLeg = $policy['calling.agent_leg'];
++            $adapter = $this->telephony->adapter();
++            // Click-to-call providers always ring the employee's work number first.
++            $agentLeg = $adapter instanceof \App\Telephony\PolledTelephony ? 'pstn_callback' : $policy['calling.agent_leg'];
+             if ($agentLeg === 'pstn_callback' && !$user->phone) {
+                 throw new DomainException('agent_phone_missing', 'Your work number is not configured. Contact your administrator.');
+             }
+-            $adapter = $this->telephony->adapter();
+             $call = DB::transaction(function () use ($user, $device, $customer, $which, $decision, $agentLeg, $adapter) {
+                 $call = Call::query()->create([
+                     'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => $device->id,
+@@ -116,6 +125,12 @@ final class CallService
+         }
+     }
+ 
++    /** Calling routes offered to employees, default first: CALLING_ROUTES, else just CALLING_ROUTE. */
++    public static function routes(): array
++    {
++        return config('ammp.telephony.routes') ?: [config('ammp.telephony.route') === 'sim' ? 'sim' : 'server'];
++    }
++
+     /** SIM route: the server authorises and records the attempt; the phone dials the returned number itself. */
+     private function startSim(User $user, ManagedDevice $device, ?Customer $customer, string $which, array $decision): Call
+     {
+@@ -191,13 +206,13 @@ final class CallService
+     }
+ 
+     /**
+-     * Exotel (and any polled provider): read the call's state from the provider and apply it once. Throttled per call,
++     * Click-to-call providers (Exotel, Click2Call): read the call's state from the provider and apply it once. Throttled per call,
+      * idempotent, and safe to call from the phone's status poll, the admin view, the callback trigger and the scheduler.
+      */
+     public function syncProvider(Call $call): Call
+     {
+-        $adapter = $call->provider === 'exotel' ? $this->telephony->adapter() : null;
+-        if (!$adapter instanceof \App\Telephony\ExotelAdapter || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
++        $adapter = in_array($call->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) ? $this->telephony->adapter() : null;
++        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
+             return $call;
+         }
+         if (!Cache::add("provider-sync:{$call->id}", 1, 5)) {
+@@ -224,7 +239,7 @@ final class CallService
+                     'answered_at' => $d['talk'] > 0 ? $ended->copy()->subSeconds($d['talk']) : null, 'ended_at' => $ended,
+                     'ring_seconds' => $d['ring'], 'talk_seconds' => $d['talk'], 'total_seconds' => max(0, $started->diffInSeconds($ended, true)),
+                 ])->save();
+-                CallEvent::query()->firstOrCreate(['call_id' => $call->id, 'provider_event_id' => 'exotel-final'],
++                CallEvent::query()->firstOrCreate(['call_id' => $call->id, 'provider_event_id' => $call->provider . '-final'],
+                     ['type' => $d['talk'] > 0 ? 'hangup' : 'failed', 'occurred_at' => $ended, 'payload' => ['cause' => $d['cause'], 'provider_call_id' => $call->provider_call_id]]);
+                 ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'updating_customer']);
+                 Audit::record('call.provider_result', $call, ['state' => $d['state'], 'talk' => $d['talk']]);
+@@ -239,7 +254,7 @@ final class CallService
+                     $call->forceFill(['recording_status' => RecordingState::Processing->value])->save();
+                     DB::afterCommit(fn () => FetchRecording::dispatch($call->company_id, $rec->id));
+                 } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes(15))) {
+-                    $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'Exotel returned no recording for this call (is recording enabled on the account?).'])->save();
++                    $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'The calling provider returned no recording for this call (is recording enabled on the account?).'])->save();
+                     $call->forceFill(['recording_status' => RecordingState::Failed->value])->save();
+                 }
+             }
+diff --git a/backend/app/Telephony/ExotelAdapter.php b/backend/app/Telephony/ExotelAdapter.php
+index 3f8da93..5681b81 100644
+--- a/backend/app/Telephony/ExotelAdapter.php
++++ b/backend/app/Telephony/ExotelAdapter.php
+@@ -14,7 +14,7 @@ use Illuminate\Support\Facades\URL;
+  * call-details API (polling) — the status callback only triggers an earlier read, its body is never trusted.
+  * https://developer.exotel.com/api/make-a-call-api · https://developer.exotel.com/api/call-details
+  */
+-final class ExotelAdapter implements TelephonyAdapter
++final class ExotelAdapter implements PolledTelephony
+ {
+     public function __construct(private readonly array $cfg)
+     {
+@@ -117,6 +117,11 @@ final class ExotelAdapter implements TelephonyAdapter
+         return $r->successful() ? $r->body() : null;
+     }
+ 
++    public function callbackNumber(): ?string
++    {
++        return $this->cfg['caller_id'] ?: null;
++    }
++
+     public function hangup(Call $call, string $cause): void
+     {
+         // The connect API has no hang-up call; the employee ends it on the phone and Exotel reports the result.
+diff --git a/backend/app/Telephony/TelephonyManager.php b/backend/app/Telephony/TelephonyManager.php
+index 1bdc53d..51c1083 100644
+--- a/backend/app/Telephony/TelephonyManager.php
++++ b/backend/app/Telephony/TelephonyManager.php
+@@ -13,6 +13,7 @@ final class TelephonyManager
+         return $this->adapter ??= match (config('ammp.telephony.driver')) {
+             'freeswitch' => new FreeSwitchAdapter(config('ammp.telephony.freeswitch')),
+             'exotel' => new ExotelAdapter(config('ammp.telephony.exotel')),
++            'click2call' => new Click2CallAdapter(config('ammp.telephony.click2call')),
+             'simulator' => app()->environment('local', 'testing')
+                 ? new SimulatorAdapter()
+                 : throw new \RuntimeException('TELEPHONY_DRIVER=simulator is only allowed in local/testing environments.'),
+diff --git a/backend/config/ammp.php b/backend/config/ammp.php
+index 61c25ab..d9a1fc9 100644
+--- a/backend/config/ammp.php
++++ b/backend/config/ammp.php
+@@ -69,10 +69,14 @@ return [
+         //             phone's built-in call-recorder file. Needs no telephony server. Recording quality depends on the OEM recorder.
+         //  'server' — server-originated calls through the driver below (Exotel cloud telephony or FreeSWITCH), recorded centrally.
+         'route' => env('CALLING_ROUTE', 'sim'),
++        // Routes the employee may choose between on each call, e.g. "sim,server" (SIM call or Click2Call). The first is
++        // the default for app builds that don't offer a choice. Empty = only CALLING_ROUTE (see CallService::routes()).
++        'routes' => array_values(array_filter(array_map('trim', explode(',', (string) env('CALLING_ROUTES', ''))),
++            fn ($v) => in_array($v, ['sim', 'server'], true))),
+         // SIM route recorder: 'phone' = the phone's own dialer auto-records (both voices, after answer) and the app uploads
+         // that file; 'app' = this app is the dialer and records the mic itself (Android blocks the customer's voice).
+         'sim_recorder' => env('SIM_RECORDER', 'phone'),
+-        // 'exotel' | 'freeswitch' | 'simulator' (refuses to run unless APP_ENV=local or testing)
++        // 'click2call' | 'exotel' | 'freeswitch' | 'simulator' (refuses to run unless APP_ENV=local or testing)
+         'driver' => env('TELEPHONY_DRIVER', 'freeswitch'),
+         // Exotel click-to-call: rings the employee's work number, then the customer; recorded on Exotel, copied here.
+         'exotel' => [
+@@ -87,6 +91,18 @@ return [
+             'time_limit' => (int) env('EXOTEL_TIME_LIMIT', 3600),
+             'timezone' => env('EXOTEL_TIMEZONE', 'Asia/Kolkata'),            // timezone of Exotel's StartTime/EndTime
+         ],
++        // Click2Call (Telozar start + Ametecs OBD gateway for result/recording, as in LeadGER): rings the employee's work
++        // number, then the customer from the company VMN; recorded by the provider, copied here.
++        'click2call' => [
++            'start_url' => env('C2C_START_URL', 'https://sip.telozar.com/api/webrtc/c2c_call'),
++            'cdr_url' => env('C2C_CDR_URL', 'https://obd.ametecsindia.com/admin/click2call_data'),
++            'gateway_secret' => env('C2C_GATEWAY_SECRET'),
++            'did' => env('C2C_DID'),                                     // the company VMN shown to customers
++            'agent_caller_id' => env('C2C_AGENT_CALLER_ID'),             // number the employee is rung from, if not the VMN
++            'webhook_secret' => env('C2C_WEBHOOK_SECRET'),               // required on the provider callback when set
++            'timeout' => (int) env('C2C_TIMEOUT', 15),
++            'timezone' => env('C2C_TIMEZONE', 'Asia/Kolkata'),           // timezone of the gateway's dmYHis times
++        ],
+         'freeswitch' => [
+             'host' => env('FREESWITCH_ESL_HOST', '127.0.0.1'),
+             'port' => (int) env('FREESWITCH_ESL_PORT', 8021),
+diff --git a/backend/routes/api.php b/backend/routes/api.php
+index da2e44e..1cfea7a 100644
+--- a/backend/routes/api.php
++++ b/backend/routes/api.php
+@@ -178,6 +178,12 @@ Route::prefix('mobile/v1')->middleware('company')->group(function () {
+             Route::post('customers/{id}/location', [Mobile\FieldMapController::class, 'setLocation'])->whereNumber('id')->middleware(['throttle:maps', 'feature:field_map']);
+             Route::post('customers/{id}/visit', [Mobile\FieldMapController::class, 'visit'])->whereNumber('id')->middleware(['throttle:maps', 'feature:field_map']);
+             Route::post('calls', [Mobile\CallController::class, 'store'])->middleware(['perm:calls.make', 'throttle:calls']);
++            // Crash note from the app's previous run (stack trace + phone model); read it in the audit log (action app.crash).
++            Route::post('diagnostics/crash', function (\Illuminate\Http\Request $r) {
++                $d = $r->validate(['report' => 'required|string|max:12000']);
++                \App\Support\Audit::record('app.crash', $r->user(), ['report' => $d['report']]);
++                return response()->json(['ok' => true]);
++            })->middleware('throttle:10,1');
+             Route::get('calls/{uuid}', [Mobile\CallController::class, 'show']);
+             Route::post('calls/{uuid}/hangup', [Mobile\CallController::class, 'hangup']);
+             Route::post('calls/{uuid}/sim-result', [Mobile\CallController::class, 'simResult']);
+@@ -339,5 +345,19 @@ Route::post('telephony/v1/exotel/{uuid}', function (string $uuid, \App\Services\
+     }
+     return response()->json(['ok' => true]);
+ })->name('telephony.exotel')->middleware(['signed', 'throttle:telephony']);
++// Click2Call provider callback: one fixed URL; ref_id = our call uuid. The body is ignored — it only triggers a read from
++// the gateway. When C2C_WEBHOOK_SECRET is set it is required (Secret-Key / X-Webhook-Secret header, or ?secret=).
++Route::match(['get', 'post'], 'telephony/v1/click2call', function (\Illuminate\Http\Request $r, \App\Services\CallService $svc) {
++    $secret = (string) config('ammp.telephony.click2call.webhook_secret');
++    $given = (string) ($r->header('Secret-Key') ?? $r->header('X-Webhook-Secret') ?? $r->query('secret') ?? '');
++    abort_if($secret !== '' && !hash_equals($secret, $given), 401);
++    $ref = (string) ($r->input('ref_id') ?? $r->input('REF_ID') ?? $r->input('reference_id') ?? $r->input('refId') ?? '');
++    $ctx = app(\App\Support\CurrentCompany::class);
++    $call = $ref === '' ? null : $ctx->withoutScope(fn () => \App\Models\Call::query()->where('uuid', $ref)->where('provider', 'click2call')->first());
++    if ($call) {
++        $ctx->run(\App\Models\Company::query()->findOrFail($call->company_id), fn () => $svc->syncProvider($call));
++    }
++    return response()->json(['status' => $call ? 'success' : 'ignored']);
++})->name('telephony.click2call')->middleware('throttle:telephony');
+ // AMAPI Pub/Sub push notifications (OIDC-verified).
+ Route::post('amapi/v1/notifications', [AmapiNotificationController::class, 'store']);
+diff --git a/backend/routes/console.php b/backend/routes/console.php
+index 20f7985..889b1e8 100644
+--- a/backend/routes/console.php
++++ b/backend/routes/console.php
+@@ -23,9 +23,9 @@ Schedule::call(function () {
+ })->everyMinute()->name('media:expire');
+ 
+ Schedule::call(function () {
+-    // Exotel results/recordings for calls still open (covers servers that Exotel's callback cannot reach, e.g. a LAN PC).
++    // Click-to-call results/recordings for calls still open (covers servers the provider's callback cannot reach, e.g. a LAN PC).
+     $ctx = app(CurrentCompany::class);
+-    $ctx->withoutScope(fn () => \App\Models\Call::query()->where('provider', 'exotel')->where('initiated_at', '>', now()->subHours(3))
++    $ctx->withoutScope(fn () => \App\Models\Call::query()->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
+         ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))->get())
+         ->each(fn ($call) => $ctx->run(Company::query()->findOrFail($call->company_id), fn () => app(\App\Services\CallService::class)->syncProvider($call)));
+ })->everyMinute()->name('exotel:sync')->withoutOverlapping();
+diff --git a/backend/tests/Feature/AcceptanceTest.php b/backend/tests/Feature/AcceptanceTest.php
+index 0596a49..5dfdb61 100644
+--- a/backend/tests/Feature/AcceptanceTest.php
++++ b/backend/tests/Feature/AcceptanceTest.php
+@@ -367,6 +367,77 @@ final class AcceptanceTest extends TestCase
+         $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk();
+     }
+ 
++    public function test_click2call_employee_chooses_route_result_and_recording(): void
++    {
++        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
++            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
++            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => 'wh', 'timeout' => 15, 'timezone' => 'Asia/Kolkata']]);
++        app(TelephonyManager::class)->swap(new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call')));
++        $cdr = ['A_DIAL_STATUS' => 'ANSWERED'];
++        $url = null;
++        \Illuminate\Support\Facades\Http::fake([
++            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ1']),
++            'obd.gateway.test/*' => function ($req) use (&$cdr, &$url) {
++                return $req->header('Secret-Key')[0] === 'gs'
++                    ? \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => $url, 'duration' => 82]])
++                    : \Illuminate\Support\Facades\Http::response(['status' => 401], 401);
++            },
++            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000)),
++        ]);
++        $this->appOnlyMandatory();
++        $m = $this->approvedPhone();
++        $this->login($m);
++        $this->ackAll($m);
++        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim', 'server'])->assertJsonPath('calling_route', 'sim');
++        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
++
++        // Employee picks Click2Call: rings the work number, then the customer, from the VMN; ref_id = our call uuid.
++        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()
++            ->assertJsonPath('route', 'server')->assertJsonPath('callback_from', '918047000000')->json('call_id');
++        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['did'] === '8047000000'
++            && $req['a_party_no'] === '9811111111' && $req['b_party_no'] === '9876543210' && $req['ref_id'] === $uuid && $req['record'] === 1);
++        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'ringing');   // employee answered, customer ringing
++
++        $cdr = ['A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED', 'B_PARTY_CONNECTED_TIME' => '21102026103015',
++            'B_PARTY_END_TIME' => '21102026103130', 'EVENT_TYPE' => 'call_end', 'DURATION' => 82];
++        $url = 'https://rec.gateway.test/r/TZ1.wav';
++        $this->postJson('/api/telephony/v1/click2call', ['ref_id' => $uuid])->assertStatus(401);   // secret required when set
++        \Illuminate\Support\Facades\Cache::flush();   // per-call sync throttle
++        $this->postJson('/api/telephony/v1/click2call?secret=wh', ['ref_id' => $uuid, 'B_DIAL_STATUS' => 'BUSY'])->assertJsonPath('status', 'success');
++        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'completed')->assertJsonPath('talk_seconds', 75)   // body ignored, gateway read
++            ->assertJsonPath('ring_seconds', 7)->assertJsonPath('recording_status', 'available')->assertJsonPath('callback_from', null);
++        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
++        $this->assertSame('2026-10-21 05:01:30', $call->ended_at->utc()->format('Y-m-d H:i:s'));   // 10:31:30 IST
++        $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk();
++
++        // Next call, employee picks SIM: the phone dials itself.
++        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'sim'])->assertCreated()
++            ->assertJsonPath('route', 'sim')->assertJsonPath('dial', '+919876543210');
++
++        // A route the company does not offer is refused.
++        config(['ammp.telephony.routes' => ['sim']]);
++        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'route_not_allowed');
++    }
++
++    public function test_app_crash_note_lands_in_audit_log(): void
++    {
++        $this->appOnlyMandatory();
++        $m = $this->approvedPhone();
++        $this->login($m);
++        $this->ackAll($m);
++        $m->work('POST', '/api/mobile/v1/diagnostics/crash', ['report' => "1.0.3 OPPO CPH2359\njava.lang.SecurityException: x"])->assertOk();
++        $this->assertStringContainsString('SecurityException', $this->admin('alpha')->getJson('/api/admin/audit?action=app.crash')->json('data.0.meta'));
++    }
++
++    public function test_click2call_leg_results(): void
++    {
++        $s = fn (array $cdr) => [\App\Telephony\Click2CallAdapter::legState($cdr['A'] ?? null), \App\Telephony\Click2CallAdapter::legState($cdr['B'] ?? null)];
++        $this->assertSame(['answered', 'busy'], $s(['A' => 'ANSWERED', 'B' => 'BUSY']));
++        $this->assertSame(['no_answer', null], $s(['A' => 'NO ANSWER']));
++        $this->assertSame([null, 'failed'], $s(['B' => 'CHANUNAVAIL']));
++        $this->assertSame([null, 'no_answer'], $s(['B' => 'not_answered']));
++    }
++
+     public function test_11_and_12_duplicate_events_and_recording_failure_visible(): void
+     {
+         $this->appOnlyMandatory();

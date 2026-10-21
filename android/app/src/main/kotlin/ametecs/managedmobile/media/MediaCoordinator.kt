@@ -160,14 +160,19 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
         accepted = null
     }
 
-    fun startScreen(projection: Intent) = ScreenShareService.start(context, projection)
-    fun startCamera() = CameraSessionService.start(context)
-    fun startVoice() = VoiceCallService.start(context)
+    // Android can refuse to start a foreground service (ForegroundServiceStartNotAllowedException): end, don't crash.
+    fun startScreen(projection: Intent) = startOrFail { ScreenShareService.start(context, projection) }
+    fun startCamera() = startOrFail { CameraSessionService.start(context) }
+    fun startVoice() = startOrFail { VoiceCallService.start(context) }
+    private fun startOrFail(start: () -> Unit) {
+        runCatching(start).onFailure { lastError.value = "Android did not allow sharing to start. Open ROVEXY and try again."; onForegroundFailed() }
+    }
 
     /** Called by the visible foreground service once it is in the foreground. */
     fun onForegroundReady(kind: String, projection: Intent?) {
         val r = accepted ?: return
         scope.launch {
+            var started: WebRtcSession? = null
             try {
                 val ice = session.work("GET", "/api/mobile/v1/media/${r.id}/ice").obj()["ice_servers"]!!.jsonArray.map { s ->
                     val o = s.jsonObject
@@ -179,14 +184,23 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
                 val s = WebRtcSession(context, r.id, kind, ice,
                     sendSignal = { type, payload -> outbound.trySend(r.id to buildJsonObject { put("type", type); put("payload", toJson(payload)) }) },
                     onEnded = { reason -> scope.launch { finish(r.id, reason) } })
+                started = s
                 session.work("POST", "/api/mobile/v1/media/${r.id}/start")
-                s.start(projection, 1280, 720, 5)
+                // 5 fps made Live View look frozen; screens change less than camera, so 10 vs 15 fps.
+                s.start(projection, 960, 540, if (kind == "screen") 10 else 15)
                 _active.value = s
                 pollSignals(s)
-            } catch (e: Exception) {
-                finish(r.id, "connection_failed")
+            } catch (e: Throwable) {
+                // A half-started session still holds the camera/projection: end() frees it and then calls finish().
+                started?.end("connection_failed") ?: finish(r.id, "connection_failed")
             }
         }
+    }
+
+    /** The visible foreground service could not start (Android refused it): end the session instead of crashing. */
+    fun onForegroundFailed() {
+        val r = accepted ?: return
+        scope.launch { finish(r.id, "connection_failed") }
     }
 
     /** Fallback when WebSockets are not running: fetch the supervisor's answer/candidates and the session state over HTTP. */

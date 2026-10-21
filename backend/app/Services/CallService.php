@@ -41,9 +41,20 @@ final class CallService
     ) {
     }
 
-    /** Validates everything server-side, then asks the telephony system to connect. The client never supplies the route. */
-    public function start(User $user, ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber): Call
+    /**
+     * Validates everything server-side, then asks the telephony system to connect. The client may only pick a route the
+     * server offers (CALLING_ROUTES: 'sim' = the phone's SIM, 'server' = Click2Call / telephony driver); null = default.
+     */
+    public function start(User $user, ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber, ?string $route = null, ?string $vmn = null): Call
     {
+        $routes = self::routes($user);
+        if ($routes === []) {
+            throw new DomainException('no_calling_option', 'No calling option is enabled for you. Ask your administrator (Calling configuration → Access & permissions).');
+        }
+        $route ??= $routes[0];
+        if (!in_array($route, $routes, true)) {
+            throw new DomainException('route_not_allowed', 'This calling option is not enabled for your company.');
+        }
         $lock = Cache::lock("call-start:{$user->id}", 10);
         if (!$lock->get()) {
             throw new DomainException('call_in_progress', 'A call is already being started.');
@@ -54,7 +65,7 @@ final class CallService
             if ($customerId !== null && $customer === null) {
                 throw new DomainException('customer_not_assigned', 'Customer is not available.');
             }
-            if (config('ammp.telephony.route') === 'sim') {
+            if ($route === 'sim') {
                 // A SIM call whose result never arrived (app killed mid-call) must not block calling for hours.
                 Call::query()->where('user_id', $user->id)->where('provider', 'sim')->whereNotIn('state', CallLifecycle::TERMINAL)
                     ->update(['state' => 'cancelled', 'failure_reason' => 'result_not_reported', 'ended_at' => now()]);
@@ -69,14 +80,23 @@ final class CallService
                 'compliant' => (bool) $device->compliant, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
             ], new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
 
-            if (config('ammp.telephony.route') === 'sim') {
+            if ($route === 'sim') {
                 return $this->startSim($user, $device, $customer, $which, $decision);
             }
-            $agentLeg = $policy['calling.agent_leg'];
-            if ($agentLeg === 'pstn_callback' && !$user->phone) {
+            $adapter = $this->telephony->adapter();
+            // Click-to-call providers always ring the employee's work number first.
+            $agentLeg = $adapter instanceof \App\Telephony\PolledTelephony ? 'pstn_callback' : $policy['calling.agent_leg'];
+            $c2c = $adapter instanceof \App\Telephony\Click2CallAdapter;
+            $agentNumber = $c2c ? \App\Telephony\Click2CallSettings::agentNumber($user) : $user->phone;
+            if ($agentLeg === 'pstn_callback' && !$agentNumber) {
                 throw new DomainException('agent_phone_missing', 'Your work number is not configured. Contact your administrator.');
             }
-            $adapter = $this->telephony->adapter();
+            // Click2Call (kit rules): the company number for this call (Smart31 / picked / default), then count the
+            // attempt for this customer number today — both refuse with a clear message before anything is dialled.
+            $callerNumber = $c2c ? \App\Telephony\Click2CallSettings::callerNumberFor($user, $vmn) : null;
+            if ($c2c) {
+                \App\Telephony\Click2CallSettings::reserveAttempt($user, $decision['destination']);
+            }
             $call = DB::transaction(function () use ($user, $device, $customer, $which, $decision, $agentLeg, $adapter) {
                 $call = Call::query()->create([
                     'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => $device->id,
@@ -98,10 +118,15 @@ final class CallService
             try {
                 $adapter->originate($call, [
                     'call_id' => $call->uuid, 'company_id' => $call->company_id, 'agent_leg' => $agentLeg,
-                    'agent_target' => $agentLeg === 'pstn_callback' ? (string) $user->phone : 'dev_' . $device->id,
+                    'agent_target' => $agentLeg === 'pstn_callback' ? (string) $agentNumber : 'dev_' . $device->id,
                     'customer_e164' => $decision['destination'], 'record_path' => $recordPath,
+                    'caller_number' => $callerNumber,   // Click2Call only: Smart31 / picked / default company number
                 ]);
             } catch (TelephonyUnavailable $e) {
+                if ($c2c) {
+                    \App\Telephony\Click2CallSettings::releaseAttempt($decision['destination']);   // given back, as LeadGER
+                }
+                Audit::record('call.not_placed', $call, ['provider' => $adapter->name(), 'detail' => mb_substr($e->getMessage(), 0, 200)]);
                 $call->forceFill(['state' => 'failed', 'failure_reason' => 'telephony_unavailable', 'ended_at' => now(),
                     'recording_status' => $decision['record'] ? RecordingState::Failed->value : RecordingState::NotRequired->value])->save();
                 Recording::query()->where('call_id', $call->id)->update(['status' => RecordingState::Failed->value, 'last_error' => 'call not placed']);
@@ -114,6 +139,12 @@ final class CallService
         } finally {
             $lock->release();
         }
+    }
+
+    /** Calling routes offered (default first): company Click2Call setting, else CALLING_ROUTES / CALLING_ROUTE. */
+    public static function routes(?User $user = null): array
+    {
+        return \App\Telephony\Click2CallSettings::routes($user);
     }
 
     /** SIM route: the server authorises and records the attempt; the phone dials the returned number itself. */
@@ -191,19 +222,19 @@ final class CallService
     }
 
     /**
-     * Exotel (and any polled provider): read the call's state from the provider and apply it once. Throttled per call,
+     * Click-to-call providers (Exotel, Click2Call): read the call's state from the provider and apply it once. Throttled per call,
      * idempotent, and safe to call from the phone's status poll, the admin view, the callback trigger and the scheduler.
      */
-    public function syncProvider(Call $call): Call
+    public function syncProvider(Call $call, ?array $finalPayload = null): Call
     {
-        $adapter = $call->provider === 'exotel' ? $this->telephony->adapter() : null;
-        if (!$adapter instanceof \App\Telephony\ExotelAdapter || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
+        $adapter = in_array($call->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) ? $this->telephony->adapter() : null;
+        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
             return $call;
         }
-        if (!Cache::add("provider-sync:{$call->id}", 1, 5)) {
+        if ($finalPayload === null && !Cache::add("provider-sync:{$call->id}", 1, 5)) {
             return $call;
         }
-        $d = $adapter->details($call);
+        $d = $finalPayload !== null && $adapter instanceof \App\Telephony\Click2CallAdapter ? $adapter->details($call, $finalPayload) : $adapter->details($call);
         if ($d === null) {
             return $call;
         }
@@ -224,7 +255,7 @@ final class CallService
                     'answered_at' => $d['talk'] > 0 ? $ended->copy()->subSeconds($d['talk']) : null, 'ended_at' => $ended,
                     'ring_seconds' => $d['ring'], 'talk_seconds' => $d['talk'], 'total_seconds' => max(0, $started->diffInSeconds($ended, true)),
                 ])->save();
-                CallEvent::query()->firstOrCreate(['call_id' => $call->id, 'provider_event_id' => 'exotel-final'],
+                CallEvent::query()->firstOrCreate(['call_id' => $call->id, 'provider_event_id' => $call->provider . '-final'],
                     ['type' => $d['talk'] > 0 ? 'hangup' : 'failed', 'occurred_at' => $ended, 'payload' => ['cause' => $d['cause'], 'provider_call_id' => $call->provider_call_id]]);
                 ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'updating_customer']);
                 Audit::record('call.provider_result', $call, ['state' => $d['state'], 'talk' => $d['talk']]);
@@ -238,8 +269,8 @@ final class CallService
                     $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => mb_substr($d['recording_url'], 0, 255)])->save();
                     $call->forceFill(['recording_status' => RecordingState::Processing->value])->save();
                     DB::afterCommit(fn () => FetchRecording::dispatch($call->company_id, $rec->id));
-                } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes(15))) {
-                    $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'Exotel returned no recording for this call (is recording enabled on the account?).'])->save();
+                } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes($call->provider === 'click2call' ? (int) config('ammp.telephony.click2call.recording_wait_minutes', 60) : 15))) {
+                    $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'The calling provider returned no recording for this call (is recording enabled on the account?).'])->save();
                     $call->forceFill(['recording_status' => RecordingState::Failed->value])->save();
                 }
             }
