@@ -26,6 +26,10 @@ final class ResolveCompany
             $cfg['base_domain'],
         );
         $slug = $request->header('X-Workspace');
+        // Plain download links (<a href>) can't send headers: they carry ?workspace= instead. Same trust as the header (the session still decides access).
+        if ($slug === null && $request->isMethod('GET') && is_string($request->query('workspace'))) {
+            $slug = $request->query('workspace');
+        }
         // ponytail: local-dev only — a bare loopback or private-LAN IP (emulator 10.0.2.2, a phone on the same Wi-Fi hitting 192.168.x.x) names no company,
         // so use the configured dev workspace. Still resolved and validated like any slug (unknown slug = rejected). Never active outside APP_ENV=local.
         if ($slug === null && $cfg['mode'] !== 'fixed' && app()->environment('local') && self::isLocalHost($request->getHost())) {   // fixed mode already has its one company

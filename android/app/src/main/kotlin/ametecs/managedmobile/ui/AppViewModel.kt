@@ -386,7 +386,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         routeAsk.value = null
         if (callingRoutes.isEmpty()) throw ApiException(0, "no_calling_option", "No calling option is enabled for you. Ask your administrator.")
         // Ask when there is a choice: SIM or Click2Call, and/or which company number Click2Call uses.
-        if (route == null && (callingRoutes.size > 1 || c2cPicker())) { routeAsk.value = c to which; return@act }
+        if ((route == null && (callingRoutes.size > 1 || c2cPicker())) || (route == "server" && vmn == null && c2cPicker())) { routeAsk.value = c to which; return@act }
         val callingRoute = route ?: callingRoutes.first()
         if (!g.session.lease.isValid(System.currentTimeMillis()) && !sync.value.online) throw ApiException(0, "offline", "Calling needs a connection to the company server.")
         val ctx = getApplication<Application>()

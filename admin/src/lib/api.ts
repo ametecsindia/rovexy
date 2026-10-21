@@ -16,6 +16,8 @@ export const currentWorkspace = (): string | undefined => {
   const h = location.hostname;
   return /^\d+\.\d+\.\d+\.\d+$/.test(h) || h.split('.').length < 3 ? undefined : h.split('.')[0];   // <slug>.<base-domain>
 };
+/** A download link (<a href>) for an API path: adds ?workspace= because links can't send the X-Workspace header. */
+export const fileUrl = (path: string): string => workspace ? `${path}${path.includes('?') ? '&' : '?'}workspace=${encodeURIComponent(workspace)}` : path;
 export const consoleBase = pathWorkspace ? `/w/${pathWorkspace}/admin` : '/admin';
 
 function xsrf(): string | undefined {

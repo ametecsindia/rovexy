@@ -135,6 +135,14 @@ final class AcceptanceTest extends TestCase
         $this->withHeaders(['X-Workspace' => 'nope'])->getJson('/api/mobile/v1/bootstrap')->assertNotFound();
     }
 
+    public function test_download_links_carry_the_workspace(): void
+    {
+        // Plain <a href> downloads can't send X-Workspace: they carry ?workspace=. Own workspace works, another company's is refused.
+        $link = $this->actingAs($this->users['alpha']['admin'], 'web')->withSession(['mfa_verified_at' => time(), 'auth_started_at' => time()])->withHeaders(['Referer' => 'http://localhost/']);
+        $link->get('/api/admin/imports/template?workspace=alpha')->assertOk();
+        $link->get('/api/admin/imports/template?workspace=bravo')->assertStatus(403);
+    }
+
     public function test_5_and_6_revocation_is_immediate_and_reapproval_issues_fresh_credentials(): void
     {
         $this->appOnlyMandatory();
@@ -581,10 +589,14 @@ final class AcceptanceTest extends TestCase
         $this->postJson('/api/click2call/webhook', ['ref_id' => 'unknown'], ['Secret-Key' => 'wh-secret'])->assertOk()->assertJsonPath('status', 'ignored');
 
         // Daily limit per customer number (2): this was attempt 1; attempt 2 ok; attempt 3 refused.
-        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000101'])->assertCreated();
-        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+        $open = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000101'])->assertCreated()->json('call_id');
+        // Click2Call keeps the provider's recording even when the policy does not require one.
+        $this->assertSame('pending', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('recording_status')));
+        // The employee's phone never answered: after 3 minutes that call no longer blocks calling ("Finish the current call first").
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->update(['initiated_at' => now()->subMinutes(4)]));
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'retry_limit');
         $this->assertSame(1, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('audit_events')->where('action', 'call.blocked')->count()));
+        $this->assertSame(['failed', 'agent_not_answered'], app(CurrentCompany::class)->withoutScope(fn () => array_values(Call::query()->where('uuid', $open)->first(['state', 'failure_reason'])->toArray())));
 
         // SIM calling: switched off → Click2Call only; SIM for selected people only (none) → same; Click2Call off too → no option.
         $adm->putJson('/api/admin/calling/sim', ['enabled' => false])->assertOk()->assertJsonPath('sim.on', false);

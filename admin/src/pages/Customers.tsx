@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { AddressHistory, ChangeDetail } from './AddressReport';
-import { api, get, post, fmtDate, fmtSeconds, qs } from '../lib/api';
+import { api, get, post, fmtDate, fmtSeconds, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Notice, Page, RecordingPlayer, Stat, Table, useAction, useAsync } from '../components/ui';
 
@@ -68,7 +68,7 @@ export function ImportsPage() {
 
   return (
     <Page title="Portfolios" subtitle="Each uploaded lead file is a portfolio. Upload it here, then give its cases to a group and its employees under Assignment."
-      actions={<a className="button secondary" href="/api/admin/imports/template">Download sample file</a>}>
+      actions={<a className="button secondary" href={fileUrl('/api/admin/imports/template')}>Download sample file</a>}>
       <ErrorBox error={a.error ?? imports.error ?? portfolios.error} />
       <Card title="Portfolios">
         <Table rows={portfolios.data} empty="No portfolios yet — upload a lead file below." columns={[
@@ -107,7 +107,7 @@ export function ImportsPage() {
                 <button disabled={a.busy || busyJob || job.status !== 'ready' || !job.valid_rows} onClick={commit}>Import {job.valid_rows ? `${job.valid_rows} leads` : ''} into “{name || job.portfolio}”</button>
               </div>
               {busyJob && <Notice tone="info">{job.status === 'validating' ? 'Checking every row…' : 'Importing…'}</Notice>}
-              {job.status === 'ready' && <Notice tone={job.error_rows ? 'warn' : 'ok'}>{job.total_rows} rows: {job.valid_rows} ready to import, {job.error_rows} with problems (they will be skipped). {job.error_rows > 0 && <a href={`/api/admin/imports/${job.id}/errors.csv`}>Download the problem rows</a>}</Notice>}
+              {job.status === 'ready' && <Notice tone={job.error_rows ? 'warn' : 'ok'}>{job.total_rows} rows: {job.valid_rows} ready to import, {job.error_rows} with problems (they will be skipped). {job.error_rows > 0 && <a href={fileUrl(`/api/admin/imports/${job.id}/errors.csv`)}>Download the problem rows</a>}</Notice>}
               {job.status === 'completed' && <Notice tone="ok">Done: {job.created_count} new, {job.updated_count} updated, {job.skipped_count} skipped. {can('customers.assign') && <Link to={`/allocation?portfolio=${job.id}`}>Assign this portfolio →</Link>}</Notice>}
               {job.status === 'failed' && <Notice tone="bad">Import failed: {job.failure}</Notice>}
               {preview && preview.errors.length > 0 && <Table rows={preview.errors.slice(0, 20).map((e: any, i: number) => ({ id: i, ...e }))} columns={[{ key: 'row', label: 'Row' }, { key: 'field', label: 'Column' }, { key: 'message', label: 'Problem' }]} />}

@@ -336,6 +336,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
     val offline by vm.profileOffline.collectAsState()
     val busy by vm.busy.collectAsState()
     val call by vm.call.collectAsState()
+    val options by vm.routeOptions.collectAsState()
+    var route by remember { mutableStateOf<String?>(null) }
     val err by vm.error.collectAsState()
     val codes by vm.dispositions.collectAsState()
     val label = { c: String -> codes.firstOrNull { it.code == c }?.label ?: c.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() } }
@@ -377,7 +379,12 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
         }
         // Main actions stay at hand on every tab.
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionChip(AmmpIcons.Call, "Call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary") }
+            if (options.size > 1) {   // both allowed: one button each, no extra question
+                ActionChip(AmmpIcons.Call, "SIM call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { route = "sim"; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary", "sim") }
+                ActionChip(AmmpIcons.Call, "C2C call", Ds.Blue, Modifier.weight(1f), enabled = !busy && call == null) { route = "server"; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary", "server") }
+            } else {
+                ActionChip(AmmpIcons.Call, "Call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { route = null; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary") }
+            }
             ActionChip(AmmpIcons.Event, "Callback", Ds.Amber, Modifier.weight(1f)) { dialog = "callback" }
             ActionChip(AmmpIcons.Check, "Payment", Ds.Teal, Modifier.weight(1f)) { dialog = "payment" }
             ActionChip(PlaceIcon, "Directions", Ds.Blue, Modifier.weight(1f), enabled = p == null || address != null || loc != null) {
@@ -414,8 +421,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
 
     when (dialog) {
         "which" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Which number?") }, confirmButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary") }) { Text("Primary") } }, dismissButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate") }) { Text("Alternate") } })
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary", route) }) { Text("Primary") } }, dismissButton = {
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate", route) }) { Text("Alternate") } })
         "note" -> TextDialog("Add collection note", "Note", busy, onDismiss = { dialog = null }) { vm.addCaseNote(case.c.id, it); dialog = null }
         "status" -> StatusDialog(p?.s("status") ?: case.c.status, busy, onDismiss = { dialog = null }) { s, n -> vm.setCaseStatus(case.c.id, s, n); dialog = null }
         "callback" -> CallbackDialog(busy, onDismiss = { dialog = null }) { iso, n -> vm.scheduleCallback(case.c.id, iso, n); dialog = null }

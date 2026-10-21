@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api, get, post, fmtDate, qs } from '../lib/api';
+import { api, get, post, fmtDate, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, LogoPlaceholder, Notice, Page, Stat, Table, useAction, useAsync } from '../components/ui';
 
@@ -155,16 +155,16 @@ export function ReportsPage() {
       <div className="grid2">
         <Card title="Portfolio-wise summary">
           <p className="muted">One row per portfolio — cases, calls, connected, not called, callbacks, collections — plus an "All portfolios" total.</p>
-          <a className="button" href={`/api/admin/reports/portfolio.csv${qs({ by: 'portfolio', from, to, ...f })}`}>Download portfolio-wise CSV</a>
+          <a className="button" href={fileUrl(`/api/admin/reports/portfolio.csv${qs({ by: 'portfolio', from, to, ...f })}`)}>Download portfolio-wise CSV</a>
         </Card>
         <Card title="Employee-wise summary">
           <p className="muted">One row per employee — their cases, calls, connect rate, cases not called, callbacks and money collected.</p>
-          <a className="button" href={`/api/admin/reports/portfolio.csv${qs({ by: 'employee', from, to, ...f })}`}>Download employee-wise CSV</a>
+          <a className="button" href={fileUrl(`/api/admin/reports/portfolio.csv${qs({ by: 'employee', from, to, ...f })}`)}>Download employee-wise CSV</a>
         </Card>
       </div>
       <Card title="Call report (every call)">
         <p className="muted">One row per call: employee, customer, portfolio, result, talk time, outcome and payment.</p>
-        <a className="button" href={`/api/admin/reports/calls.csv${qs({ from, to: `${to}T23:59:59`, ...f })}`}>Download call-by-call CSV</a>
+        <a className="button" href={fileUrl(`/api/admin/reports/calls.csv${qs({ from, to: `${to}T23:59:59`, ...f })}`)}>Download call-by-call CSV</a>
       </Card>
     </Page>
   );

@@ -70,6 +70,14 @@ final class CallService
                 Call::query()->where('user_id', $user->id)->where('provider', 'sim')->whereNotIn('state', CallLifecycle::TERMINAL)
                     ->update(['state' => 'cancelled', 'failure_reason' => 'result_not_reported', 'ended_at' => now()]);
             }
+            // A provider call (Click2Call / Exotel) still open: read its result first, so a finished call never blocks the next one.
+            Call::query()->where('user_id', $user->id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)
+                ->whereNotIn('state', CallLifecycle::TERMINAL)->get()->each(fn (Call $c) => $this->syncProvider($c));
+            // ponytail: a Click2Call call that never got past "initiated" in 3 minutes means the employee's phone never answered;
+            // it no longer blocks calling (its late result, if any, is ignored). Raise the 3 minutes if a provider is slower.
+            Call::query()->where('user_id', $user->id)->where('provider', 'click2call')->where('state', 'initiated')
+                ->where('initiated_at', '<', now()->subMinutes(3))
+                ->update(['state' => 'failed', 'failure_reason' => 'agent_not_answered', 'ended_at' => now()]);
             $active = Call::query()->where('user_id', $user->id)->whereNotIn('state', CallLifecycle::TERMINAL)
                 ->where('initiated_at', '>', now()->subHours(2))->exists();
             $decision = CallAuthoriser::authorise($policy, $customer ? [
@@ -97,15 +105,16 @@ final class CallService
             if ($c2c) {
                 \App\Telephony\Click2CallSettings::reserveAttempt($user, $decision['destination']);
             }
-            $call = DB::transaction(function () use ($user, $device, $customer, $which, $decision, $agentLeg, $adapter) {
+            $keep = $decision['record'] || $c2c;   // Click2Call: the provider records every call, keep it even when not required
+            $call = DB::transaction(function () use ($user, $device, $customer, $which, $decision, $agentLeg, $adapter, $keep) {
                 $call = Call::query()->create([
                     'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => $device->id,
                     'customer_id' => $customer?->id, 'destination' => $decision['destination'], 'which_number' => $which,
                     'agent_leg' => $agentLeg, 'state' => 'initiated', 'initiated_at' => now(),
                     'recording_required' => $decision['record'],
-                    'recording_status' => $decision['record'] ? RecordingState::Pending->value : RecordingState::NotRequired->value,
+                    'recording_status' => $keep ? RecordingState::Pending->value : RecordingState::NotRequired->value,
                 ]);
-                if ($decision['record']) {
+                if ($keep) {
                     Recording::query()->create(['call_id' => $call->id, 'status' => RecordingState::Pending->value]);
                 }
                 return $call;
