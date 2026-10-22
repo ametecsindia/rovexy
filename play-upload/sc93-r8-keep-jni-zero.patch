@@ -1,0 +1,29 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index 9f27358..63155c2 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -16,8 +16,8 @@ android {
+         applicationId = "in.ametecs.managedmobile"
+         minSdk = 28          // Android 9+: required for reliable Keystore EC keys and managed-device APIs used here
+         targetSdk = 36
+-        versionCode = 7        // +1 on every Play upload
+-        versionName = "1.0.6"
++        versionCode = 8        // +1 on every Play upload
++        versionName = "1.0.7"
+         // Default cloud server; managed configuration from Android Management overrides it, on-prem users type theirs.
+         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://rovexy.app\"")
+         buildConfigField("String", "PRODUCT_NAME", "\"ROVEXY\"")
+diff --git a/android/app/proguard-rules.pro b/android/app/proguard-rules.pro
+index 7873274..6553a29 100644
+--- a/android/app/proguard-rules.pro
++++ b/android/app/proguard-rules.pro
+@@ -3,3 +3,9 @@
+ -keepclassmembers class ametecs.managedmobile.** { *** Companion; }
+ -keep class org.webrtc.** { *; }
+ -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }   # field map WebView bridge
++# WebRTC's native code calls these classes BY NAME (org/jni_zero/JniUtil builds the video codec lists). R8 removed them,
++# so every camera / screen session aborted natively at start (SIGTRAP in jni_zero.cc) in release builds only.
++-keep class org.jni_zero.** { *; }
++-keepclasseswithmembers,includedescriptorclasses class * { @org.jni_zero.CalledByNative *; }
++-keepclasseswithmembers,includedescriptorclasses class * { @org.jni_zero.CalledByNativeUnchecked *; }
++-keepclasseswithmembers,includedescriptorclasses class * { @org.jni_zero.AccessedByNative *; }
