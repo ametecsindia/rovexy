@@ -64,7 +64,7 @@ final class DeviceController extends Controller
         return [
             'state' => $d->approval_state->value,
             'approval_code' => $d->approval_state === ApprovalState::Pending ? $d->approval_code : null,
-            'poll_after_seconds' => $d->approval_state === ApprovalState::Pending ? (int) min(60, max(5, $age / 10)) : null,
+            'poll_after_seconds' => $d->approval_state === ApprovalState::Pending ? (int) min(10, max(5, $age / 60)) : null,   // phone shows approval within ~10 s
         ];
     }
 }

@@ -28,7 +28,8 @@ final class PeopleController extends Controller
             ->when($r->query('role'), fn ($q, $k) => $q->whereHas('roles', fn ($w) => $w->where('key', $k)))
             ->when($r->query('team_id'), fn ($q, $t) => $q->whereHas('teams', fn ($w) => $w->where('teams.id', $t)))
             ->with(['teams:id,code,name', 'roles:id,key,name'])->orderBy('name')
-            ->paginate(100, ['id', 'employee_code', 'name', 'email', 'phone', 'status', 'last_login_at', 'mfa_enabled_at']));
+            // ponytail: per_page up to 1000 so pickers (device approval) list every employee, not just the first 100.
+            ->paginate(min(1000, max(1, (int) $r->query('per_page', 100))), ['id', 'employee_code', 'name', 'email', 'phone', 'status', 'last_login_at', 'mfa_enabled_at']));
     }
 
     public function createEmployee(Request $r, CurrentCompany $current)

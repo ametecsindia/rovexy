@@ -23,8 +23,21 @@ use Illuminate\Support\Facades\DB;
 
 final class PolicyService
 {
+    public const STANDARD = 'ROVEXY Standard';
+
     public function __construct(private readonly PushService $push)
     {
+    }
+
+    /** Every company has the recommended profile, published and ready to assign (created on first use). */
+    public function ensureStandard(User $actor): PolicyProfile
+    {
+        $p = PolicyProfile::query()->firstOrCreate(['name' => self::STANDARD],
+            ['description' => 'Recommended. Calling, optional call recording, work-time location, live screen and camera sessions (always with the employee\'s consent).']);
+        if (!$p->versions()->exists()) {   // new, or an earlier attempt stopped half-way
+            $this->publish($this->draft($p, PolicyCatalog::standard(), $actor, 'Recommended defaults'), $actor, true);
+        }
+        return $p;
     }
 
     /** @return array{company: array, team: array, device: array, refs: array} published override layers */

@@ -31,8 +31,14 @@ final class DeviceApprovalService
 
     public function approve(ManagedDevice $device, User $actor, int $userId, ?int $teamId, ?string $assetTag, ?int $profileId, string $code): ManagedDevice
     {
+        // Double-click / retry after a slow response: the phone is already approved to this employee, so it is a success.
+        if ($device->approval_state === ApprovalState::Approved && (int) $device->assigned_user_id === $userId) {
+            return $device;
+        }
         app(\App\Services\Platform\Licensing::class)->assertUsable();   // no new phones on an expired / suspended licence
-        if (!hash_equals($device->approval_code, strtoupper(trim($code)))) {
+        // Compare letters/digits only: "ABCD2345", "abcd-2345" and "ABCD 2345" are the code shown as ABCD-2345.
+        $norm = static fn (?string $c) => preg_replace('/[^A-Z0-9]/', '', strtoupper((string) $c));
+        if ($device->approval_state === ApprovalState::Pending && !hash_equals($norm($device->approval_code), $norm($code))) {
             throw new DomainException('approval_code_mismatch', 'The code does not match the code shown on the phone.');
         }
         $employee = User::query()->whereKey($userId)->first() ?? throw new DomainException('unknown_employee');
@@ -48,6 +54,9 @@ final class DeviceApprovalService
         $device = DB::transaction(function () use ($device, $actor, $employee, $teamId, $assetTag, $profileId) {
             /** @var ManagedDevice $d */
             $d = ManagedDevice::query()->whereKey($device->id)->lockForUpdate()->firstOrFail();
+            if ($d->approval_state === ApprovalState::Approved && (int) $d->assigned_user_id === $employee->id) {
+                return $d;   // two clicks at once: the first one won
+            }
             $d->approval_state = $d->approval_state->transitionTo(ApprovalState::Approved);
             $epoch = $d->credential_epoch + 1;   // fresh epoch: any earlier session is invalid
             $d->forceFill([
@@ -66,9 +75,11 @@ final class DeviceApprovalService
             Audit::record('device.approved', $d, ['employee_id' => $employee->id, 'team_id' => $teamId, 'asset_tag' => $assetTag, 'profile_id' => $profileId]);
             return $d;
         });
-        $this->policies->refreshDevice($device);
-        $this->push->ping($device, 'approval');
-        AdminFeed::dispatchFor($device->company_id, 'device.updated', ['device_id' => $device->id]);
+        // The approval is committed. Follow-ups must not turn it into an error: a failure here used to return 500, the
+        // admin retried and got "Cannot move device approval from approved to approved" while the phone was approved.
+        rescue(fn () => $this->policies->refreshDevice($device));   // also recomputed on the phone's first policy sync
+        rescue(fn () => $this->push->ping($device, 'approval'));
+        rescue(fn () => AdminFeed::dispatchFor($device->company_id, 'device.updated', ['device_id' => $device->id]));
         return $device;
     }
 

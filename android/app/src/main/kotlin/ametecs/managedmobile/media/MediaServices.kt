@@ -55,21 +55,23 @@ abstract class VisibleMediaService(private val kind: String, private val fgsType
     }
 }
 
+// ponytail: startService (not startForegroundService) — the app is on screen when consent returns, and a refused
+// startForeground() can then just stopSelf() instead of Android killing the app for breaking the FGS promise.
 class ScreenShareService : VisibleMediaService("screen", ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION) {
     companion object {
         fun start(ctx: Context, projectionData: Intent) =
-            ctx.startForegroundService(Intent(ctx, ScreenShareService::class.java).putExtra(EXTRA_PROJECTION, projectionData))
+            ctx.startService(Intent(ctx, ScreenShareService::class.java).putExtra(EXTRA_PROJECTION, projectionData))
     }
 }
 
 class VoiceCallService : VisibleMediaService("voice", ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE) {
     companion object {
-        fun start(ctx: Context) = ctx.startForegroundService(Intent(ctx, VoiceCallService::class.java))
+        fun start(ctx: Context) = ctx.startService(Intent(ctx, VoiceCallService::class.java))
     }
 }
 
 class CameraSessionService : VisibleMediaService("camera", ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA) {
     companion object {
-        fun start(ctx: Context) = ctx.startForegroundService(Intent(ctx, CameraSessionService::class.java))
+        fun start(ctx: Context) = ctx.startService(Intent(ctx, CameraSessionService::class.java))
     }
 }

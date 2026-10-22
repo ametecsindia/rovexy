@@ -70,13 +70,21 @@ class MainActivity : ComponentActivity() {
                     confirmButton = { TextButton(onClick = { prefs.edit().putBoolean("disclosure_ok", true).apply(); disclosed = true; askAll() }) { Text("Continue") } },
                     dismissButton = { TextButton(onClick = { disclosed = true }) { Text("Not now") } })
                 AppRoot(vm,
-                    requestScreenConsent = { screenConsent.launch((getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager).createScreenCaptureIntent()) },
-                    requestCameraConsent = { cameraConsent.launch(Manifest.permission.CAMERA) },
-                    requestMicConsent = { micConsent.launch(Manifest.permission.RECORD_AUDIO) },
+                    requestScreenConsent = { runCatching { screenConsent.launch(screenCaptureIntent()) }.onFailure { vm.mediaConsent(null, "screen") } },
+                    requestCameraConsent = { runCatching { cameraConsent.launch(Manifest.permission.CAMERA) }.onFailure { vm.mediaConsent(null, "camera") } },
+                    requestMicConsent = { runCatching { micConsent.launch(Manifest.permission.RECORD_AUDIO) }.onFailure { vm.mediaConsent(null, "voice") } },
                     requestCallPermissions = { if (prefs.getBoolean("disclosure_ok", false)) notifPermission.launch(SimCalls.required) else disclosed = false },
                     requestDialerRole = { CallSession.roleRequestIntent(this)?.let { runCatching { dialerRole.launch(it) } } })
             }
         }
+    }
+
+    /** Android 14+: offer ONLY "Entire screen". "A single app" opened an app picker and moved the employee into another
+     *  app (looked like ROVEXY closing), and the supervisor then saw just that one app. */
+    private fun screenCaptureIntent(): android.content.Intent {
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        return if (android.os.Build.VERSION.SDK_INT >= 34) mpm.createScreenCaptureIntent(android.media.projection.MediaProjectionConfig.createConfigForDefaultDisplay())
+        else mpm.createScreenCaptureIntent()
     }
 
     // Buttons/taps on our notifications: Answer an internet call, open the chat.

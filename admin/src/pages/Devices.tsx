@@ -19,6 +19,12 @@ export function DevicesPage() {
     return () => echo.leave(`company.${me.company.id}.admin`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [me]);
+  // New requests and approvals also show up without live updates (WebSockets off / blocked): quiet refresh every 10 s.
+  useEffect(() => {
+    const t = setInterval(() => { if (!document.hidden) void devices.reload(); }, 10_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   return (
     <Page title="Mobile devices & approval requests" subtitle="Match the code shown on the phone before approving. The code identifies the request; it is not a password."
@@ -47,7 +53,7 @@ export function DevicesPage() {
 }
 
 function ApproveModal({ device, onClose, onDone }: { device: any; onClose: () => void; onDone: () => void }) {
-  const emps = useAsync(() => get('/employees'));
+  const emps = useAsync(() => get('/employees?role=employee&per_page=1000'));
   const teams = useAsync(() => get<any[]>('/teams'));
   const profiles = useAsync(() => get<any[]>('/policies'));
   const [f, setF] = useState({ code: '', user_id: '', team_id: '', asset_tag: '', profile_id: '' });

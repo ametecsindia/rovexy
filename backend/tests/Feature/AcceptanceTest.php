@@ -592,8 +592,11 @@ final class AcceptanceTest extends TestCase
         $open = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000101'])->assertCreated()->json('call_id');
         // Click2Call keeps the provider's recording even when the policy does not require one.
         $this->assertSame('pending', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('recording_status')));
+        // "Hang up" before the employee's phone answered: Click2Call has no hang-up API, so the call is closed here.
+        $m->work('POST', "/api/mobile/v1/calls/{$open}/hangup")->assertSuccessful();
+        $this->assertSame('cancelled', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('state')));
         // The employee's phone never answered: after 3 minutes that call no longer blocks calling ("Finish the current call first").
-        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->update(['initiated_at' => now()->subMinutes(4)]));
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->update(['state' => 'initiated', 'failure_reason' => null, 'initiated_at' => now()->subMinutes(4)]));
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'retry_limit');
         $this->assertSame(1, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('audit_events')->where('action', 'call.blocked')->count()));
         $this->assertSame(['failed', 'agent_not_answered'], app(CurrentCompany::class)->withoutScope(fn () => array_values(Call::query()->where('uuid', $open)->first(['state', 'failure_reason'])->toArray())));
@@ -1257,5 +1260,36 @@ final class AcceptanceTest extends TestCase
         $m->register()->assertCreated()->assertJsonPath('state', 'approved')->assertJsonPath('approval_code', null);
         $m->signed('POST', '/api/mobile/v1/device/session')->assertOk()->assertJsonStructure(['device_token']);
         (new MobileClient($this, 'bravo'))->register()->assertCreated()->assertJsonPath('state', 'pending');   // other companies unchanged
+    }
+
+    /** Approval: the code is accepted without its dash / in lower case, and a repeated Approve is a success, not an error. */
+    public function test_approval_tolerates_code_format_and_double_click(): void
+    {
+        $m = new MobileClient($this, 'alpha');
+        $code = $m->register()->assertCreated()->json('approval_code');
+        $device = app(CurrentCompany::class)->withoutScope(fn () => ManagedDevice::query()->where('installation_id', $m->installationId)->firstOrFail());
+        $body = ['code' => strtolower(str_replace('-', ' ', $code)), 'user_id' => $this->users['alpha']['emp']->id];
+        $this->admin('alpha')->postJson("/api/admin/devices/{$device->id}/approve", $body)->assertOk()->assertJsonPath('state', 'approved');
+        $this->admin('alpha')->postJson("/api/admin/devices/{$device->id}/approve", $body)->assertOk()->assertJsonPath('state', 'approved');
+        $m->signed('GET', '/api/mobile/v1/device/status')->assertOk()->assertJsonPath('state', 'approved');
+        $this->admin('alpha')->postJson("/api/admin/devices/{$device->id}/approve", ['code' => 'ZZZZ-ZZZZ', 'user_id' => $this->users['alpha']['admin']->id])->assertStatus(422);
+    }
+
+    /** Every company gets "ROVEXY Standard", live and ready to apply; it turns on live view + camera sessions. */
+    public function test_recommended_policy_is_ready_to_apply(): void
+    {
+        $list = $this->admin('alpha')->getJson('/api/admin/policies')->assertOk()->json();
+        $std = collect($list)->firstWhere('recommended', true);
+        self::assertNotNull($std);
+        self::assertSame('published', $std['versions'][0]['status']);
+        self::assertCount(1, collect($this->admin('alpha')->getJson('/api/admin/policies')->json())->where('recommended', true));   // not duplicated
+        $this->admin('alpha')->putJson('/api/admin/policy-assignments', ['profile_id' => $std['id'], 'target_type' => 'company'])->assertOk();
+        $m = $this->approvedPhone();
+        app(CurrentCompany::class)->run($this->a, function () use ($m) {
+            $d = ManagedDevice::query()->where('installation_id', $m->installationId)->firstOrFail();
+            $v = app(\App\Services\PolicyService::class)->currentSnapshot($d)->values;
+            self::assertTrue($v['live_view.enabled']);
+            self::assertTrue($v['camera_session.enabled']);
+        });
     }
 }

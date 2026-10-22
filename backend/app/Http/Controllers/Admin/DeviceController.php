@@ -47,7 +47,7 @@ final class DeviceController extends Controller
 
     public function approve(Request $r, int $id, DeviceApprovalService $svc)
     {
-        $data = $r->validate(['code' => 'required|string|max:9', 'user_id' => 'required|integer', 'team_id' => 'nullable|integer',
+        $data = $r->validate(['code' => 'required|string|max:20', 'user_id' => 'required|integer', 'team_id' => 'nullable|integer',
             'asset_tag' => 'nullable|string|max:64', 'profile_id' => 'nullable|integer']);
         $d = $svc->approve(self::scopedDevice($r, $id), $r->user(), $data['user_id'], $data['team_id'] ?? null,
             $data['asset_tag'] ?? null, $data['profile_id'] ?? null, $data['code']);

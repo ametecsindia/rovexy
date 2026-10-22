@@ -58,7 +58,9 @@ final class PolicyTest extends TestCase
 
         $ok = PolicyResolver::effective(['apps.packages' => [self::PKG]])['values'];
         self::assertFalse(PolicyConflictDetector::hasErrors(PolicyConflictDetector::detect($ok, self::PKG)));
-        self::assertContains('app_not_allowlisted', array_column(PolicyConflictDetector::detect(PolicyResolver::effective([])['values'], self::PKG), 'code'));
+        // Catalogue defaults alone publish cleanly (the employee app is always force-installed by the translator).
+        self::assertFalse(PolicyConflictDetector::hasErrors(PolicyConflictDetector::detect(PolicyResolver::effective([])['values'], self::PKG)));
+        self::assertFalse(PolicyConflictDetector::hasErrors(PolicyConflictDetector::detect(PolicyResolver::effective(PolicyCatalog::standard())['values'], self::PKG)));
     }
 
     public function test_capability_reporting_is_accurate(): void

@@ -455,6 +455,13 @@ final class CallService
         if (!$call->isTerminal() && $call->provider !== 'sim') {   // SIM calls are hung up on the phone itself
             $this->telephony->adapter()->hangup($call, 'NORMAL_CLEARING');
         }
+        // Click2Call has no hang-up API: if the employee's phone never answered, "Hang up" simply closes the call here
+        // (otherwise the app waits up to 15 minutes for a result that will not come). A call in progress ends on the phone.
+        if ($call->provider === 'click2call' && $call->state === 'initiated') {
+            $call->forceFill(['state' => 'cancelled', 'failure_reason' => 'hung_up_before_answer', 'ended_at' => now()])->save();
+            ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'idle']);
+            Audit::record('call.cancelled_by_employee', $call);
+        }
     }
 
     /** Policy `revocation.active_call`: terminate (default) or allow the in-progress call to finish. */

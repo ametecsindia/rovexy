@@ -28,10 +28,15 @@ final class PolicyController extends Controller
         ], PolicyCatalog::all())));
     }
 
-    public function index()
+    public function index(Request $r, PolicyService $svc)
     {
-        return response()->json(PolicyProfile::query()->with(['versions' => fn ($q) => $q->orderByDesc('version')->limit(10)])->get()->map(fn ($p) => $p->toArray() + [
-            'assignments' => PolicyAssignment::query()->where('profile_id', $p->id)->get(['target_type', 'target_id']),
+        $svc->ensureStandard($r->user());
+        $teams = Team::query()->pluck('name', 'id');
+        return response()->json(PolicyProfile::query()->with(['versions' => fn ($q) => $q->orderByDesc('version')->limit(10)])->orderBy('id')->get()->map(fn ($p) => $p->toArray() + [
+            'recommended' => $p->name === PolicyService::STANDARD,
+            'standard' => $p->name === PolicyService::STANDARD ? PolicyCatalog::standard() : null,
+            'assignments' => PolicyAssignment::query()->where('profile_id', $p->id)->get(['target_type', 'target_id'])
+                ->map(fn ($a) => $a->toArray() + ['label' => match ($a->target_type) { 'company' => 'All phones', 'team' => 'Team: ' . ($teams[$a->target_id] ?? "#{$a->target_id}"), default => "Phone #{$a->target_id}" }]),
         ]));
     }
 

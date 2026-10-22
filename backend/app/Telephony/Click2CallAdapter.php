@@ -52,6 +52,8 @@ final class Click2CallAdapter implements PolledTelephony
         if (!$r->successful() || !is_array($body) || isset($body['error']) || isset($body['errors'])) {
             throw new TelephonyUnavailable('Click2Call refused the call: HTTP ' . $r->status() . ' ' . mb_substr($r->body(), 0, 200));
         }
+        // The provider's own answer, kept on the call's audit trail (Audit log → call.provider_start) to see why a call never rang.
+        \App\Support\Audit::record('call.provider_start', $call, ['http' => $r->status(), 'reply' => mb_substr($r->body(), 0, 500)]);
         $id = $body['call_id'] ?? $body['callId'] ?? $body['uuid'] ?? ($body['response']['call_id'] ?? null);
         $call->forceFill(['provider_call_id' => mb_substr((string) ($id ?? $call->uuid), 0, 64)])->save();
     }
@@ -85,19 +87,26 @@ final class Click2CallAdapter implements PolledTelephony
     }
 
     /** Fetch the gateway record. @return array{cdr:array,recording_url:?string,duration:?int}|null */
+    /** Why the last gateway read gave nothing (e.g. HTTP401 = wrong gateway secret), shown on the call as its cause. */
+    private string $why = '';
+
     private function record(Call $call): ?array
     {
+        $this->why = '';
         if (empty($this->cfg['cdr_url'])) {
+            $this->why = 'NO_URL';
             return null;
         }
         try {
             $r = Http::timeout(5)->acceptJson()->withHeaders(['Secret-Key' => (string) $this->cfg['gateway_secret']])
                 ->get(rtrim((string) $this->cfg['cdr_url'], '/') . '/' . rawurlencode($call->uuid) . '/' . rawurlencode($call->caller_number ?: self::normalize($this->cfg['did'])));
         } catch (\Throwable) {
+            $this->why = 'UNREACHABLE';
             return null;
         }
         $j = $r->json();
         if (!is_array($j) || (int) ($j['status'] ?? 0) !== 200 || !is_array($j['data'] ?? null)) {
+            $this->why = 'HTTP' . $r->status() . (is_array($j) && isset($j['status']) ? '_S' . (int) $j['status'] : '');
             return null;
         }
         $cdr = $j['data']['response'] ?? [];
@@ -133,7 +142,7 @@ final class Click2CallAdapter implements PolledTelephony
             // No record at all long after the start: the provider never placed the call. End it so it doesn't block calling.
             if ($call->initiated_at && $call->initiated_at->lt(now()->subMinutes(15))) {
                 return ['terminal' => true, 'state' => 'failed', 'talk' => 0, 'ring' => null, 'started' => null, 'ended' => null,
-                    'recording_url' => null, 'cause' => 'C2C_NO_RECORD'];
+                    'recording_url' => null, 'cause' => rtrim('C2C_NO_RECORD_' . $this->why, '_')];
             }
             return null;
         }

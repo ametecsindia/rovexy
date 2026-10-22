@@ -85,8 +85,8 @@ class WebRtcSession(
             // screen into a small, blurry picture.
             val m = context.resources.displayMetrics
             val scale = minOf(1f, 1280f / maxOf(m.widthPixels, m.heightPixels))
-            capturer!!.startCapture((m.widthPixels * scale).toInt() / 2 * 2, (m.heightPixels * scale).toInt() / 2 * 2, fps)
-        } else capturer!!.startCapture(width, height, fps)
+            capturer!!.startCapture((m.widthPixels * scale).toInt() / 16 * 16, (m.heightPixels * scale).toInt() / 16 * 16, fps)
+        } else capturer!!.startCapture(width / 16 * 16, height / 16 * 16, fps)
         localTrack = factory.createVideoTrack("ammp-$kind", source)
     }
 

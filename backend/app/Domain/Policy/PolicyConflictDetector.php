@@ -37,9 +37,8 @@ final class PolicyConflictDetector
         if ($v['live_view.screenshots'] && !$v['live_view.enabled']) {
             $add('screenshots_without_live_view', 'error', ['live_view.screenshots'], 'Screenshots are only possible inside a live-view session.');
         }
-        if ($v['apps.mode'] === 'allowlist' && !in_array($employeeAppPackage, $v['apps.packages'], true)) {
-            $add('app_not_allowlisted', 'error', ['apps.packages'], "The employee app ({$employeeAppPackage}) must be in the allowlist.");
-        }
+        // (No "employee app must be in the allowlist" check: AmapiPolicyTranslator always force-installs the employee app,
+        //  so that error was a false alarm that blocked every new profile with the default allowlist.)
         if ($v['apps.mode'] === 'blocklist' && in_array($employeeAppPackage, $v['apps.packages'], true)) {
             $add('app_blocklisted', 'error', ['apps.packages'], 'The employee app cannot be blocklisted.');
         }

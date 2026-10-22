@@ -42,7 +42,7 @@ export const NAV: NavItem[] = [
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
   { to: '/address-report', icon: 'pin', label: 'Address & reachability', perm: 'customers.view', group: 'Customers' },
   { to: '/devices', icon: 'phone', label: 'Devices & approvals', perm: 'devices.view', group: 'Devices' },
-  { to: '/policies', icon: 'shield', label: 'Policy profiles', perm: 'policies.view', group: 'Devices' },
+  { to: '/policies', icon: 'shield', label: 'Policies', perm: 'policies.view', group: 'Devices' },
   { to: '/location', icon: 'pin', label: 'Status & location', perm: 'location.view', group: 'Supervision' },
   { to: '/chat', icon: 'chat', label: 'Messages', perm: 'chat.use', group: 'Supervision' },
   { to: '/screen', icon: 'screen', label: 'Live screen', perm: 'media.screen', group: 'Supervision' },

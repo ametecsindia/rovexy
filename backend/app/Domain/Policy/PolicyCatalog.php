@@ -78,6 +78,31 @@ final class PolicyCatalog
         return self::$controls;
     }
 
+    /**
+     * "ROVEXY Standard" — the recommended starting policy: everything a calling / field team uses, nothing extra.
+     * Only app-level controls; device-level ones (Android Management) stay at catalogue defaults and are ignored on
+     * app-only phones anyway. Live view and camera still ask the employee every time.
+     *
+     * @return array<string,mixed>
+     */
+    public static function standard(): array
+    {
+        return [
+            'calling.enabled' => true,
+            'recording.mode' => 'optional',          // the phone's own recorder; phones without one are not blocked
+            'recording.on_failure' => 'continue_flagged',
+            'location.enabled' => true,
+            'location.interval_seconds' => 300,
+            'live_view.enabled' => true,
+            'live_view.screenshots' => true,
+            'live_view.fps' => 10,                   // what the app actually sends
+            'live_view.timeout_minutes' => 15,
+            'camera_session.enabled' => true,
+            'camera_session.timeout_minutes' => 10,
+            'compliance.mandatory' => ['calling.enabled'],
+        ];
+    }
+
     public static function get(string $key): Control
     {
         return self::all()[$key] ?? throw new DomainException('unknown_policy_key', "Unknown policy key {$key}.");

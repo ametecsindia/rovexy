@@ -188,7 +188,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             var attempt = 0
             var hint: Int? = null
             while (screen.value is Screen.Pending) {
-                delay(Backoff.pollDelaySeconds(hint, attempt++) * 1000)
+                // Capped at ~10 s: the old 60 s backoff left an approved phone on the code screen for up to a minute.
+                delay(Backoff.pollDelaySeconds(hint, minOf(attempt++, 1)) * 1000)
                 try {
                     val s = g.api.call("GET", "/api/mobile/v1/device/status", null, ApiClient.Auth.SIGNED).obj()
                     hint = s.str("poll_after_seconds")?.toIntOrNull()
@@ -236,9 +237,31 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Uploads the crash note left by the previous run (see AmmpApp), once. */
     private fun sendCrashNote() = viewModelScope.launch {
         val f = File(getApplication<Application>().filesDir, "last_crash.txt")
-        if (!f.exists()) return@launch
-        runCatching { g.session.work("POST", "/api/mobile/v1/diagnostics/crash", buildJsonObject { put("report", f.readText().take(12_000)) }) }
+        val note = (if (f.exists()) f.readText() else "") + (kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { lastExitNote() } ?: "")
+        if (note.isBlank()) return@launch
+        runCatching { g.session.work("POST", "/api/mobile/v1/diagnostics/crash", buildJsonObject { put("report", note.take(12_000)) }) }
             .onSuccess { f.delete() }
+    }
+
+    /** Native (WebRTC/camera driver) crashes, ANRs and Android killing the app leave no Java stack trace: Android 11+
+     *  keeps the reason, so it goes to the console (audit "app.crash") too. Each exit is reported once. */
+    private fun lastExitNote(): String? {
+        if (Build.VERSION.SDK_INT < 30) return null
+        val ctx = getApplication<Application>()
+        val prefs = ctx.getSharedPreferences("rovexy_ui", android.content.Context.MODE_PRIVATE)
+        val e = runCatching { ctx.getSystemService(android.app.ActivityManager::class.java).getHistoricalProcessExitReasons(ctx.packageName, 0, 1).firstOrNull() }
+            .getOrNull() ?: return null
+        if (e.timestamp <= prefs.getLong("exit_seen", 0)) return null
+        prefs.edit().putLong("exit_seen", e.timestamp).apply()
+        val bad = setOf(android.app.ApplicationExitInfo.REASON_CRASH_NATIVE, android.app.ApplicationExitInfo.REASON_ANR,
+            android.app.ApplicationExitInfo.REASON_LOW_MEMORY, android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE,
+            android.app.ApplicationExitInfo.REASON_SIGNALED, android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)
+        if (e.reason !in bad) return null
+        // Native tombstones are binary; the readable parts (library + function names) are enough to find the cause.
+        val trace = runCatching { e.traceInputStream?.use { it.readBytes().let { b -> String(b, 0, minOf(b.size, 16_000)) }.replace(Regex("[^\\x20-\\x7E\\n]+"), " ") } }.getOrNull() ?: ""
+        return "\n--- previous exit: reason=${e.reason} status=${e.status} at=${java.time.Instant.ofEpochMilli(e.timestamp)} " +
+            "${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} app=${BuildConfig.VERSION_NAME} " +
+            "${e.description ?: ""}\n${trace.take(8_000)}"
     }
 
     private fun applyMe(me: JsonObject) {
@@ -463,6 +486,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Activity resumed (back from the dialer) or the employee tapped "Finish call": report the SIM call once. */
     fun onResumed() {
+        // Back in the app while waiting for approval (e.g. after asking the admin): check now, don't wait for the next poll.
+        if (screen.value is Screen.Pending) viewModelScope.launch { refreshStatus() }
         if (recorderSetup.value && CallRecordService.accessibilityOn(getApplication())) recorderSetup.value = false
         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
         if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
@@ -524,7 +549,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     for (i in 0 until 15) { if (!CallRecordService.running) break; delay(700) }
                     // Without the accessibility switch Android feeds silence to the mic during calls — never upload that as a recording.
                     if (!SimCalls.phoneRecorder && own.length() > 2_000 && CallRecordService.accessibilityOn(ctx)) file = SimCalls.RecorderFile(android.net.Uri.fromFile(own), own.name, "audio/wav", talk, own.length())
-                    else if (talk > 0 && answeredOverride == null) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
+                    // Also after the employee tapped "Yes, answered": OPPO/ColorOS and others save the file only after hang-up, so the
+                    // first search can miss it; it used to never be looked for again and the recording was lost.
+                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
                     bytes = file?.let { SimCalls.read(ctx, it) }
                     // An answered call with no recorder file means auto-record is off: block the next call until a recording shows up.
                     if (SimCalls.phoneRecorder && talk > 0) {

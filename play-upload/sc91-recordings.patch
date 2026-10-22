@@ -1,0 +1,55 @@
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+index b4907ee..8efd386 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+@@ -549,7 +549,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                     for (i in 0 until 15) { if (!CallRecordService.running) break; delay(700) }
+                     // Without the accessibility switch Android feeds silence to the mic during calls — never upload that as a recording.
+                     if (!SimCalls.phoneRecorder && own.length() > 2_000 && CallRecordService.accessibilityOn(ctx)) file = SimCalls.RecorderFile(android.net.Uri.fromFile(own), own.name, "audio/wav", talk, own.length())
+-                    else if (talk > 0 && answeredOverride == null) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
++                    // Also after the employee tapped "Yes, answered": OPPO/ColorOS and others save the file only after hang-up, so the
++                    // first search can miss it; it used to never be looked for again and the recording was lost.
++                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
+                     bytes = file?.let { SimCalls.read(ctx, it) }
+                     // An answered call with no recorder file means auto-record is off: block the next call until a recording shows up.
+                     if (SimCalls.phoneRecorder && talk > 0) {
+diff --git a/backend/app/Telephony/Click2CallAdapter.php b/backend/app/Telephony/Click2CallAdapter.php
+index a3079cb..09fc537 100644
+--- a/backend/app/Telephony/Click2CallAdapter.php
++++ b/backend/app/Telephony/Click2CallAdapter.php
+@@ -87,19 +87,26 @@ final class Click2CallAdapter implements PolledTelephony
+     }
+ 
+     /** Fetch the gateway record. @return array{cdr:array,recording_url:?string,duration:?int}|null */
++    /** Why the last gateway read gave nothing (e.g. HTTP401 = wrong gateway secret), shown on the call as its cause. */
++    private string $why = '';
++
+     private function record(Call $call): ?array
+     {
++        $this->why = '';
+         if (empty($this->cfg['cdr_url'])) {
++            $this->why = 'NO_URL';
+             return null;
+         }
+         try {
+             $r = Http::timeout(5)->acceptJson()->withHeaders(['Secret-Key' => (string) $this->cfg['gateway_secret']])
+                 ->get(rtrim((string) $this->cfg['cdr_url'], '/') . '/' . rawurlencode($call->uuid) . '/' . rawurlencode($call->caller_number ?: self::normalize($this->cfg['did'])));
+         } catch (\Throwable) {
++            $this->why = 'UNREACHABLE';
+             return null;
+         }
+         $j = $r->json();
+         if (!is_array($j) || (int) ($j['status'] ?? 0) !== 200 || !is_array($j['data'] ?? null)) {
++            $this->why = 'HTTP' . $r->status() . (is_array($j) && isset($j['status']) ? '_S' . (int) $j['status'] : '');
+             return null;
+         }
+         $cdr = $j['data']['response'] ?? [];
+@@ -135,7 +142,7 @@ final class Click2CallAdapter implements PolledTelephony
+             // No record at all long after the start: the provider never placed the call. End it so it doesn't block calling.
+             if ($call->initiated_at && $call->initiated_at->lt(now()->subMinutes(15))) {
+                 return ['terminal' => true, 'state' => 'failed', 'talk' => 0, 'ring' => null, 'started' => null, 'ended' => null,
+-                    'recording_url' => null, 'cause' => 'C2C_NO_RECORD'];
++                    'recording_url' => null, 'cause' => rtrim('C2C_NO_RECORD_' . $this->why, '_')];
+             }
+             return null;
+         }
