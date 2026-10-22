@@ -258,7 +258,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             android.app.ApplicationExitInfo.REASON_SIGNALED, android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)
         if (e.reason !in bad) return null
         // Native tombstones are binary; the readable parts (library + function names) are enough to find the cause.
-        val trace = runCatching { e.traceInputStream?.use { it.readBytes().let { b -> String(b, 0, minOf(b.size, 16_000)) }.replace(Regex("[^\\x20-\\x7E\\n]+"), " ") } }.getOrNull() ?: ""
+        // Whole file; keep the frames that name a library/function (the crashing thread is not always first).
+        val trace = runCatching { e.traceInputStream?.use { String(it.readBytes(), Charsets.ISO_8859_1) } }.getOrNull().orEmpty()
+            .split(Regex("[^\\x20-\\x7E]+")).map { it.trim() }.filter { it.length > 6 }
+            .let { parts ->
+                // A frame is "<function>" then "<library>": keep the function before every WebRTC/app/abort hit.
+                val hit = Regex("abort|Abort|Check failed|FATAL|webrtc|jingle|Java_|ametecs|SIG|cause")
+                parts.take(6) + parts.indices.filter { hit.containsMatchIn(parts[it]) }.flatMap { listOf(it - 1, it) }.filter { it >= 0 }.distinct().map { parts[it] }
+            }
+            .joinToString("\n")
         return "\n--- previous exit: reason=${e.reason} status=${e.status} at=${java.time.Instant.ofEpochMilli(e.timestamp)} " +
             "${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} app=${BuildConfig.VERSION_NAME} " +
             "${e.description ?: ""}\n${trace.take(8_000)}"
@@ -492,9 +500,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
         if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
+        if (screen.value is Screen.Dashboard && g.store.getString("rec_hunt") != null && g.store.getString("sim_pending") == null) viewModelScope.launch { huntRecording() }
         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
         finishing = true
         viewModelScope.launch { try { finishSimCall() } finally { finishing = false } }
+    }
+
+    /** Late upload of a recording the phone's recorder saved after the call screen closed. True when done or given up. */
+    private suspend fun huntRecording(): Boolean {
+        val h = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject } ?: return true
+        if (g.store.getString("sim_pending") != null || finishing) return false
+        val since = h.str("since")!!.toLong()
+        if (System.currentTimeMillis() - since > 30 * 60_000) { g.store.putString("rec_hunt", null); return true }
+        val ctx = getApplication<Application>()
+        SimCalls.rescan(ctx); delay(1500)
+        val f = SimCalls.findRecording(ctx, h.str("number")!!, since) ?: return false
+        g.store.putString("rec_hunt", null)
+        g.store.putString("rec_ok", "1"); g.store.putString("rec_block_since", null)
+        g.store.putString("sim_pending", buildJsonObject {
+            put("id", h.str("id")!!); put("number", h.str("number")!!); put("since", since.toString())
+            put("stage", "upload"); put("uri", f.uri.toString()); put("name", f.name); put("mime", f.mime ?: "audio/mp4"); f.durationSeconds?.let { put("dur", it) }
+        }.toString())
+        finishing = true
+        try { finishSimCall() } finally { finishing = false }
+        return true
     }
 
     private suspend fun finishSimCall() {
@@ -551,7 +580,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     if (!SimCalls.phoneRecorder && own.length() > 2_000 && CallRecordService.accessibilityOn(ctx)) file = SimCalls.RecorderFile(android.net.Uri.fromFile(own), own.name, "audio/wav", talk, own.length())
                     // Also after the employee tapped "Yes, answered": OPPO/ColorOS and others save the file only after hang-up, so the
                     // first search can miss it; it used to never be looked for again and the recording was lost.
-                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
+                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { if (i % 3 == 0) SimCalls.rescan(ctx); file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
                     bytes = file?.let { SimCalls.read(ctx, it) }
                     // An answered call with no recorder file means auto-record is off: block the next call until a recording shows up.
                     if (SimCalls.phoneRecorder && talk > 0) {
@@ -585,6 +614,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     stage = "upload"
                 } else {
                     g.store.putString("sim_pending", null)
+                    // Answered but no file yet: keep looking for 30 min (OPPO indexed the file only later) and upload it then.
+                    if (keepRecording && talk > 0) {
+                        g.store.putString("rec_hunt", buildJsonObject { put("id", id); put("number", number); put("since", log?.startedAtMs ?: since) }.toString())
+                        viewModelScope.launch { repeat(10) { delay(30_000); if (huntRecording()) return@launch } }
+                    }
                     return
                 }
             }

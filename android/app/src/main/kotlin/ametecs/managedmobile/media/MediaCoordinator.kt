@@ -187,7 +187,7 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
                 started = s
                 session.work("POST", "/api/mobile/v1/media/${r.id}/start")
                 // 5 fps made Live View look frozen; screens change less than camera, so 10 vs 15 fps.
-                s.start(projection, 1280, 720, if (kind == "screen") 10 else 15)   // 720 (not 540): 16-aligned for HW encoders
+                s.start(projection, 960, 544, if (kind == "screen") 10 else 15)   // 16-aligned; sized for software VP8
                 _active.value = s
                 pollSignals(s)
             } catch (e: Throwable) {

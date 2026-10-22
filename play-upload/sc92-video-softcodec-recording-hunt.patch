@@ -1,0 +1,202 @@
+diff --git a/android/app/build.gradle.kts b/android/app/build.gradle.kts
+index a8a2f1e..9f27358 100644
+--- a/android/app/build.gradle.kts
++++ b/android/app/build.gradle.kts
+@@ -16,8 +16,8 @@ android {
+         applicationId = "in.ametecs.managedmobile"
+         minSdk = 28          // Android 9+: required for reliable Keystore EC keys and managed-device APIs used here
+         targetSdk = 36
+-        versionCode = 6        // +1 on every Play upload
+-        versionName = "1.0.5"
++        versionCode = 7        // +1 on every Play upload
++        versionName = "1.0.6"
+         // Default cloud server; managed configuration from Android Management overrides it, on-prem users type theirs.
+         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://rovexy.app\"")
+         buildConfigField("String", "PRODUCT_NAME", "\"ROVEXY\"")
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/calls/SimCalls.kt b/android/app/src/main/kotlin/ametecs/managedmobile/calls/SimCalls.kt
+index 8003acb..14397c1 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/calls/SimCalls.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/calls/SimCalls.kt
+@@ -93,7 +93,7 @@ object SimCalls {
+         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < 29) return emptyList()
+         return runCatching {
+             ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Audio.Media.RELATIVE_PATH),
+-                "${MediaStore.Audio.Media.DATE_ADDED} >= ?", arrayOf(((sinceMs - 5_000) / 1000).toString()), null)?.use { c ->
++                SINCE, since(sinceMs - 5_000), null)?.use { c ->
+                 buildList { while (c.moveToNext()) add(c.getString(0).orEmpty()) }.distinct().take(5)
+             } ?: emptyList()
+         }.getOrDefault(emptyList())
+@@ -119,7 +119,8 @@ object SimCalls {
+      *  talk time. No file within ~20 s → reported as not answered. ponytail: with auto-record off every call reads as
+      *  unanswered; the off-hook time (READ_PHONE_STATE) could bound it if that ever matters. */
+     suspend fun logFromRecording(ctx: Context, number: String, sinceMs: Long): LogEntry {
+-        repeat(10) {
++        repeat(10) { i ->
++            if (i % 3 == 0) rescan(ctx)
+             findRecording(ctx, number, sinceMs)?.let { return LogEntry(it.durationSeconds ?: 1, sinceMs) }
+             kotlinx.coroutines.delay(2000)
+         }
+@@ -134,8 +135,7 @@ object SimCalls {
+         val cols = mutableListOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.MIME_TYPE,
+             MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
+         if (Build.VERSION.SDK_INT >= 29) cols += MediaStore.Audio.Media.RELATIVE_PATH
+-        ctx.contentResolver.query(base, cols.toTypedArray(), "${MediaStore.Audio.Media.DATE_ADDED} >= ?", arrayOf(((sinceMs - 5_000) / 1000).toString()),
+-            "${MediaStore.Audio.Media.DATE_ADDED} DESC")?.use { c ->
++        ctx.contentResolver.query(base, cols.toTypedArray(), SINCE, since(sinceMs - 5_000), "${MediaStore.Audio.Media.DATE_MODIFIED} DESC")?.use { c ->
+             while (c.moveToNext()) {
+                 val name = c.getString(1).orEmpty()
+                 val where = (c.getString(5).orEmpty() + "/" + (if (cols.size > 6) c.getString(6).orEmpty() else "")).lowercase()
+@@ -156,8 +156,7 @@ object SimCalls {
+         val cols = mutableListOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
+         if (Build.VERSION.SDK_INT >= 29) cols += MediaStore.Audio.Media.RELATIVE_PATH
+         return runCatching {
+-            ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), "${MediaStore.Audio.Media.DATE_ADDED} >= ?",
+-                arrayOf((sinceMs / 1000).toString()), "${MediaStore.Audio.Media.DATE_ADDED} DESC")?.use { c ->
++            ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), SINCE, since(sinceMs), "${MediaStore.Audio.Media.DATE_MODIFIED} DESC")?.use { c ->
+                 while (c.moveToNext()) {
+                     val where = (c.getString(3).orEmpty() + "/" + (if (cols.size > 4) c.getString(4).orEmpty() else "") + "/" + c.getString(0).orEmpty()).lowercase()
+                     if (where.contains("call") && c.getLong(2) > 0) return@use c.getLong(1) * 1000
+@@ -173,5 +172,18 @@ object SimCalls {
+         if (!ok) ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+     }
+ 
++    /** New since the call: added OR modified. OPPO/ColorOS saved the file but it was not found by DATE_ADDED alone. */
++    private val SINCE = "(${MediaStore.Audio.Media.DATE_ADDED} >= ? OR ${MediaStore.Audio.Media.DATE_MODIFIED} >= ?)"
++    private fun since(ms: Long) = (ms / 1000).toString().let { arrayOf(it, it) }
++
++    /** OEM recorders often write the file directly; Android indexes it late. Ask for those folders to be indexed now. */
++    fun rescan(ctx: Context) = runCatching {
++        val root = android.os.Environment.getExternalStorageDirectory().absolutePath
++        val dirs = listOf("Music/Recordings/Call Recordings", "Recordings/Call Recordings", "Recordings/Call", "Music/Recordings", "Recordings",
++            "MIUI/sound_recorder/call_rec", "Record/Call", "Call", "CallRecordings", "Sounds/CallRecord")
++            .map { "$root/$it" }.filter { java.io.File(it).exists() }
++        if (dirs.isNotEmpty()) android.media.MediaScannerConnection.scanFile(ctx, dirs.toTypedArray(), null, null)
++    }
++
+     fun read(ctx: Context, f: RecorderFile): ByteArray? = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes() } }.getOrNull()
+ }
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
+index e0b6ece..a991f17 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/media/MediaCoordinator.kt
+@@ -187,7 +187,7 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
+                 started = s
+                 session.work("POST", "/api/mobile/v1/media/${r.id}/start")
+                 // 5 fps made Live View look frozen; screens change less than camera, so 10 vs 15 fps.
+-                s.start(projection, 1280, 720, if (kind == "screen") 10 else 15)   // 720 (not 540): 16-aligned for HW encoders
++                s.start(projection, 960, 544, if (kind == "screen") 10 else 15)   // 16-aligned; sized for software VP8
+                 _active.value = s
+                 pollSignals(s)
+             } catch (e: Throwable) {
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt b/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
+index f261910..48f2de8 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/media/WebRtcSession.kt
+@@ -4,8 +4,6 @@ import android.content.Context
+ import android.content.Intent
+ import android.media.projection.MediaProjection
+ import org.webrtc.Camera2Enumerator
+-import org.webrtc.DefaultVideoDecoderFactory
+-import org.webrtc.DefaultVideoEncoderFactory
+ import org.webrtc.EglBase
+ import org.webrtc.IceCandidate
+ import org.webrtc.MediaConstraints
+@@ -51,9 +49,12 @@ class WebRtcSession(
+ 
+     fun start(projectionData: Intent?, width: Int, height: Int, fps: Int) {
+         initOnce(context)
++        // Software VP8/VP9 only: the 1.0.5 crash reports (OPPO CPH2359, Android 14) show a native abort within 1.5 s of every
++        // camera/screen start, never for voice — i.e. while WebRTC lists the phone's hardware video codecs for the offer.
++        // ponytail: software codecs everywhere; add a hardware allow-list per chipset only if CPU use becomes a problem.
+         factory = PeerConnectionFactory.builder()
+-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
+-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
++            .setVideoEncoderFactory(org.webrtc.SoftwareVideoEncoderFactory())
++            .setVideoDecoderFactory(org.webrtc.SoftwareVideoDecoderFactory())
+             .createPeerConnectionFactory()
+ 
+         if (kind != "voice") startVideo(projectionData, width, height, fps)
+@@ -84,7 +85,7 @@ class WebRtcSession(
+             // Capture at the screen's own shape (portrait), long side ≤ 1280: a fixed 1280×720 box squeezed a portrait
+             // screen into a small, blurry picture.
+             val m = context.resources.displayMetrics
+-            val scale = minOf(1f, 1280f / maxOf(m.widthPixels, m.heightPixels))
++            val scale = minOf(1f, 1024f / maxOf(m.widthPixels, m.heightPixels))   // long side ≤ 1024 for software VP8
+             capturer!!.startCapture((m.widthPixels * scale).toInt() / 16 * 16, (m.heightPixels * scale).toInt() / 16 * 16, fps)
+         } else capturer!!.startCapture(width / 16 * 16, height / 16 * 16, fps)
+         localTrack = factory.createVideoTrack("ammp-$kind", source)
+diff --git a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+index 8efd386..00494f6 100644
+--- a/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
++++ b/android/app/src/main/kotlin/ametecs/managedmobile/ui/AppViewModel.kt
+@@ -258,7 +258,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+             android.app.ApplicationExitInfo.REASON_SIGNALED, android.app.ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)
+         if (e.reason !in bad) return null
+         // Native tombstones are binary; the readable parts (library + function names) are enough to find the cause.
+-        val trace = runCatching { e.traceInputStream?.use { it.readBytes().let { b -> String(b, 0, minOf(b.size, 16_000)) }.replace(Regex("[^\\x20-\\x7E\\n]+"), " ") } }.getOrNull() ?: ""
++        // Whole file; keep the frames that name a library/function (the crashing thread is not always first).
++        val trace = runCatching { e.traceInputStream?.use { String(it.readBytes(), Charsets.ISO_8859_1) } }.getOrNull().orEmpty()
++            .split(Regex("[^\\x20-\\x7E]+")).map { it.trim() }.filter { it.length > 6 }
++            .let { parts ->
++                // A frame is "<function>" then "<library>": keep the function before every WebRTC/app/abort hit.
++                val hit = Regex("abort|Abort|Check failed|FATAL|webrtc|jingle|Java_|ametecs|SIG|cause")
++                parts.take(6) + parts.indices.filter { hit.containsMatchIn(parts[it]) }.flatMap { listOf(it - 1, it) }.filter { it >= 0 }.distinct().map { parts[it] }
++            }
++            .joinToString("\n")
+         return "\n--- previous exit: reason=${e.reason} status=${e.status} at=${java.time.Instant.ofEpochMilli(e.timestamp)} " +
+             "${Build.MANUFACTURER} ${Build.MODEL} Android ${Build.VERSION.RELEASE} app=${BuildConfig.VERSION_NAME} " +
+             "${e.description ?: ""}\n${trace.take(8_000)}"
+@@ -492,11 +500,32 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
+         if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
+         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
++        if (screen.value is Screen.Dashboard && g.store.getString("rec_hunt") != null && g.store.getString("sim_pending") == null) viewModelScope.launch { huntRecording() }
+         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
+         finishing = true
+         viewModelScope.launch { try { finishSimCall() } finally { finishing = false } }
+     }
+ 
++    /** Late upload of a recording the phone's recorder saved after the call screen closed. True when done or given up. */
++    private suspend fun huntRecording(): Boolean {
++        val h = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject } ?: return true
++        if (g.store.getString("sim_pending") != null || finishing) return false
++        val since = h.str("since")!!.toLong()
++        if (System.currentTimeMillis() - since > 30 * 60_000) { g.store.putString("rec_hunt", null); return true }
++        val ctx = getApplication<Application>()
++        SimCalls.rescan(ctx); delay(1500)
++        val f = SimCalls.findRecording(ctx, h.str("number")!!, since) ?: return false
++        g.store.putString("rec_hunt", null)
++        g.store.putString("rec_ok", "1"); g.store.putString("rec_block_since", null)
++        g.store.putString("sim_pending", buildJsonObject {
++            put("id", h.str("id")!!); put("number", h.str("number")!!); put("since", since.toString())
++            put("stage", "upload"); put("uri", f.uri.toString()); put("name", f.name); put("mime", f.mime ?: "audio/mp4"); f.durationSeconds?.let { put("dur", it) }
++        }.toString())
++        finishing = true
++        try { finishSimCall() } finally { finishing = false }
++        return true
++    }
++
+     private suspend fun finishSimCall() {
+         android.util.Log.i("AMMP", "finishSimCall: ${g.store.getString("sim_pending")}")
+         val p = g.api.json.parseToJsonElement(g.store.getString("sim_pending") ?: return).jsonObject
+@@ -551,7 +580,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                     if (!SimCalls.phoneRecorder && own.length() > 2_000 && CallRecordService.accessibilityOn(ctx)) file = SimCalls.RecorderFile(android.net.Uri.fromFile(own), own.name, "audio/wav", talk, own.length())
+                     // Also after the employee tapped "Yes, answered": OPPO/ColorOS and others save the file only after hang-up, so the
+                     // first search can miss it; it used to never be looked for again and the recording was lost.
+-                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
++                    else if (talk > 0 && answeredOverride != false) for (i in 0 until 10) { if (i % 3 == 0) SimCalls.rescan(ctx); file = SimCalls.findRecording(ctx, number, log?.startedAtMs ?: since); if (file != null) break; delay(2000) }  // OEM recorders save the file a few seconds after hang-up
+                     bytes = file?.let { SimCalls.read(ctx, it) }
+                     // An answered call with no recorder file means auto-record is off: block the next call until a recording shows up.
+                     if (SimCalls.phoneRecorder && talk > 0) {
+@@ -585,6 +614,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
+                     stage = "upload"
+                 } else {
+                     g.store.putString("sim_pending", null)
++                    // Answered but no file yet: keep looking for 30 min (OPPO indexed the file only later) and upload it then.
++                    if (keepRecording && talk > 0) {
++                        g.store.putString("rec_hunt", buildJsonObject { put("id", id); put("number", number); put("since", log?.startedAtMs ?: since) }.toString())
++                        viewModelScope.launch { repeat(10) { delay(30_000); if (huntRecording()) return@launch } }
++                    }
+                     return
+                 }
+             }

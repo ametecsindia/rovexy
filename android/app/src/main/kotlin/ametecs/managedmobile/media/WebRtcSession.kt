@@ -4,8 +4,6 @@ import android.content.Context
 import android.content.Intent
 import android.media.projection.MediaProjection
 import org.webrtc.Camera2Enumerator
-import org.webrtc.DefaultVideoDecoderFactory
-import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
@@ -51,9 +49,12 @@ class WebRtcSession(
 
     fun start(projectionData: Intent?, width: Int, height: Int, fps: Int) {
         initOnce(context)
+        // Software VP8/VP9 only: the 1.0.5 crash reports (OPPO CPH2359, Android 14) show a native abort within 1.5 s of every
+        // camera/screen start, never for voice — i.e. while WebRTC lists the phone's hardware video codecs for the offer.
+        // ponytail: software codecs everywhere; add a hardware allow-list per chipset only if CPU use becomes a problem.
         factory = PeerConnectionFactory.builder()
-            .setVideoEncoderFactory(DefaultVideoEncoderFactory(egl.eglBaseContext, true, true))
-            .setVideoDecoderFactory(DefaultVideoDecoderFactory(egl.eglBaseContext))
+            .setVideoEncoderFactory(org.webrtc.SoftwareVideoEncoderFactory())
+            .setVideoDecoderFactory(org.webrtc.SoftwareVideoDecoderFactory())
             .createPeerConnectionFactory()
 
         if (kind != "voice") startVideo(projectionData, width, height, fps)
@@ -84,7 +85,7 @@ class WebRtcSession(
             // Capture at the screen's own shape (portrait), long side ≤ 1280: a fixed 1280×720 box squeezed a portrait
             // screen into a small, blurry picture.
             val m = context.resources.displayMetrics
-            val scale = minOf(1f, 1280f / maxOf(m.widthPixels, m.heightPixels))
+            val scale = minOf(1f, 1024f / maxOf(m.widthPixels, m.heightPixels))   // long side ≤ 1024 for software VP8
             capturer!!.startCapture((m.widthPixels * scale).toInt() / 16 * 16, (m.heightPixels * scale).toInt() / 16 * 16, fps)
         } else capturer!!.startCapture(width / 16 * 16, height / 16 * 16, fps)
         localTrack = factory.createVideoTrack("ammp-$kind", source)

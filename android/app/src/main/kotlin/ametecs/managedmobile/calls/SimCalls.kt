@@ -93,7 +93,7 @@ object SimCalls {
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED || Build.VERSION.SDK_INT < 29) return emptyList()
         return runCatching {
             ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, arrayOf(MediaStore.Audio.Media.RELATIVE_PATH),
-                "${MediaStore.Audio.Media.DATE_ADDED} >= ?", arrayOf(((sinceMs - 5_000) / 1000).toString()), null)?.use { c ->
+                SINCE, since(sinceMs - 5_000), null)?.use { c ->
                 buildList { while (c.moveToNext()) add(c.getString(0).orEmpty()) }.distinct().take(5)
             } ?: emptyList()
         }.getOrDefault(emptyList())
@@ -119,7 +119,8 @@ object SimCalls {
      *  talk time. No file within ~20 s → reported as not answered. ponytail: with auto-record off every call reads as
      *  unanswered; the off-hook time (READ_PHONE_STATE) could bound it if that ever matters. */
     suspend fun logFromRecording(ctx: Context, number: String, sinceMs: Long): LogEntry {
-        repeat(10) {
+        repeat(10) { i ->
+            if (i % 3 == 0) rescan(ctx)
             findRecording(ctx, number, sinceMs)?.let { return LogEntry(it.durationSeconds ?: 1, sinceMs) }
             kotlinx.coroutines.delay(2000)
         }
@@ -134,8 +135,7 @@ object SimCalls {
         val cols = mutableListOf(MediaStore.Audio.Media._ID, MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.DURATION, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
         if (Build.VERSION.SDK_INT >= 29) cols += MediaStore.Audio.Media.RELATIVE_PATH
-        ctx.contentResolver.query(base, cols.toTypedArray(), "${MediaStore.Audio.Media.DATE_ADDED} >= ?", arrayOf(((sinceMs - 5_000) / 1000).toString()),
-            "${MediaStore.Audio.Media.DATE_ADDED} DESC")?.use { c ->
+        ctx.contentResolver.query(base, cols.toTypedArray(), SINCE, since(sinceMs - 5_000), "${MediaStore.Audio.Media.DATE_MODIFIED} DESC")?.use { c ->
             while (c.moveToNext()) {
                 val name = c.getString(1).orEmpty()
                 val where = (c.getString(5).orEmpty() + "/" + (if (cols.size > 6) c.getString(6).orEmpty() else "")).lowercase()
@@ -156,8 +156,7 @@ object SimCalls {
         val cols = mutableListOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
         if (Build.VERSION.SDK_INT >= 29) cols += MediaStore.Audio.Media.RELATIVE_PATH
         return runCatching {
-            ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), "${MediaStore.Audio.Media.DATE_ADDED} >= ?",
-                arrayOf((sinceMs / 1000).toString()), "${MediaStore.Audio.Media.DATE_ADDED} DESC")?.use { c ->
+            ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), SINCE, since(sinceMs), "${MediaStore.Audio.Media.DATE_MODIFIED} DESC")?.use { c ->
                 while (c.moveToNext()) {
                     val where = (c.getString(3).orEmpty() + "/" + (if (cols.size > 4) c.getString(4).orEmpty() else "") + "/" + c.getString(0).orEmpty()).lowercase()
                     if (where.contains("call") && c.getLong(2) > 0) return@use c.getLong(1) * 1000
@@ -171,6 +170,19 @@ object SimCalls {
     fun openCallSettings(ctx: Context) {
         val ok = runCatching { ctx.startActivity(Intent(TelecomManager.ACTION_SHOW_CALL_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
         if (!ok) ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    /** New since the call: added OR modified. OPPO/ColorOS saved the file but it was not found by DATE_ADDED alone. */
+    private val SINCE = "(${MediaStore.Audio.Media.DATE_ADDED} >= ? OR ${MediaStore.Audio.Media.DATE_MODIFIED} >= ?)"
+    private fun since(ms: Long) = (ms / 1000).toString().let { arrayOf(it, it) }
+
+    /** OEM recorders often write the file directly; Android indexes it late. Ask for those folders to be indexed now. */
+    fun rescan(ctx: Context) = runCatching {
+        val root = android.os.Environment.getExternalStorageDirectory().absolutePath
+        val dirs = listOf("Music/Recordings/Call Recordings", "Recordings/Call Recordings", "Recordings/Call", "Music/Recordings", "Recordings",
+            "MIUI/sound_recorder/call_rec", "Record/Call", "Call", "CallRecordings", "Sounds/CallRecord")
+            .map { "$root/$it" }.filter { java.io.File(it).exists() }
+        if (dirs.isNotEmpty()) android.media.MediaScannerConnection.scanFile(ctx, dirs.toTypedArray(), null, null)
     }
 
     fun read(ctx: Context, f: RecorderFile): ByteArray? = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes() } }.getOrNull()
