@@ -1,0 +1,25 @@
+diff --git a/backend/app/Http/Controllers/Admin/CallController.php b/backend/app/Http/Controllers/Admin/CallController.php
+index 0533db2..9e0a12d 100644
+--- a/backend/app/Http/Controllers/Admin/CallController.php
++++ b/backend/app/Http/Controllers/Admin/CallController.php
+@@ -151,6 +151,6 @@ final class CallController extends Controller
+         // The browser's <audio> loads this URL without the X-Workspace header: name the workspace in the (signed) URL, or
+         // /w/<slug> consoles got "company_unresolved" and the player showed "no supported source".
+         return URL::temporarySignedRoute('recordings.stream', $ttl, ['id' => $rec->id, 'dl' => $download ? 1 : 0,
+-            'workspace' => app(\App\Support\CurrentCompany::class)->get()->slug]);
++            'workspace' => app(\App\Support\CurrentCompany::class)->get()->slug], absolute: false);
+     }
+ }
+diff --git a/backend/routes/api.php b/backend/routes/api.php
+index 71b0c73..f0e7f16 100644
+--- a/backend/routes/api.php
++++ b/backend/routes/api.php
+@@ -354,7 +354,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
+ });
+ 
+ // Short-lived signed recording stream (local storage driver). URL minted only after a scoped, audited lookup.
+-Route::get('admin/recordings/{id}/stream', [Admin\CallController::class, 'stream'])->name('recordings.stream')->middleware(['company', 'signed']);
++Route::get('admin/recordings/{id}/stream', [Admin\CallController::class, 'stream'])->name('recordings.stream')->middleware(['company', 'signed:relative']);   // relative: Cloudflare→nginx changes scheme/host, which broke full-URL signatures (403)
+ 
+ // Telephony HMAC webhook (alternative to the ESL listener for existing Ametecs telephony systems). No tenant guessing:
+ // the company is taken from the call record the event references.

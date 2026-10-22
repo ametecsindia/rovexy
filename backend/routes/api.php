@@ -354,7 +354,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
 });
 
 // Short-lived signed recording stream (local storage driver). URL minted only after a scoped, audited lookup.
-Route::get('admin/recordings/{id}/stream', [Admin\CallController::class, 'stream'])->name('recordings.stream')->middleware(['company', 'signed']);
+Route::get('admin/recordings/{id}/stream', [Admin\CallController::class, 'stream'])->name('recordings.stream')->middleware(['company', 'signed:relative']);   // relative: Cloudflare→nginx changes scheme/host, which broke full-URL signatures (403)
 
 // Telephony HMAC webhook (alternative to the ESL listener for existing Ametecs telephony systems). No tenant guessing:
 // the company is taken from the call record the event references.
