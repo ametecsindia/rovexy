@@ -151,6 +151,8 @@ function Viewer({ session, kind, onEnd }: { session: any; kind: string; onEnd: (
 
   const screenshot = () => a.run(async () => {
     const v = video.current!;
+    // No picture yet (still connecting / connection failed): a 0×0 canvas gives no image and the upload crashed.
+    if (!v.videoWidth) throw new Error('No picture yet: wait until the phone screen is visible, then take the screenshot.');
     const c = document.createElement('canvas');
     c.width = v.videoWidth;
     c.height = v.videoHeight;

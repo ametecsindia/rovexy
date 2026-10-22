@@ -226,7 +226,10 @@ final class AcceptanceTest extends TestCase
         $m->upload("/api/mobile/v1/calls/{$uuid}/recording", [], ['file' => $bad])->assertStatus(422);
         $m->upload("/api/mobile/v1/calls/{$uuid}/recording", ['duration_seconds' => 41], ['file' => $wav])->assertOk()->assertJsonPath('recording_status', 'available');
         $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
-        $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk();
+        $url = $this->admin('alpha')->postJson("/api/admin/calls/{$call->id}/recording/playback")->assertOk()->json('url');
+        // The <audio> player sends no X-Workspace header: the signed URL itself must name the workspace.
+        $this->flushHeaders();
+        $this->get(str_replace(config('app.url'), '', $url))->assertOk();
         // Unanswered call: no recording expected; a later call is not blocked by an unreported one.
         $u2 = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary'])->json('call_id');
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary'])->assertCreated();   // u2 never reported → auto-closed

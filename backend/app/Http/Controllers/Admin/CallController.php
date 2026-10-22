@@ -148,6 +148,9 @@ final class CallController extends Controller
         if (config('filesystems.disks.' . config('ammp.recordings.disk') . '.driver') === 's3') {
             return $disk->temporaryUrl($rec->object_key, $ttl, $download ? ['ResponseContentDisposition' => "attachment; filename=call-{$rec->call_id}.{$rec->format}"] : []);
         }
-        return URL::temporarySignedRoute('recordings.stream', $ttl, ['id' => $rec->id, 'dl' => $download ? 1 : 0]);
+        // The browser's <audio> loads this URL without the X-Workspace header: name the workspace in the (signed) URL, or
+        // /w/<slug> consoles got "company_unresolved" and the player showed "no supported source".
+        return URL::temporarySignedRoute('recordings.stream', $ttl, ['id' => $rec->id, 'dl' => $download ? 1 : 0,
+            'workspace' => app(\App\Support\CurrentCompany::class)->get()->slug]);
     }
 }
