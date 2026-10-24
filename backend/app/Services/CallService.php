@@ -65,11 +65,9 @@ final class CallService
             if ($customerId !== null && $customer === null) {
                 throw new DomainException('customer_not_assigned', 'Customer is not available.');
             }
-            if ($route === 'sim') {
-                // A SIM call whose result never arrived (app killed mid-call) must not block calling for hours.
-                Call::query()->where('user_id', $user->id)->where('provider', 'sim')->whereNotIn('state', CallLifecycle::TERMINAL)
-                    ->update(['state' => 'cancelled', 'failure_reason' => 'result_not_reported', 'ended_at' => now()]);
-            }
+            // A SIM call whose result never arrived (app killed mid-call) must not block calling for hours — on either route.
+            Call::query()->where('user_id', $user->id)->where('provider', 'sim')->whereNotIn('state', CallLifecycle::TERMINAL)
+                ->update(['state' => 'cancelled', 'failure_reason' => 'result_not_reported', 'ended_at' => now()]);
             // A provider call (Click2Call / Exotel) still open: read its result first, so a finished call never blocks the next one.
             Call::query()->where('user_id', $user->id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)
                 ->whereNotIn('state', CallLifecycle::TERMINAL)->get()->each(fn (Call $c) => $this->syncProvider($c));
@@ -78,6 +76,13 @@ final class CallService
             Call::query()->where('user_id', $user->id)->where('provider', 'click2call')->where('state', 'initiated')
                 ->where('initiated_at', '<', now()->subMinutes(3))
                 ->update(['state' => 'failed', 'failure_reason' => 'agent_not_answered', 'ended_at' => now()]);
+            // A provider call that reached ringing/connected but never got its final record (the gateway missed the call end)
+            // must not block calling for 2 hours: older than 2 minutes and still open after the read above → closed as
+            // 'superseded'. Its recording stays pending, so a late gateway result still fills in talk time and recording.
+            // ponytail: 2 minutes; an employee still talking on the old call and starting another loses only the live state.
+            Call::query()->where('user_id', $user->id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)
+                ->whereNotIn('state', CallLifecycle::TERMINAL)->where('initiated_at', '<', now()->subMinutes(2))
+                ->update(['state' => 'disconnected', 'failure_reason' => 'superseded', 'ended_at' => now()]);
             $active = Call::query()->where('user_id', $user->id)->whereNotIn('state', CallLifecycle::TERMINAL)
                 ->where('initiated_at', '>', now()->subHours(2))->exists();
             $decision = CallAuthoriser::authorise($policy, $customer ? [
@@ -239,7 +244,8 @@ final class CallService
         $adapter = in_array($call->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) ? $this->telephony->adapter() : null;
         // A late provider callback may still bring the link for a recording that had given up waiting (LeadGER: fills a missing URL).
         $late = $finalPayload !== null && $call->recording_status === RecordingState::Failed->value;
-        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value && !$late)) {
+        $superseded = $call->failure_reason === 'superseded' && $call->ended_at?->gt(now()->subHours(3));
+        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value && !$late && !$superseded)) {
             return $call;
         }
         if ($finalPayload === null && !Cache::add("provider-sync:{$call->id}", 1, 5)) {
@@ -251,7 +257,11 @@ final class CallService
         }
         return DB::transaction(function () use ($call, $d) {
             $call = Call::query()->whereKey($call->id)->lockForUpdate()->firstOrFail();
-            if (!$call->isTerminal()) {
+            $wasSuperseded = $call->failure_reason === 'superseded';
+            if ($wasSuperseded && !$d['terminal']) {
+                return $call;   // closed early by a newer call; wait for the gateway's final record (keeps the recording pending)
+            }
+            if (!$call->isTerminal() || $wasSuperseded) {   // superseded: take the real result now that it came
                 if (!$d['terminal']) {
                     if ($call->state !== $d['state']) {
                         $call->forceFill(['state' => $d['state'], 'answered_at' => $d['state'] === 'answered' ? ($call->answered_at ?? now()) : $call->answered_at])->save();
@@ -265,10 +275,13 @@ final class CallService
                     'state' => $d['state'], 'hangup_cause' => mb_substr($d['cause'], 0, 48),
                     'answered_at' => $d['talk'] > 0 ? $ended->copy()->subSeconds($d['talk']) : null, 'ended_at' => $ended,
                     'ring_seconds' => $d['ring'], 'talk_seconds' => $d['talk'], 'total_seconds' => max(0, $started->diffInSeconds($ended, true)),
+                    'failure_reason' => $wasSuperseded ? null : $call->failure_reason,
                 ])->save();
                 CallEvent::query()->firstOrCreate(['call_id' => $call->id, 'provider_event_id' => $call->provider . '-final'],
                     ['type' => $d['talk'] > 0 ? 'hangup' : 'failed', 'occurred_at' => $ended, 'payload' => ['cause' => $d['cause'], 'provider_call_id' => $call->provider_call_id]]);
-                ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'updating_customer']);
+                if (!$wasSuperseded) {   // the phone has moved on to a newer call: leave its work state alone
+                    ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'updating_customer']);
+                }
                 Audit::record('call.provider_result', $call, ['state' => $d['state'], 'talk' => $d['talk']]);
             }
             $rec = Recording::query()->where('call_id', $call->id)->lockForUpdate()->first();
