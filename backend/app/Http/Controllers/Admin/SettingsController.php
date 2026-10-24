@@ -151,7 +151,7 @@ final class SettingsController extends Controller
             $out = fopen('php://output', 'w');
             fputcsv($out, ['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Portfolio', 'Destination', 'Outcome', 'Initiated (' . $tz . ')', 'Ring s', 'Talk s', 'Total s', 'Recording', 'Disposition', 'Amount', 'Payment mode']);
             Call::query()->with(['user:id,employee_code,name', 'customer:id,customer_ref,name,last_import_id', 'disposition:id,call_id,code,amount,payment_mode'])
-                ->whereBetween('initiated_at', [$data['from'], $data['to']])
+                ->where('is_test', false)->whereBetween('initiated_at', [$data['from'], $data['to']])
                 ->when($teams !== null, fn ($q) => $q->whereIn('user_id', DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')))
                 ->when(!empty($data['employee']), fn ($q) => $q->where('user_id', (int) $data['employee']))
                 ->when($pf === 'manual', fn ($q) => $q->whereHas('customer', fn ($c) => $c->whereNull('last_import_id')))

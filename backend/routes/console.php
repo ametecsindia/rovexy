@@ -31,6 +31,19 @@ Schedule::call(function () {
 })->everyMinute()->name('exotel:sync')->withoutOverlapping();
 
 Schedule::call(function () {
+    // Provider recordings whose download failed or got stuck (worker restart, provider hiccup): retry for 24 h, max 20 tries (LeadGER sweep).
+    $ctx = app(CurrentCompany::class);
+    $ctx->withoutScope(fn () => \App\Models\Recording::query()->where('source_path', 'like', 'https://%')->where('created_at', '>', now()->subDay())
+        ->where('updated_at', '<', now()->subMinutes(10))->where('attempts', '<', 20)
+        ->whereIn('status', [\App\Domain\Calling\RecordingState::Failed->value, \App\Domain\Calling\RecordingState::Processing->value])->get()
+        ->each(function (\App\Models\Recording $rec) {
+            $rec->forceFill(['status' => \App\Domain\Calling\RecordingState::Processing->value, 'updated_at' => now()])->save();   // next try ≥10 min later
+            \App\Models\Call::query()->whereKey($rec->call_id)->update(['recording_status' => \App\Domain\Calling\RecordingState::Processing->value]);
+            \App\Jobs\FetchRecording::dispatch($rec->company_id, $rec->id);
+        }));
+})->everyFiveMinutes()->name('recordings:retry')->withoutOverlapping(10);
+
+Schedule::call(function () {
     // Presence: a device with no contact for 3 minutes is offline (heartbeat every 60 s while the app runs).
     \Illuminate\Support\Facades\DB::table('managed_devices')->where('presence', 'online')->where('last_contact_at', '<', now()->subMinutes(3))->update(['presence' => 'offline']);
 })->everyMinute()->name('presence:sweep');

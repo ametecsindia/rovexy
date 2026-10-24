@@ -1,0 +1,260 @@
+--- a/admin/src/pages/CallingConfig.tsx
++++ b/admin/src/pages/CallingConfig.tsx
+@@ -155,55 +155,115 @@
+ }
+ 
+ type TestState = { call_id: number; state: string; terminal: boolean; cause: string | null; talk_seconds: number; recording_status: string };
+-const STATE_TEXT: Record<string, string> = {
+-  initiated: 'Asking the provider to place the call…', agent_ringing: 'Your phone is ringing — answer it.', ringing: 'You answered. The customer is ringing…',
+-  answered: 'Connected — talk, then hang up.', completed: 'Call completed.', busy: 'Customer was busy.', no_answer: 'Customer did not answer.',
+-  agent_unanswered: 'You did not answer your phone, so the customer was not called.', disconnected: 'Customer answered but the call ended at once.', failed: 'The call failed.',
++type FromNumber = { number: string; source: 'voucher' | 'company'; available: boolean; expires: string | null };
++const STEPS = [
++  { key: 'agent', label: 'Your phone rings', states: ['initiated', 'agent_ringing'] },
++  { key: 'customer', label: 'Customer rings', states: ['ringing'] },
++  { key: 'talk', label: 'Connected', states: ['answered'] },
++  { key: 'end', label: 'Call ended', states: [] as string[] },
++];
++const END_TEXT: Record<string, string> = {
++  completed: 'Call completed', busy: 'Customer was busy', no_answer: 'Customer did not answer', failed: 'Call failed',
++  agent_unanswered: 'You did not answer — customer not called', disconnected: 'Customer answered, call dropped at once',
+ };
++const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '0', '⌫'];
++const fmt = (n: string) => n.replace(/\D/g, '').replace(/^(\d{5})(\d{1,5})$/, '$1 $2');
++const keepPhone = { get: () => { try { return localStorage.getItem('c2c.test.agent') ?? ''; } catch { return ''; } },
++  set: (v: string) => { try { localStorage.setItem('c2c.test.agent', v); } catch { /* private window */ } } };
+ 
+-/** Calling options → Test call: one real Click2Call call from the console, then its result and recording. */
++/** Calling options → Test call: a dialer that places one real Click2Call call from the console, then shows its result and recording. */
+ function TestCall() {
++  const nums = useAsync(() => get<{ numbers: FromNumber[] }>('/calling/click2call/test-call/numbers'));
+   const a = useAction();
+-  const [n, setN] = useState({ agent_number: '', customer_number: '' });
+-  const [msg, setMsg] = useState<{ ok: boolean; detail: string } | null>(null);
++  const [agent, setAgent] = useState(keepPhone.get);
++  const [dial, setDial] = useState('');
++  const [from, setFrom] = useState('');
++  const [err, setErr] = useState<string | null>(null);
+   const [st, setSt] = useState<TestState | null>(null);
+-  const waiting = !!st && (!st.terminal || ['pending', 'processing'].includes(st.recording_status));
++  const [secs, setSecs] = useState(0);
++  const live = !!st && !st.terminal;
++  const waitingRec = !!st && st.terminal && st.talk_seconds > 0 && ['pending', 'processing'].includes(st.recording_status);
++  const list = nums.data?.numbers ?? [];
++  const usable = list.filter((n) => n.available);
++  const fromValue = from || usable[0]?.number || '';
+   useEffect(() => {
+-    if (!st || !waiting) return;
++    if (!st || (!live && !waitingRec)) return;
+     const started = Date.now();
+     const t = setInterval(async () => {
+-      if (Date.now() - started > 15 * 60 * 1000) { clearInterval(t); return; }   // ponytail: stop polling after 15 min; the call stays in Calls
++      if (Date.now() - started > 15 * 60 * 1000) { clearInterval(t); return; }   // ponytail: stop after 15 min; the call stays in Calls
+       try { setSt(await get(`/calling/click2call/test-call/${st.call_id}`)); } catch { /* next tick */ }
+-    }, 4000);
++    }, 3000);
+     return () => clearInterval(t);
+-  }, [st?.call_id, waiting]);
++  }, [st?.call_id, live, waitingRec]);
++  useEffect(() => {   // call timer while the call is live
++    if (!live) return;
++    const t0 = Date.now(); setSecs(0);
++    const t = setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 1000);
++    return () => clearInterval(t);
++  }, [live, st?.call_id]);
++  const press = (k: string) => { setErr(null); setDial((d) => (k === '⌫' ? d.slice(0, -1) : (d + k).slice(0, 15))); };
+   const call = () => a.run(async () => {
+-    setSt(null); setMsg(null);
++    setErr(null); setSt(null);
+     try {
+-      const r = await post('/calling/click2call/test-call', n);
+-      setMsg(r);
++      const r = await post('/calling/click2call/test-call', { agent_number: agent, customer_number: dial, from: fromValue || null });
++      keepPhone.set(agent);
+       setSt({ call_id: r.call_id, state: 'initiated', terminal: false, cause: null, talk_seconds: 0, recording_status: 'pending' });
+-    } catch (e: any) { setMsg({ ok: false, detail: e?.message ?? String(e) }); }
++    } catch (e: any) { setErr(e?.message ?? String(e)); }
+   });
++  const stepIndex = !st ? -1 : st.terminal ? 3 : STEPS.findIndex((x) => x.states.includes(st.state));
++  const ok = /^\+?\d{10,13}$/.test(agent.replace(/\s/g, '')) && /^\+?\d{10,13}$/.test(dial);
++  const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+   return (
+     <Card title="Test call">
+-      <p className="muted">Places one real Click2Call call: your phone rings first, then the customer number, from the company number. The result and recording show here and in Calls.</p>
+-      <div className="form-grid two">
+-        <label className="field"><span>Your phone (rings first)</span><input inputMode="tel" value={n.agent_number} placeholder="98XXXXXXXX" onChange={(e) => setN({ ...n, agent_number: e.target.value })} /></label>
+-        <label className="field"><span>Customer number to call</span><input inputMode="tel" value={n.customer_number} placeholder="98XXXXXXXX" onChange={(e) => setN({ ...n, customer_number: e.target.value })} /></label>
+-      </div>
+-      {msg && <Notice tone={msg.ok ? 'ok' : 'warn'}>{msg.detail}</Notice>}
+-      {st && (
+-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', margin: '8px 0' }}>
+-          <Badge value={st.state} />
+-          <span>{STATE_TEXT[st.state] ?? st.state}{st.talk_seconds > 0 ? ` Talk time ${st.talk_seconds}s.` : ''}</span>
+-          {st.terminal && st.cause && <span className="code">{st.cause}</span>}
+-          {st.terminal && st.talk_seconds > 0 && (st.recording_status === 'available'
+-            ? <RecordingPlayer callId={st.call_id} status="available" canPlay canDownload />
+-            : <span className="muted">Recording: {['pending', 'processing'].includes(st.recording_status) ? 'waiting for the provider…' : st.recording_status.replace(/_/g, ' ')}</span>)}
++      <div className="dialer-wrap">
++        <div className="dialer">
++          <label className="field"><span>Call from</span>
++            <select value={fromValue} onChange={(e) => setFrom(e.target.value)} disabled={live}>
++              {list.length === 0 && <option value="">No Click2Call number yet</option>}
++              {list.map((n) => <option key={n.number} value={n.number} disabled={!n.available}>
++                +91 {fmt(n.number)} · {n.source === 'voucher' ? 'voucher' : 'company'}{n.available ? '' : ' (expired)'}
++              </option>)}
++            </select>
++          </label>
++          <label className="field"><span>Your phone (rings first)</span>
++            <input inputMode="tel" value={agent} placeholder="98XXXXXXXX" disabled={live} onChange={(e) => setAgent(e.target.value)} />
++          </label>
++          <input className="dialer-display" inputMode="tel" aria-label="Customer number" placeholder="Customer number" value={dial} disabled={live}
++            onChange={(e) => setDial(e.target.value.replace(/[^\d+]/g, '').slice(0, 15))} onKeyDown={(e) => { if (e.key === 'Enter' && ok && !live) call(); }} />
++          <div className="dialer-keys">
++            {KEYS.map((k) => <button key={k} type="button" className="dialer-key" disabled={live} onClick={() => press(k)} aria-label={k === '⌫' ? 'Delete' : k}>{k}</button>)}
++          </div>
++          <button type="button" className="dialer-call" disabled={a.busy || live || !ok || !fromValue} onClick={call} aria-label="Call">
++            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
++          </button>
+         </div>
+-      )}
+-      <button disabled={a.busy || waiting || !n.agent_number || !n.customer_number} onClick={call}>{waiting ? 'Call in progress…' : 'Call now'}</button>
++        <div className="dialer-status">
++          {!st && !err && <p className="muted">Places one real Click2Call call: your phone rings first; when you answer, the customer is called from the chosen number. The result and recording show here and in Calls.</p>}
++          {err && <Notice tone="warn">{err}</Notice>}
++          {st && (
++            <>
++              <div className="dialer-head">
++                <strong>+91 {fmt(dial.replace(/^\+?91(?=\d{10}$)/, ''))}</strong>
++                <span className="muted">from +91 {fmt(fromValue)}</span>
++                {live && <span className="dialer-timer">{mmss}</span>}
++              </div>
++              <ol className="dialer-steps">
++                {STEPS.map((x, i) => (
++                  <li key={x.key} className={i < stepIndex ? 'done' : i === stepIndex ? (st.terminal ? (st.state === 'completed' ? 'done' : 'bad') : 'now') : ''}>
++                    {i === 3 && st.terminal ? END_TEXT[st.state] ?? st.state : x.label}
++                    {i === 2 && st.talk_seconds > 0 ? ` · ${st.talk_seconds}s` : ''}
++                  </li>
++                ))}
++              </ol>
++              {st.terminal && st.cause && <p className="muted" style={{ fontSize: '.8rem' }}>Provider code: <span className="code">{st.cause}</span></p>}
++              {st.terminal && st.talk_seconds > 0 && (st.recording_status === 'available'
++                ? <RecordingPlayer callId={st.call_id} status="available" canPlay canDownload />
++                : <p className="muted">Recording: {waitingRec ? 'waiting for the provider…' : st.recording_status.replace(/_/g, ' ')}</p>)}
++              {st.terminal && <button type="button" className="secondary" onClick={() => { setSt(null); setDial(''); }}>New call</button>}
++            </>
++          )}
++        </div>
++      </div>
+     </Card>
+   );
+ }
+--- a/backend/app/Http/Controllers/Admin/IntegrationController.php
++++ b/backend/app/Http/Controllers/Admin/IntegrationController.php
+@@ -139,8 +139,13 @@
+     {
+         $cfg = \App\Telephony\Click2CallSettings::effective($current->get());
+         abort_if($cfg === null, 422, 'Switch Click2Call on and save first.');
+-        $d = $r->validate(['agent_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/'], 'customer_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/']]);
+-        $cfg['did'] = $cfg['did'] ?: \App\Models\C2c\Vmn::query()->where('click2call', true)->value('virtual_number');
++        $d = $r->validate(['agent_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/'], 'customer_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/'],
++            'from' => ['nullable', 'regex:/^\+?[0-9 ]{6,15}$/']]);
++        // Call from: one of the company's Click2Call numbers (voucher numbers first, as real calls use them), never a free-typed one.
++        $numbers = collect($this->testCallNumberList($current))->where('available', true);
++        $from = isset($d['from']) ? $numbers->firstWhere('number', \App\Telephony\Click2CallAdapter::normalize($d['from'])) : $numbers->first();
++        abort_if(!$from, 422, isset($d['from']) ? 'That number is not one of your Click2Call numbers (or it has expired).' : 'No Click2Call number: add a voucher (Company numbers) or a company number above.');
++        $cfg['did'] = $from['number'];
+         $adapter = new \App\Telephony\Click2CallAdapter($cfg);
+         $h = $adapter->health();
+         if (!$h['ok']) {
+@@ -167,6 +172,25 @@
+         return response()->json(['ok' => true, 'call_id' => $call->id, 'detail' => 'Your phone will ring now. Answer it; the customer is called next.']);
+     }
+ 
++    /** Numbers a test call can go out on. */
++    public function testCallNumbers(\App\Support\CurrentCompany $current)
++    {
++        return response()->json(['numbers' => $this->testCallNumberList($current)]);
++    }
++
++    /** @return list<array{number:string,source:string,available:bool,expires:?string}> voucher numbers, then the typed company number */
++    private function testCallNumberList(\App\Support\CurrentCompany $current): array
++    {
++        $out = \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->get()
++            ->map(fn ($v) => ['number' => \App\Telephony\Click2CallAdapter::normalize($v->virtual_number), 'source' => 'voucher',
++                'available' => $v->isAvailable(), 'expires' => $v->expires_at?->toDateString()])->unique('number')->values()->all();
++        $typed = \App\Telephony\Click2CallAdapter::normalize(\App\Telephony\Click2CallSettings::stored($current->get())['did'] ?? null);
++        if ($typed !== '' && !in_array($typed, array_column($out, 'number'), true)) {
++            $out[] = ['number' => $typed, 'source' => 'company', 'available' => true, 'expires' => null];
++        }
++        return $out;
++    }
++
+     /** Test call progress: asks the gateway (throttled) and returns the call's state, cause and recording state. */
+     public function testCallStatus(int $id, \App\Services\CallService $svc)
+     {
+--- a/backend/routes/api.php
++++ b/backend/routes/api.php
+@@ -345,6 +345,7 @@
+         Route::put('calling/click2call', [Admin\IntegrationController::class, 'saveClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
+         Route::post('calling/click2call/test', [Admin\IntegrationController::class, 'testClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
+         Route::post('calling/click2call/test-call', [Admin\IntegrationController::class, 'testCall'])->middleware(['perm:telephony.configure', 'feature:click2call', 'throttle:5,1']);
++        Route::get('calling/click2call/test-call/numbers', [Admin\IntegrationController::class, 'testCallNumbers'])->middleware('perm:telephony.configure');
+         Route::get('calling/click2call/test-call/{id}', [Admin\IntegrationController::class, 'testCallStatus'])->whereNumber('id')->middleware('perm:telephony.configure');
+         Route::get('integrations/maps', [Admin\IntegrationController::class, 'maps'])->middleware('perm:system.health');
+         Route::put('integrations/maps', [Admin\IntegrationController::class, 'saveMaps'])->middleware('perm:telephony.configure');
+--- a/backend/tests/Feature/AcceptanceTest.php
++++ b/backend/tests/Feature/AcceptanceTest.php
+@@ -504,10 +504,17 @@
+         $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '08047000001', 'gateway_secret' => 'gw'])->assertOk();
+         $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => 'abc', 'customer_number' => '9876543210'])->assertStatus(422);
+ 
++        $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '08047000001')->assertJsonPath('numbers.0.source', 'company');
++        $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '9876543210', 'from' => '8047999999'])
++            ->assertStatus(422)->assertJsonPath('message', 'That number is not one of your Click2Call numbers (or it has expired).');
++        // A voucher number is offered first and is the default "call from".
++        \App\Models\C2c\Vmn::query()->create(['virtual_number' => '8047000101', 'click2call' => true, 'expires_at' => now()->addMonth()]);
++        $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '8047000101')->assertJsonPath('numbers.0.source', 'voucher')
++            ->assertJsonPath('numbers.1.number', '08047000001');
+         $id = $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '+91 98765 43210'])
+             ->assertOk()->assertJsonPath('ok', true)->json('call_id');
+         \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['a_party_no'] === '9811111111'
+-            && $req['b_party_no'] === '9876543210' && $req['did'] === '08047000001' && $req['record'] === 1);
++            && $req['b_party_no'] === '9876543210' && $req['did'] === '8047000101' && $req['record'] === 1);
+         $adm->getJson("/api/admin/calling/click2call/test-call/{$id}")->assertJsonPath('state', 'ringing')->assertJsonPath('terminal', false);
+ 
+         $ist = now('Asia/Kolkata');
+diff --git a/admin/src/styles.css b/admin/src/styles.css
+index 129f490..2eda3ef 100644
+--- a/admin/src/styles.css
++++ b/admin/src/styles.css
+@@ -837,3 +837,30 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
+ .pol-savebar button.secondary { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); }
+ @media (max-width: 900px) { .pol-layout { grid-template-columns: 1fr; } .pol-list { position: static; } }
+ @media (max-width: 640px) { .pol-row { grid-template-columns: 1fr; padding-left: 14px; } .pol-input, .pol-hours, .pol-days { justify-content: flex-start; justify-items: start; } .pol-off-note { padding-left: 14px; } .pol-editor { padding: 14px 14px 0; } .pol-savebar { margin: 0 -14px; } }
++
++/* Calling options → Test call dialer */
++.dialer-wrap { display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 24px; align-items: start; }
++@media (max-width: 760px) { .dialer-wrap { grid-template-columns: 1fr; } }
++.dialer { display: flex; flex-direction: column; gap: 10px; background: #f7f9fc; border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
++.dialer .field { margin: 0; }
++.dialer-display { font-size: 1.6rem; font-weight: 600; letter-spacing: .06em; text-align: center; padding: 10px; border: none; border-bottom: 2px solid var(--border); background: transparent; border-radius: 0; font-variant-numeric: tabular-nums; }
++.dialer-display:focus { outline: none; border-bottom-color: var(--primary); }
++.dialer-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
++.dialer-key { height: 52px; font-size: 1.25rem; font-weight: 500; border-radius: 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: none; }
++.dialer-key:hover:not(:disabled) { background: var(--muted-bg); transform: none; }
++.dialer-call { width: 64px; height: 64px; border-radius: 50%; align-self: center; display: grid; place-items: center; padding: 0; background: #1e9e5a; border-color: #1e9e5a; color: #fff; box-shadow: 0 4px 12px rgba(30,158,90,.35); }
++.dialer-call:disabled { background: #a9c9b7; border-color: #a9c9b7; box-shadow: none; }
++.dialer-status { display: flex; flex-direction: column; gap: 12px; min-height: 200px; }
++.dialer-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; font-size: 1.1rem; }
++.dialer-timer { margin-left: auto; font-variant-numeric: tabular-nums; color: var(--ok); font-weight: 600; }
++.dialer-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
++.dialer-steps li { position: relative; padding-left: 28px; color: var(--muted); }
++.dialer-steps li::before { content: ''; position: absolute; left: 0; top: 2px; width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--border); background: var(--surface); box-sizing: border-box; }
++.dialer-steps li.now { color: var(--text); font-weight: 600; }
++.dialer-steps li.now::before { border-color: var(--info); background: var(--info-bg); animation: dialer-pulse 1.2s ease-in-out infinite; }
++.dialer-steps li.done { color: var(--text); }
++.dialer-steps li.done::before { border-color: var(--ok); background: var(--ok); }
++.dialer-steps li.bad { color: var(--bad); font-weight: 600; }
++.dialer-steps li.bad::before { border-color: var(--bad); background: var(--bad); }
++@keyframes dialer-pulse { 50% { box-shadow: 0 0 0 6px rgba(29,95,168,.15); } }
++@media (prefers-reduced-motion: reduce) { .dialer-steps li.now::before { animation: none; } }

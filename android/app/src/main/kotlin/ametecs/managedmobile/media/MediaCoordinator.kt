@@ -139,6 +139,12 @@ class MediaCoordinator(private val context: Context, private val session: Sessio
     }
 
     fun accept(r: MediaRequest) = scope.launch {
+        // ponytail: Play build has no mediaProjection foreground service, and Android requires one for screen capture.
+        if (ametecs.managedmobile.BuildConfig.PLAY && r.kind == "screen") {
+            lastError.value = "Screen sharing is not available in the Play Store version of ROVEXY."
+            declineId(r.id)
+            return@launch
+        }
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
             lastError.value = "Turn on notifications for this app first: an indicator must stay visible during sharing."
             return@launch

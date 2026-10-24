@@ -23,7 +23,7 @@ enum RecordingState: string
             self::Pending => [self::Recording, self::Failed, self::Processing],
             self::Recording => [self::Processing, self::Failed],
             self::Processing => [self::Available, self::Failed],
-            self::Failed => [self::Processing], // recovery: file found on reconciliation / retry
+            self::Failed => [self::Processing, self::Pending], // recovery: file found / retry / late provider link
             self::Available => [self::DeletedByRetention],
             self::DeletedByRetention => [],
         }, true);

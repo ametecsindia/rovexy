@@ -98,9 +98,9 @@ final class IntegrationController extends Controller
         ]);
         $new = ['mode' => $d['mode'], 'did' => isset($d['did']) ? preg_replace('/\D/', '', $d['did']) : ($old['did'] ?? null),
             'agent_caller_id' => isset($d['agent_caller_id']) ? preg_replace('/\D/', '', $d['agent_caller_id']) : null,
-            'secret' => filled($d['gateway_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString($d['gateway_secret']) : ($old['secret'] ?? null),
+            'secret' => filled($d['gateway_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString(self::cleanKey($d['gateway_secret'])) : ($old['secret'] ?? null),
             'crm_id' => array_key_exists('crm_id', $d) ? ($d['crm_id'] ?: null) : ($old['crm_id'] ?? null),
-            'lc_secret' => filled($d['lc_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString($d['lc_secret']) : ($old['lc_secret'] ?? null),
+            'lc_secret' => filled($d['lc_secret'] ?? null) ? \Illuminate\Support\Facades\Crypt::encryptString(self::cleanKey($d['lc_secret'])) : ($old['lc_secret'] ?? null),
             'daily_limit' => array_key_exists('daily_limit', $d) ? ($d['daily_limit'] ?: null) : ($old['daily_limit'] ?? null)];
         $company->forceFill(['settings' => array_replace($company->settings ?? [], ['click2call' => $new])])->save();
         Audit::record('click2call.saved', $company, ['mode' => $new['mode'], 'did' => $new['did'], 'secret_changed' => filled($d['gateway_secret'] ?? null)]);
@@ -121,14 +121,154 @@ final class IntegrationController extends Controller
         }
         try {
             $res = \Illuminate\Support\Facades\Http::timeout(8)->acceptJson()->withHeaders(['Secret-Key' => (string) $cfg['gateway_secret']])
-                ->get(rtrim((string) $cfg['cdr_url'], '/') . '/connection-test/' . \App\Telephony\Click2CallAdapter::normalize($cfg['did']));
+                // A LeadGER-shaped reference (with the CRM id), in case the gateway checks the key against the CRM in the ref_id.
+                ->get(rtrim((string) $cfg['cdr_url'], '/') . '/' . rawurlencode('connection-test_d_' . ($cfg['crm_id'] ?: '0') . '_0_1') . '/' . \App\Telephony\Click2CallAdapter::normalize($cfg['did']));
         } catch (\Throwable $e) {
             return response()->json(['ok' => false, 'detail' => 'Call-record gateway unreachable: ' . mb_substr($e->getMessage(), 0, 150)]);
         }
-        $ok = !in_array($res->status(), [401, 403], true) && $res->status() < 500;
+        // The gateway answers HTTP 200 even for a wrong key ({"status":400,"message":"Secret Key not matched"}): read the body.
+        if (\App\Telephony\Click2CallAdapter::keyRefused($res->status(), $res->json())) {
+            return response()->json(['ok' => false, 'detail' => 'The OBD gateway refused the Gateway secret (…' . mb_substr((string) $cfg['gateway_secret'], -4) . '). '
+                . $this->sameKeyHint((string) $cfg['gateway_secret']) . 'Enter the OBD Secret-Key in Gateway secret and Save.']);
+        }
+        $ok = $res->status() < 500;
         return response()->json(['ok' => $ok, 'detail' => $ok
-            ? 'Saved. The call-record gateway answered (HTTP ' . $res->status() . '). Place a test call to confirm the call itself.'
-            : 'The call-record gateway refused the secret or failed (HTTP ' . $res->status() . '). Check the gateway secret.']);
+            ? 'Saved. The OBD gateway accepted the Gateway secret. Place a test call below to confirm the call itself.'
+            : 'The call-record gateway failed (HTTP ' . $res->status() . '). Try again later.']);
+    }
+
+    /** A key copied from PHP/.env code: drop surrounding spaces and quotes ('abc', "abc", `abc`, trailing , or ;). */
+    public static function cleanKey(string $k): string
+    {
+        return trim(rtrim(trim($k), ',;'), " \t\n\r\0\x0B'\"`");
+    }
+
+    /** Where the right key is (OBD guide 9): LeadGER's TELEPHONY_SECRET — not the licence-server (CRM) key. */
+    private function sameKeyHint(string $gateway): string
+    {
+        $crm = (string) \App\Telephony\VoucherService::licenceSecret();
+        return 'The OBD key is LeadGER\'s TELEPHONY_SECRET (LeadGER .env TELEPHONY_WEBHOOK_SECRET / config/services.php); it is not the licence-server key used for vouchers'
+            . ($crm !== '' && hash_equals($crm, $gateway) ? ', which is what Gateway secret holds now' : '') . '. ';
+    }
+
+    /**
+     * Calling options → Test call: the admin types their own phone and a customer number; a real Click2Call call is placed
+     * (rings the admin first, then the customer from the company number) and follows the normal result + recording path.
+     */
+    public function testCall(Request $r, \App\Support\CurrentCompany $current)
+    {
+        $cfg = \App\Telephony\Click2CallSettings::effective($current->get());
+        abort_if($cfg === null, 422, 'Switch Click2Call on and save first.');
+        $d = $r->validate(['agent_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/'], 'customer_number' => ['required', 'regex:/^\+?[0-9 ]{10,15}$/'],
+            'from' => ['nullable', 'regex:/^\+?[0-9 ]{6,15}$/']]);
+        // Call from: one of the company's Click2Call numbers (voucher numbers first, as real calls use them), never a free-typed one.
+        $numbers = collect($this->testCallNumberList($current))->where('available', true);
+        $from = isset($d['from']) ? $numbers->firstWhere('number', \App\Telephony\Click2CallAdapter::normalize($d['from'])) : $numbers->first();
+        abort_if(!$from, 422, isset($d['from']) ? 'That number is not one of your Click2Call numbers (or it has expired).' : 'No Click2Call number: add a voucher (Company numbers) or a company number above.');
+        $cfg['did'] = $from['number'];
+        $adapter = new \App\Telephony\Click2CallAdapter($cfg);
+        $h = $adapter->health();
+        if (!$h['ok']) {
+            return response()->json($h + ['message' => $h['detail']], 422);
+        }
+        $customer = \App\Telephony\Click2CallAdapter::normalize($d['customer_number']);
+        $call = \Illuminate\Support\Facades\DB::transaction(function () use ($r, $customer) {
+            $call = \App\Models\Call::query()->create([
+                'uuid' => (string) \Illuminate\Support\Str::uuid(), 'provider' => 'click2call', 'user_id' => $r->user()->id, 'device_id' => null, 'is_test' => true,
+                'destination' => strlen($customer) === 10 ? '+91' . $customer : '+' . $customer, 'agent_leg' => 'pstn_callback',
+                'state' => 'initiated', 'initiated_at' => now(), 'recording_status' => \App\Domain\Calling\RecordingState::Pending->value,
+            ]);
+            \App\Models\Recording::query()->create(['call_id' => $call->id, 'status' => \App\Domain\Calling\RecordingState::Pending->value]);
+            return $call;
+        });
+        try {
+            $adapter->originate($call, ['caller_number' => $cfg['did'], 'agent_target' => $d['agent_number'], 'customer_e164' => $d['customer_number']]);
+        } catch (\App\Telephony\TelephonyUnavailable $e) {
+            $call->forceFill(['state' => 'failed', 'hangup_cause' => 'C2C_TEST_NOT_PLACED', 'ended_at' => now(), 'recording_status' => 'failed'])->save();
+            \App\Models\Recording::query()->where('call_id', $call->id)->update(['status' => 'failed', 'last_error' => 'call not placed']);
+            return response()->json(['ok' => false, 'call_id' => $call->id, 'detail' => $e->getMessage(), 'message' => $e->getMessage()], 422);
+        }
+        Audit::record('click2call.test_call', $call, ['caller_number' => $call->caller_number]);
+        return response()->json(['ok' => true, 'call_id' => $call->id, 'detail' => 'Your phone will ring now. Answer it; the customer is called next.']);
+    }
+
+    /**
+     * Test call → Hang up. Click2Call has no hang-up API (as in LeadGER): before the customer is dialled the call is closed
+     * here (the admin's own phone stops ringing when they reject it); once the customer rings, the call is cut on the phone.
+     */
+    public function testCallHangup(int $id)
+    {
+        $call = \App\Models\Call::query()->whereKey($id)->where('provider', 'click2call')->where('is_test', true)->firstOrFail();
+        if ($call->isTerminal()) {
+            return response()->json(['ok' => true, 'state' => $call->state]);
+        }
+        if (!in_array($call->state, ['initiated', 'agent_ringing'], true)) {
+            return response()->json(['ok' => false, 'message' => 'The customer is already being called. Cut the call on your phone; the result and recording will show here.'], 409);
+        }
+        $call->forceFill(['state' => 'cancelled', 'failure_reason' => 'hung_up_before_answer', 'ended_at' => now(),
+            'recording_status' => \App\Domain\Calling\RecordingState::NotRequired->value])->save();
+        \App\Models\Recording::query()->where('call_id', $call->id)->update(['status' => \App\Domain\Calling\RecordingState::NotRequired->value]);
+        Audit::record('click2call.test_call_cancelled', $call);
+        return response()->json(['ok' => true, 'state' => 'cancelled']);
+    }
+
+    /** Calling configuration → Test calls: every test call with its result and recording (open ones are refreshed first). */
+    public function testCalls(Request $r, \App\Services\CallService $svc)
+    {
+        \App\Models\Call::query()->where('is_test', true)->where('initiated_at', '>', now()->subHours(3))
+            ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))
+            ->latest('initiated_at')->limit(5)->get()->each(fn ($c) => $svc->syncProvider($c));
+        return response()->json(\App\Models\Call::query()->where('is_test', true)
+            ->with(['user:id,name', 'recording:id,call_id,format,duration_seconds,last_error'])
+            ->latest('initiated_at')->latest('id')->paginate(min(100, max(10, (int) $r->query('per_page', 25))),
+                ['id', 'user_id', 'caller_number', 'destination', 'state', 'hangup_cause', 'failure_reason', 'initiated_at', 'ended_at', 'talk_seconds', 'recording_status']));
+    }
+
+    /** Numbers a test call can go out on. */
+    public function testCallNumbers(\App\Support\CurrentCompany $current)
+    {
+        return response()->json(['numbers' => $this->testCallNumberList($current)]);
+    }
+
+    /** @return list<array{number:string,source:string,available:bool,expires:?string}> voucher numbers, then the typed company number */
+    private function testCallNumberList(\App\Support\CurrentCompany $current): array
+    {
+        $out = \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->get()
+            ->map(fn ($v) => ['number' => \App\Telephony\Click2CallAdapter::normalize($v->virtual_number), 'source' => 'voucher',
+                'available' => $v->isAvailable(), 'expires' => $v->expires_at?->toDateString()])->unique('number')->values()->all();
+        $typed = \App\Telephony\Click2CallAdapter::normalize(\App\Telephony\Click2CallSettings::stored($current->get())['did'] ?? null);
+        if ($typed !== '' && !in_array($typed, array_column($out, 'number'), true)) {
+            $out[] = ['number' => $typed, 'source' => 'company', 'available' => true, 'expires' => null];
+        }
+        return $out;
+    }
+
+    /** Test call progress: asks the gateway (throttled) and returns the call's state, cause and recording state. */
+    public function testCallStatus(int $id, \App\Services\CallService $svc)
+    {
+        $call = \App\Models\Call::query()->whereKey($id)->where('provider', 'click2call')->where('is_test', true)->firstOrFail();
+        $call = $svc->syncProvider($call)->refresh();   // refresh: the recording job may have finished after commit
+        // Still no result: ask the gateway once more and say WHY it gives nothing (wrong key, no record yet …) instead of
+        // leaving the admin on "ringing" for 15 minutes.
+        $gateway = null;
+        // At most one extra gateway read per 15 s (the page polls every 3 s; a single-threaded dev server would queue them).
+        if (!$call->isTerminal() && in_array($call->state, ['initiated', 'agent_ringing'], true) && \Illuminate\Support\Facades\Cache::add("test-call-probe:{$call->id}", 1, 15)
+            && ($cfg = \App\Telephony\Click2CallSettings::effective())) {
+            $probe = new \App\Telephony\Click2CallAdapter($cfg);
+            if ($probe->details($call) === null && ($why = $probe->lastProblem()) !== '') {
+                $gateway = ['code' => $why, 'text' => match (true) {
+                    $why === 'KEY_REFUSED' || in_array($why, ['HTTP401', 'HTTP403'], true) || str_ends_with($why, '_S401') || str_ends_with($why, '_S403')
+                        => 'The call was placed, but the OBD gateway refused the Gateway secret (…' . mb_substr((string) $cfg['gateway_secret'], -4) . '), so ROVEXY cannot read the result or recording. '
+                            . $this->sameKeyHint((string) $cfg['gateway_secret']) . 'Enter the OBD Secret-Key in Click2Call connection → Gateway secret and Save.',
+                    $why === 'UNREACHABLE' => 'The OBD gateway (obd.ametecsindia.com) did not answer this server in time; ROVEXY keeps retrying.',
+                    $why === 'NO_URL' => 'No call-record gateway address is configured (C2C_CDR_URL).',
+                    default => 'The OBD gateway has no record for this call yet (' . $why . '). If the call already ended, the provider has not sent it to the gateway.',
+                } . (($t = $probe->lastProblemText()) !== '' ? ' Gateway says: "' . $t . '"' : '')
+                  . (empty($cfg['crm_id']) ? ' No CRM id is set in Click2Call connection, so the reference is sent without it.' : '')];
+            }
+        }
+        return response()->json(['call_id' => $call->id, 'state' => $call->state, 'terminal' => $call->isTerminal(), 'cause' => $call->hangup_cause,
+            'talk_seconds' => $call->talk_seconds, 'recording_status' => $call->recording_status, 'gateway' => $gateway]);
     }
 
     /** Integrations → Google Maps: which keys are stored (last 4 characters only). */

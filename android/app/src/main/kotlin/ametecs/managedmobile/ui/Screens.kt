@@ -517,7 +517,7 @@ private fun DisclosureDialog(d: Disclosure, close: () -> Unit) {
             if (BuildConfig.PLAY) "Call duration comes from the call recording; recorded calls are uploaded to your company."
             else "Call duration comes from this phone's call log; recorded calls are uploaded to your company.",
             d.location?.let { "Location: $it." } ?: "Location is not collected.",
-            if (d.liveView) "Screen sharing can be requested; you must accept and Android asks for permission each time." else null,
+            if (d.liveView && !BuildConfig.PLAY) "Screen sharing can be requested; you must accept and Android asks for permission each time." else null,
             if (d.camera) "Camera sessions can be requested; you must accept and the camera indicator is shown." else null,
             "Nothing is captured without your knowledge: a ROVEXY notification is shown whenever location, a call or a session is active.").joinToString("\n\n"), style = MaterialTheme.typography.bodyMedium) })
 }

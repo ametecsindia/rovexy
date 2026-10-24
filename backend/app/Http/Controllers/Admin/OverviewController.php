@@ -38,9 +38,9 @@ final class OverviewController extends Controller
         $start = now($tz)->startOfDay()->subDays($days - 1);
         $prevStart = $start->copy()->subDays($days);
         $devices = ManagedDevice::query()->when($teams !== null, fn ($q) => $q->whereIn('team_id', $teams));
-        $today = $scope(Call::query()->where('provider', '!=', 'manual')->where('initiated_at', '>=', now($tz)->startOfDay()->utc()));
-        $range = $scope(Call::query()->where('provider', '!=', 'manual')->where('initiated_at', '>=', $start->copy()->utc()));
-        $prev = $scope(Call::query()->where('provider', '!=', 'manual')->whereBetween('initiated_at', [$prevStart->copy()->utc(), $start->copy()->utc()]));
+        $today = $scope(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->where('initiated_at', '>=', now($tz)->startOfDay()->utc()));
+        $range = $scope(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->where('initiated_at', '>=', $start->copy()->utc()));
+        $prev = $scope(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->whereBetween('initiated_at', [$prevStart->copy()->utc(), $start->copy()->utc()]));
         $people = $this->people($devices, $today);
 
         return response()->json([
@@ -72,13 +72,13 @@ final class OverviewController extends Controller
             ],
             // Kept for older clients / tests.
             'calls_today' => ['total' => (clone $today)->count(), 'answered' => (clone $today)->whereNotNull('answered_at')->count(), 'talk_seconds' => (int) (clone $today)->sum('talk_seconds')],
-            'recordings_failed_7d' => Recording::query()->where('status', 'failed')->where('updated_at', '>=', now()->subDays(7))->count(),
-            'recordings_pending' => Recording::query()->whereIn('status', ['pending', 'processing'])->where('created_at', '>=', now()->subDays(2))->count(),
+            'recordings_failed_7d' => Recording::query()->whereNotIn('call_id', Call::query()->select('id')->where('is_test', true))->where('status', 'failed')->where('updated_at', '>=', now()->subDays(7))->count(),
+            'recordings_pending' => Recording::query()->whereNotIn('call_id', Call::query()->select('id')->where('is_test', true))->whereIn('status', ['pending', 'processing'])->where('created_at', '>=', now()->subDays(2))->count(),
             'follow_ups' => [
                 'due_today' => $this->followUps($users)->whereBetween('due_at', [now($tz)->startOfDay()->utc(), now($tz)->endOfDay()->utc()])->count(),
                 'overdue' => $this->followUps($users)->where('due_at', '<', now($tz)->startOfDay()->utc())->count(),
             ],
-            'trend_7d' => $days === 7 ? $this->trend($range, $start, 7, $tz, $scope) : $this->trend($scope(Call::query()->where('provider', '!=', 'manual')->where('initiated_at', '>=', now($tz)->startOfDay()->subDays(6)->utc())), now($tz)->startOfDay()->subDays(6), 7, $tz, $scope),
+            'trend_7d' => $days === 7 ? $this->trend($range, $start, 7, $tz, $scope) : $this->trend($scope(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->where('initiated_at', '>=', now($tz)->startOfDay()->subDays(6)->utc())), now($tz)->startOfDay()->subDays(6), 7, $tz, $scope),
             'employees_today' => $this->employees($today, $people),
         ]);
     }
@@ -128,7 +128,7 @@ final class OverviewController extends Controller
             $days[$k] = ['date' => $k, 'calls' => 0, 'connected' => 0, 'talk_seconds' => 0, 'active_users' => 0];
             $users[$k] = [];
         }
-        $scope(Call::query()->where('provider', '!=', 'manual')->where('initiated_at', '>=', $start->copy()->utc()))->select(['initiated_at', 'answered_at', 'talk_seconds', 'user_id'])->cursor()
+        $scope(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->where('initiated_at', '>=', $start->copy()->utc()))->select(['initiated_at', 'answered_at', 'talk_seconds', 'user_id'])->cursor()
             ->each(function (Call $c) use (&$days, &$users, $tz) {
                 $d = $c->initiated_at->copy()->setTimezone($tz)->format('Y-m-d');
                 if (isset($days[$d])) {

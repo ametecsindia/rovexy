@@ -13,11 +13,11 @@ class Call extends Model
 
     protected $table = 'calls';
 
-    protected $fillable = ['uuid','provider','provider_call_id','user_id','device_id','customer_id','destination','which_number','calling_mode','agent_leg','state','hangup_cause','failure_reason','initiated_at','agent_answered_at','ringing_at','answered_at','ended_at','ring_seconds','talk_seconds','total_seconds','recording_required','recording_status','disposition_status','caller_number'];
+    protected $fillable = ['uuid','provider','provider_call_id','user_id','device_id','customer_id','destination','which_number','calling_mode','agent_leg','state','hangup_cause','failure_reason','initiated_at','agent_answered_at','ringing_at','answered_at','ended_at','ring_seconds','talk_seconds','total_seconds','recording_required','recording_status','disposition_status','caller_number','is_test'];
 
     protected function casts(): array
     {
-        return ['initiated_at' => 'datetime','agent_answered_at' => 'datetime','ringing_at' => 'datetime','answered_at' => 'datetime','ended_at' => 'datetime','recording_required' => 'bool'];
+        return ['initiated_at' => 'datetime','agent_answered_at' => 'datetime','ringing_at' => 'datetime','answered_at' => 'datetime','ended_at' => 'datetime','recording_required' => 'bool','is_test' => 'bool'];
     }
 
     public function recording(): \Illuminate\Database\Eloquent\Relations\HasOne

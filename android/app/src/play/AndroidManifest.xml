@@ -1,8 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Google Play build: drops permissions Play restricts. Talk time comes from the phone recorder's file instead of the call log;
-     location runs only as a visible foreground service started from the app. -->
+<!-- Google Play build: drops permissions Play restricts. Talk time comes from the phone recorder's file instead of the call log.
+     No typed foreground services (Play's FGS declaration needs a video per type): location, camera and voice run only while
+     ROVEXY is on screen, and screen sharing is off in this build. The direct build keeps all of them. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.READ_CALL_LOG" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove" />
+    <application>
+        <service android:name=".work.LocationService" tools:remove="android:foregroundServiceType" />
+        <service android:name=".media.ScreenShareService" tools:remove="android:foregroundServiceType" />
+        <service android:name=".media.CameraSessionService" tools:remove="android:foregroundServiceType" />
+        <service android:name=".media.VoiceCallService" tools:remove="android:foregroundServiceType" />
+    </application>
 </manifest>

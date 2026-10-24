@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { del, get, patch, post, put } from '../lib/api';
-import { Badge, Card, ErrorBox, Notice, Page, Table, useAction, useAsync } from '../components/ui';
+import { Badge, Card, ErrorBox, Notice, Page, RecordingPlayer, Table, useAction, useAsync } from '../components/ui';
 
 /**
  * Calling configuration, in the order an admin sets it up:
@@ -141,13 +141,179 @@ export function CallingOptionsPage() {
           <div className="form-grid two">
             <label className="field"><span>Number the employee is rung from (only if not the company number)</span><input value={v.agent_caller_id} placeholder="Same as the company number" onChange={(e) => set('agent_caller_id', e.target.value)} /></label>
           </div>
-          <p className="muted">Give your provider this address for call results: <span className="code">{d.callback_url?.replace('/telephony/v1/click2call', '/click2call/webhook')}</span> · Webhook secret on the server: {d.webhook_secret_set ? 'set' : 'not set'}</p>
+          <p className="muted">Call-end webhook for the provider (same as LeadGER): <span className="code">{d.callback_url?.replace('/telephony/v1/click2call', '/telephony/webhook')}</span> with header <span className="code">Secret-Key</span> = the Gateway secret{d.webhook_secret_set ? ' (a separate webhook secret is also set on the server)' : ''}. Use https — an http address loses the header.</p>
         </details>
         {result && <Notice tone={result.ok ? 'ok' : 'warn'}>{result.detail}</Notice>}
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button disabled={a.busy} onClick={() => saveC2c(d.mode ?? 'off')}>Save</button>
           <button className="secondary" disabled={a.busy || !c2cOn} onClick={() => a.run(async () => setResult(await post('/calling/click2call/test')))}>Test connection</button>
         </div>
+      </Card>
+      {c2cOn && <p className="muted" style={{ marginTop: 12 }}>Place a test call and see every test call's result and recording in <Link to="/calling/test-calls">Test calls</Link>.</p>}
+    </Page>
+  );
+}
+
+type TestState = { call_id: number; state: string; terminal: boolean; cause: string | null; talk_seconds: number; recording_status: string; gateway?: { code: string; text: string } | null };
+type FromNumber = { number: string; source: 'voucher' | 'company'; available: boolean; expires: string | null };
+const STEPS = [
+  { key: 'agent', label: 'Your phone rings', states: ['initiated', 'agent_ringing'] },
+  { key: 'customer', label: 'Customer rings', states: ['ringing'] },
+  { key: 'talk', label: 'Connected', states: ['answered'] },
+  { key: 'end', label: 'Call ended', states: [] as string[] },
+];
+const END_TEXT: Record<string, string> = {
+  completed: 'Call completed', busy: 'Customer was busy', no_answer: 'Customer did not answer', failed: 'Call failed',
+  agent_unanswered: 'You did not answer — customer not called', disconnected: 'Customer answered, call dropped at once',
+  cancelled: 'Cancelled by you',
+};
+const KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '+', '0', '⌫'];
+const fmt = (n: string) => n.replace(/\D/g, '').replace(/^(\d{5})(\d{1,5})$/, '$1 $2');
+const keepPhone = { get: () => { try { return localStorage.getItem('c2c.test.agent') ?? ''; } catch { return ''; } },
+  set: (v: string) => { try { localStorage.setItem('c2c.test.agent', v); } catch { /* private window */ } } };
+
+/** Calling options → Test call: a dialer that places one real Click2Call call from the console, then shows its result and recording. */
+function TestCall({ onChange }: { onChange?: () => void }) {
+  const nums = useAsync(() => get<{ numbers: FromNumber[] }>('/calling/click2call/test-call/numbers'));
+  const a = useAction();
+  const [agent, setAgent] = useState(keepPhone.get);
+  const [dial, setDial] = useState('');
+  const [from, setFrom] = useState('');
+  const [err, setErr] = useState<string | null>(null);
+  const [st, setSt] = useState<TestState | null>(null);
+  const [secs, setSecs] = useState(0);
+  const live = !!st && !st.terminal;
+  const waitingRec = !!st && st.terminal && st.talk_seconds > 0 && ['pending', 'processing'].includes(st.recording_status);
+  const list = nums.data?.numbers ?? [];
+  const usable = list.filter((n) => n.available);
+  const fromValue = from || usable[0]?.number || '';
+  useEffect(() => {
+    if (!st || (!live && !waitingRec)) return;
+    const started = Date.now();
+    const t = setInterval(async () => {
+      if (Date.now() - started > 15 * 60 * 1000) { clearInterval(t); return; }   // ponytail: stop after 15 min; the call stays in Calls
+      try { setSt(await get(`/calling/click2call/test-call/${st.call_id}`)); } catch { /* next tick */ }
+    }, 3000);
+    return () => clearInterval(t);
+  }, [st?.call_id, live, waitingRec]);
+  useEffect(() => { if (st) onChange?.(); }, [st?.call_id, st?.state, st?.recording_status]);   // list below stays current
+  useEffect(() => {   // call timer while the call is live
+    if (!live) return;
+    const t0 = Date.now(); setSecs(0);
+    const t = setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(t);
+  }, [live, st?.call_id]);
+  const press = (k: string) => { setErr(null); setDial((d) => (k === '⌫' ? d.slice(0, -1) : (d + k).slice(0, 15))); };
+  const call = () => a.run(async () => {
+    setErr(null); setSt(null);
+    try {
+      const r = await post('/calling/click2call/test-call', { agent_number: agent, customer_number: dial, from: fromValue || null });
+      keepPhone.set(agent);
+      setSt({ call_id: r.call_id, state: 'initiated', terminal: false, cause: null, talk_seconds: 0, recording_status: 'pending' });
+    } catch (e: any) { setErr(e?.message ?? String(e)); }
+  });
+  const hangup = () => st && a.run(async () => {
+    setErr(null);
+    try { await post(`/calling/click2call/test-call/${st.call_id}/hangup`); setSt(await get(`/calling/click2call/test-call/${st.call_id}`)); }
+    catch (e: any) { setErr(e?.message ?? String(e)); }   // 409: customer already called → cut on the phone
+  });
+  const stepIndex = !st ? -1 : st.terminal ? 3 : STEPS.findIndex((x) => x.states.includes(st.state));
+  const ok = /^\+?\d{10,13}$/.test(agent.replace(/\s/g, '')) && /^\+?\d{10,13}$/.test(dial);
+  const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}`;
+  return (
+    <Card title="Test call">
+      <div className="dialer-wrap">
+        <div className="dialer">
+          <label className="field"><span>Call from</span>
+            <select value={fromValue} onChange={(e) => setFrom(e.target.value)} disabled={live}>
+              {list.length === 0 && <option value="">No Click2Call number yet</option>}
+              {list.map((n) => <option key={n.number} value={n.number} disabled={!n.available}>
+                +91 {fmt(n.number)} · {n.source === 'voucher' ? 'voucher' : 'company'}{n.available ? '' : ' (expired)'}
+              </option>)}
+            </select>
+          </label>
+          <label className="field"><span>Your phone (rings first)</span>
+            <input inputMode="tel" value={agent} placeholder="98XXXXXXXX" disabled={live} onChange={(e) => setAgent(e.target.value)} />
+          </label>
+          <input className="dialer-display" inputMode="tel" aria-label="Customer number" placeholder="Customer number" value={dial} disabled={live}
+            onChange={(e) => setDial(e.target.value.replace(/[^\d+]/g, '').slice(0, 15))} onKeyDown={(e) => { if (e.key === 'Enter' && ok && !live) call(); }} />
+          <div className="dialer-keys">
+            {KEYS.map((k) => <button key={k} type="button" className="dialer-key" disabled={live} onClick={() => press(k)} aria-label={k === '⌫' ? 'Delete' : k}>{k}</button>)}
+          </div>
+          {live ? (
+            <button type="button" className="dialer-call hangup" disabled={a.busy} onClick={hangup} aria-label="Hang up" title="Hang up">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" style={{ transform: 'rotate(135deg)' }}><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+            </button>
+          ) : (
+            <button type="button" className="dialer-call" disabled={a.busy || !ok || !fromValue} onClick={call} aria-label="Call" title="Call">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.3.2 2.5.6 3.6.1.3 0 .7-.2 1L6.6 10.8z"/></svg>
+            </button>
+          )}
+        </div>
+        <div className="dialer-status">
+          {!st && !err && <p className="muted">Places one real Click2Call call: your phone rings first; when you answer, the customer is called from the chosen number. The result and recording show here and in the report below.</p>}
+          {err && <Notice tone="warn">{err}</Notice>}
+          {st && (
+            <>
+              <div className="dialer-head">
+                <strong>+91 {fmt(dial.replace(/^\+?91(?=\d{10}$)/, ''))}</strong>
+                <span className="muted">from +91 {fmt(fromValue)}</span>
+                {live && <span className="dialer-timer">{mmss}</span>}
+              </div>
+              <ol className="dialer-steps">
+                {STEPS.map((x, i) => (
+                  <li key={x.key} className={i < stepIndex ? 'done' : i === stepIndex ? (st.terminal ? (st.state === 'completed' ? 'done' : 'bad') : 'now') : ''}>
+                    {i === 3 && st.terminal ? END_TEXT[st.state] ?? st.state : x.label}
+                    {i === 2 && st.talk_seconds > 0 ? ` · ${st.talk_seconds}s` : ''}
+                  </li>
+                ))}
+              </ol>
+              {!st.terminal && st.gateway && secs > 5 && <Notice tone="warn">{st.gateway.text}</Notice>}
+              {st.terminal && st.cause && <p className="muted" style={{ fontSize: '.8rem' }}>Provider code: <span className="code">{st.cause}</span></p>}
+              {st.terminal && st.talk_seconds > 0 && (st.recording_status === 'available'
+                ? <RecordingPlayer callId={st.call_id} status="available" canPlay canDownload />
+                : <p className="muted">Recording: {waitingRec ? 'waiting for the provider…' : st.recording_status.replace(/_/g, ' ')}</p>)}
+              {st.terminal && <button type="button" className="secondary" onClick={() => { setSt(null); setDial(''); }}>New call</button>}
+            </>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** Calling configuration → Test calls: the dialer, and every test call with its result and recording — kept out of Calls and reports. */
+export function TestCallsPage() {
+  const [page, setPage] = useState(1);
+  const list = useAsync(() => get(`/calling/click2call/test-calls?page=${page}`), [page]);
+  const cfg = useAsync(() => get('/calling/click2call'));
+  const on = !!cfg.data?.mode && cfg.data.mode !== 'off';
+  const d = list.data;
+  const when = (t: string) => { const x = new Date(t); return <><b style={{ whiteSpace: 'nowrap' }}>{x.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b><br /><span className="muted" style={{ fontSize: '.8rem' }}>{x.toLocaleDateString([], { day: '2-digit', month: 'short' })}</span></>; };
+  const phone = (n?: string | null) => n ? <span style={{ whiteSpace: 'nowrap' }}>+91 {fmt(n.replace(/^\+?91(?=\d{10}$)/, ''))}</span> : <span className="muted">—</span>;
+  return (
+    <Page title="Test calls" subtitle="Check Click2Call end to end: place a real call here and see its result and recording. Test calls are kept apart — they never appear in Calls, the Dashboard, Supervision or exports.">
+      <ErrorBox error={list.error ?? cfg.error} />
+      {cfg.data && !on && <Notice tone="warn">Click2Call is off. Switch it on in <Link to="/calling/options">Calling options</Link> to place a test call.</Notice>}
+      {on && <TestCall onChange={() => list.reload()} />}
+      <Card title={`Test call report${d?.total ? ` (${d.total})` : ''}`}>
+        <Table rows={d?.data} error={list.error} empty="No test calls yet." columns={[
+          { key: 'when', label: 'When', render: (c: any) => when(c.initiated_at) },
+          { key: 'by', label: 'Placed by', render: (c: any) => <span style={{ whiteSpace: 'nowrap' }}>{c.user?.name ?? '—'}</span> },
+          { key: 'from', label: 'From', render: (c: any) => phone(c.caller_number) },
+          { key: 'to', label: 'Customer', render: (c: any) => phone(c.destination) },
+          { key: 'state', label: 'Result', render: (c: any) => <Badge value={c.state} label={END_TEXT[c.state] ?? c.state.replace(/_/g, ' ')} /> },
+          { key: 'talk', label: 'Talk', align: 'right', render: (c: any) => `${c.talk_seconds ?? 0}s` },
+          { key: 'code', label: 'Provider code', render: (c: any) => c.hangup_cause ? <span className="code" style={{ fontSize: '.75rem', whiteSpace: 'nowrap' }}>{c.hangup_cause}</span> : <span className="muted">—</span> },
+          { key: 'rec', label: 'Recording', render: (c: any) => <RecordingPlayer callId={c.id} status={c.recording_status} format={c.recording?.format} canPlay canDownload compact /> },
+        ]} />
+        {d && d.last_page > 1 && (
+          <div className="row" style={{ marginTop: 10 }}>
+            <button className="secondary" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</button>
+            <span className="muted">Page {d.current_page} of {d.last_page}</span>
+            <button className="secondary" disabled={page >= d.last_page} onClick={() => setPage(page + 1)}>Next</button>
+          </div>
+        )}
       </Card>
     </Page>
   );

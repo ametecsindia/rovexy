@@ -65,7 +65,7 @@ final class SupervisionController extends Controller
         $fixes = LocationEvent::query()->whereIn('id', LocationEvent::query()->selectRaw('MAX(id)')->whereIn('user_id', $ids)
                 ->where('captured_at', '>=', $isToday ? now()->subDay() : $dayStart)->where('captured_at', '<', $dayEnd)->groupBy('user_id'))
             ->get(['user_id', 'lat', 'lng', 'accuracy_m', 'captured_at', 'battery_pct'])->keyBy('user_id');
-        $calls = \App\Models\Call::query()->whereIn('user_id', $ids)->where('initiated_at', '>=', $dayStart)->where('initiated_at', '<', $dayEnd)->where('provider', '!=', 'manual')
+        $calls = \App\Models\Call::query()->where('is_test', false)->whereIn('user_id', $ids)->where('initiated_at', '>=', $dayStart)->where('initiated_at', '<', $dayEnd)->where('provider', '!=', 'manual')
             ->when($pfCustomers, fn ($q) => $q->whereIn('customer_id', clone $pfCustomers))
             ->selectRaw('user_id, COUNT(*) AS n, SUM(CASE WHEN answered_at IS NOT NULL THEN 1 ELSE 0 END) AS connected')->groupBy('user_id')->get()->keyBy('user_id');
         $visits = \App\Models\CustomerEvent::query()->whereIn('user_id', $ids)->where('type', 'visit')->where('created_at', '>=', $dayStart)->where('created_at', '<', $dayEnd)
@@ -122,7 +122,7 @@ final class SupervisionController extends Controller
         $visits = \App\Models\CustomerEvent::query()->where('user_id', $employee->id)->where('type', 'visit')->where('created_at', '>=', $from)->where('created_at', '<', $to)
             ->when($pfCustomers, fn ($q) => $q->whereIn('customer_id', clone $pfCustomers))->orderBy('created_at')->get();
         $customers = \App\Models\Customer::query()->whereIn('id', $visits->pluck('customer_id'))->get(['id', 'customer_ref', 'name', 'address', 'area', 'city', 'lat', 'lng', 'status'])->keyBy('id');
-        $calls = \App\Models\Call::query()->where('user_id', $employee->id)->where('initiated_at', '>=', $from)->where('initiated_at', '<', $to)->where('provider', '!=', 'manual')
+        $calls = \App\Models\Call::query()->where('is_test', false)->where('user_id', $employee->id)->where('initiated_at', '>=', $from)->where('initiated_at', '<', $to)->where('provider', '!=', 'manual')
             ->when($pfCustomers, fn ($q) => $q->whereIn('customer_id', clone $pfCustomers));
         return response()->json([
             'date' => $from->copy()->setTimezone($tz)->toDateString(),

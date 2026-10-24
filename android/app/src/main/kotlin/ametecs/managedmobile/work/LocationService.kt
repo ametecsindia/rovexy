@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.ServiceCompat
 import ametecs.managedmobile.AmmpApp
+import ametecs.managedmobile.BuildConfig
 import ametecs.managedmobile.R
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
@@ -62,7 +63,8 @@ class LocationService : Service() {
         // it is started again when ROVEXY is opened (onResumed).
         val granted = checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-        val inForeground = granted && runCatching { ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess
+        // Play build: no location FGS (would need a Play declaration video) — plain service, fixes while ROVEXY is in use.
+        val inForeground = granted && (BuildConfig.PLAY || runCatching { ServiceCompat.startForeground(this, 1001, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION) }.isSuccess)
         if (!inForeground) {
             started = false
             stopSelf()
@@ -76,11 +78,12 @@ class LocationService : Service() {
         @Suppress("MissingPermission")
         LocationServices.getFusedLocationProviderClient(this).getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
             .addOnSuccessListener { l -> if (l != null) callback.onLocationResult(LocationResult.create(listOf(l))) }
-        return START_STICKY
+        return if (BuildConfig.PLAY) START_NOT_STICKY else START_STICKY
     }
 
     override fun onDestroy() {
         LocationServices.getFusedLocationProviderClient(this).removeLocationUpdates(callback)
+        started = false   // Android stops a plain service after the app leaves the screen; onResumed() starts it again
         super.onDestroy()
     }
 
@@ -90,7 +93,7 @@ class LocationService : Service() {
                 ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
             // Android 12+ refuses a foreground-service start while the app is not in front (e.g. launched from the
             // debugger or still starting). Never let that break sign-in/sync; onResumed() retries once we are visible.
-            if (granted) started = runCatching { ctx.startForegroundService(Intent(ctx, LocationService::class.java)) }.isSuccess
+            if (granted) started = runCatching { Intent(ctx, LocationService::class.java).let { if (BuildConfig.PLAY) ctx.startService(it) else ctx.startForegroundService(it) } }.isSuccess
             // After an app restart `latest` is empty until a fresh fix arrives (up to a minute indoors): seed it with the
             // phone's last known position so "Nearest" and the map have a position at once; real fixes replace it.
             if (granted && latest.value == null) seedLastKnown(ctx)

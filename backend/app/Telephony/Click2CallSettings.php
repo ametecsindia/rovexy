@@ -167,8 +167,8 @@ final class Click2CallSettings
         }
         // With voucher numbers the company number field may be blank: the first voucher number stands in for health checks.
         $did = ($s['did'] ?? null) ?: \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->value('virtual_number');
-        return ['did' => $did, 'agent_caller_id' => $s['agent_caller_id'] ?? null, 'gateway_secret' => $secret]
-            + config('ammp.telephony.click2call');
+        return ['did' => $did, 'agent_caller_id' => $s['agent_caller_id'] ?? null, 'gateway_secret' => $secret,
+            'crm_id' => ($s['crm_id'] ?? null) ?: config('ammp.telephony.click2call.crm_id')] + config('ammp.telephony.click2call');
     }
 
     /** Is Click2Call the server route right now (company setting, or the .env driver)? */

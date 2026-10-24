@@ -1,0 +1,177 @@
+diff --git a/backend/app/Domain/Calling/RecordingState.php b/backend/app/Domain/Calling/RecordingState.php
+index e31cc2d..4f6705e 100644
+--- a/backend/app/Domain/Calling/RecordingState.php
++++ b/backend/app/Domain/Calling/RecordingState.php
+@@ -23,7 +23,7 @@ enum RecordingState: string
+             self::Pending => [self::Recording, self::Failed, self::Processing],
+             self::Recording => [self::Processing, self::Failed],
+             self::Processing => [self::Available, self::Failed],
+-            self::Failed => [self::Processing], // recovery: file found on reconciliation / retry
++            self::Failed => [self::Processing, self::Pending], // recovery: file found / retry / late provider link
+             self::Available => [self::DeletedByRetention],
+             self::DeletedByRetention => [],
+         }, true);
+diff --git a/backend/app/Services/CallService.php b/backend/app/Services/CallService.php
+index 46113be..903bc38 100644
+--- a/backend/app/Services/CallService.php
++++ b/backend/app/Services/CallService.php
+@@ -237,7 +237,9 @@ final class CallService
+     public function syncProvider(Call $call, ?array $finalPayload = null): Call
+     {
+         $adapter = in_array($call->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) ? $this->telephony->adapter() : null;
+-        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
++        // A late provider callback may still bring the link for a recording that had given up waiting (LeadGER: fills a missing URL).
++        $late = $finalPayload !== null && $call->recording_status === RecordingState::Failed->value;
++        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value && !$late)) {
+             return $call;
+         }
+         if ($finalPayload === null && !Cache::add("provider-sync:{$call->id}", 1, 5)) {
+@@ -270,12 +272,15 @@ final class CallService
+                 Audit::record('call.provider_result', $call, ['state' => $d['state'], 'talk' => $d['talk']]);
+             }
+             $rec = Recording::query()->where('call_id', $call->id)->lockForUpdate()->first();
++            if ($rec && $rec->status === RecordingState::Failed->value && !str_starts_with((string) $rec->source_path, 'https://') && $d['recording_url'] && $call->talk_seconds > 0) {
++                $rec->forceFill(['status' => RecordingState::Pending->value])->save();   // late link: take the normal path below
++            }
+             if ($rec && $rec->status === RecordingState::Pending->value) {
+                 if ($call->talk_seconds <= 0) {
+                     $rec->forceFill(['status' => RecordingState::NotRequired->value])->save();
+                     $call->forceFill(['recording_status' => RecordingState::NotRequired->value])->save();
+                 } elseif ($d['recording_url']) {
+-                    $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => mb_substr($d['recording_url'], 0, 255)])->save();
++                    $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => $d['recording_url']])->save();
+                     $call->forceFill(['recording_status' => RecordingState::Processing->value])->save();
+                     DB::afterCommit(fn () => FetchRecording::dispatch($call->company_id, $rec->id));
+                 } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes($call->provider === 'click2call' ? (int) config('ammp.telephony.click2call.recording_wait_minutes', 60) : 15))) {
+diff --git a/backend/app/Telephony/Click2CallAdapter.php b/backend/app/Telephony/Click2CallAdapter.php
+index 09fc537..7fcf001 100644
+--- a/backend/app/Telephony/Click2CallAdapter.php
++++ b/backend/app/Telephony/Click2CallAdapter.php
+@@ -196,13 +196,20 @@ final class Click2CallAdapter implements PolledTelephony
+ 
+     public function fetchRecording(string $url): ?string
+     {
+-        // ponytail: the URL comes from the authenticated gateway record, never from the webhook body; https only.
+-        // Add a host allow-list (C2C_RECORDING_HOSTS) if the provider's storage host is ever known to be fixed.
+-        if (!str_starts_with($url, 'https://')) {
++        // The URL comes from the gateway record or the secret-checked webhook; https only, optional host allow-list
++        // (C2C_RECORDING_HOSTS), and the answer must be audio: no error pages saved as recordings (LeadGER guide 9).
++        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
++        $hosts = (array) ($this->cfg['recording_hosts'] ?? config('ammp.telephony.click2call.recording_hosts', []));
++        if (!str_starts_with($url, 'https://') || $host === '' || ($hosts && !in_array($host, $hosts, true))) {
+             return null;
+         }
+         $r = Http::timeout(60)->connectTimeout(15)->get($url);
+-        return $r->successful() && $r->body() !== '' ? $r->body() : null;
++        $body = $r->body();
++        if (!$r->successful() || $body === '' || strlen($body) > 200 * 1024 * 1024
++            || str_contains(strtolower((string) $r->header('Content-Type')), 'text/html') || str_starts_with(ltrim(substr($body, 0, 64)), '<')) {
++            return null;
++        }
++        return $body;
+     }
+ 
+     /** The employee is rung from the agent caller ID when set, else from the number this call goes out on. */
+diff --git a/backend/config/ammp.php b/backend/config/ammp.php
+index ace0f8e..5fbc204 100644
+--- a/backend/config/ammp.php
++++ b/backend/config/ammp.php
+@@ -109,6 +109,7 @@ return [
+             'daily_limit' => (int) env('C2C_DAILY_LIMIT_PER_NUMBER', 100), // Click2Call attempts per customer number per day (LeadGER)
+             'max_users' => (int) env('C2C_MAX_USERS', 0),                  // licensed Click2Call users per company, 0 = no limit
+             'webhook_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('C2C_WEBHOOK_IPS', ''))))),
++            'recording_hosts' => array_values(array_filter(array_map(fn ($h) => strtolower(trim($h)), explode(',', (string) env('C2C_RECORDING_HOSTS', ''))))),
+             'recording_wait_minutes' => 60,                                // no recording this long after the call → failed (LeadGER 60)
+         ],
+         'freeswitch' => [
+diff --git a/backend/routes/console.php b/backend/routes/console.php
+index 889b1e8..f4aae41 100644
+--- a/backend/routes/console.php
++++ b/backend/routes/console.php
+@@ -30,6 +30,19 @@ Schedule::call(function () {
+         ->each(fn ($call) => $ctx->run(Company::query()->findOrFail($call->company_id), fn () => app(\App\Services\CallService::class)->syncProvider($call)));
+ })->everyMinute()->name('exotel:sync')->withoutOverlapping();
+ 
++Schedule::call(function () {
++    // Provider recordings whose download failed or got stuck (worker restart, provider hiccup): retry for 24 h, max 20 tries (LeadGER sweep).
++    $ctx = app(CurrentCompany::class);
++    $ctx->withoutScope(fn () => \App\Models\Recording::query()->where('source_path', 'like', 'https://%')->where('created_at', '>', now()->subDay())
++        ->where('updated_at', '<', now()->subMinutes(10))->where('attempts', '<', 20)
++        ->whereIn('status', [\App\Domain\Calling\RecordingState::Failed->value, \App\Domain\Calling\RecordingState::Processing->value])->get()
++        ->each(function (\App\Models\Recording $rec) {
++            $rec->forceFill(['status' => \App\Domain\Calling\RecordingState::Processing->value, 'updated_at' => now()])->save();   // next try ≥10 min later
++            \App\Models\Call::query()->whereKey($rec->call_id)->update(['recording_status' => \App\Domain\Calling\RecordingState::Processing->value]);
++            \App\Jobs\FetchRecording::dispatch($rec->company_id, $rec->id);
++        }));
++})->everyFiveMinutes()->name('recordings:retry')->withoutOverlapping(10);
++
+ Schedule::call(function () {
+     // Presence: a device with no contact for 3 minutes is offline (heartbeat every 60 s while the app runs).
+     \Illuminate\Support\Facades\DB::table('managed_devices')->where('presence', 'online')->where('last_contact_at', '<', now()->subMinutes(3))->update(['presence' => 'offline']);
+diff --git a/backend/tests/Feature/AcceptanceTest.php b/backend/tests/Feature/AcceptanceTest.php
+index 248decc..3cb5bea 100644
+--- a/backend/tests/Feature/AcceptanceTest.php
++++ b/backend/tests/Feature/AcceptanceTest.php
+@@ -431,6 +431,62 @@ final class AcceptanceTest extends TestCase
+         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'route_not_allowed');
+     }
+ 
++    public function test_click2call_recording_late_link_long_url_checks_and_retry_sweep(): void
++    {
++        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
++            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
++            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => 'wh', 'timeout' => 15,
++            'timezone' => 'Asia/Kolkata', 'recording_hosts' => ['rec.gateway.test'], 'recording_wait_minutes' => 60]]);
++        $adapter = new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call'));
++        app(TelephonyManager::class)->swap($adapter);
++        $audio = 'RIFF' . str_repeat("\x00", 4000);
++        $ist = now('Asia/Kolkata');
++        $cdr = ['A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED', 'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(75)->format('dmYHis'),
++            'B_PARTY_END_TIME' => $ist->format('dmYHis'), 'EVENT_TYPE' => 'call_end', 'DURATION' => 82];
++        \Illuminate\Support\Facades\Http::fake([
++            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ2']),
++            'obd.gateway.test/*' => \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => null]]),
++            'rec.gateway.test/html*' => \Illuminate\Support\Facades\Http::response('<html>expired</html>', 200, ['Content-Type' => 'text/html']),
++            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response($audio, 200, ['Content-Type' => 'audio/wav']),
++            'evil.test/*' => \Illuminate\Support\Facades\Http::response($audio),
++        ]);
++        // Download checks: allowed host + https + audio only.
++        $this->assertSame($audio, $adapter->fetchRecording('https://rec.gateway.test/r/a.wav'));
++        $this->assertNull($adapter->fetchRecording('https://rec.gateway.test/html/a.wav'));   // provider error page
++        $this->assertNull($adapter->fetchRecording('https://evil.test/a.wav'));               // host not allowed
++        $this->assertNull($adapter->fetchRecording('http://rec.gateway.test/a.wav'));         // not https
++
++        $this->appOnlyMandatory();
++        $m = $this->approvedPhone();
++        $this->login($m);
++        $this->ackAll($m);
++        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
++        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
++
++        // Result arrives without a link → call completed, recording still waiting.
++        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid] + $cdr, ['Secret-Key' => 'wh'])->assertJsonPath('status', 'success');
++        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'completed')->assertJsonPath('recording_status', 'pending');
++        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
++        // 60-minute wait ran out: recording failed (no link).
++        app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->where('call_id', $call->id)->update(['status' => 'failed', 'last_error' => 'no recording']));
++        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->whereKey($call->id)->update(['recording_status' => 'failed']));
++
++        // A late callback brings a long signed link (> 255 chars): it is stored whole and the recording becomes available.
++        $long = 'https://rec.gateway.test/r/TZ2.wav?X-Amz-Signature=' . str_repeat('a', 400);
++        \Illuminate\Support\Facades\Cache::flush();
++        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid] + $cdr + ['recording_url' => $long], ['Secret-Key' => 'wh'])->assertJsonPath('status', 'success');
++        $rec = app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->where('call_id', $call->id)->first());
++        $this->assertSame('available', $rec->status);
++        $this->assertSame($long, $rec->source_path);
++
++        // Retry sweep: a failed provider download older than 10 minutes is queued again.
++        app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->whereKey($rec->id)->update(['status' => 'failed', 'attempts' => 3, 'updated_at' => now()->subMinutes(11)]));
++        \Illuminate\Support\Facades\Queue::fake();
++        collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())->first(fn ($e) => $e->description === 'recordings:retry')->run(app());
++        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\FetchRecording::class, fn ($j) => $j->recordingId === $rec->id);
++        $this->assertSame('processing', app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->whereKey($rec->id)->value('status')));
++    }
++
+     public function test_app_crash_note_lands_in_audit_log(): void
+     {
+         $this->appOnlyMandatory();

@@ -344,6 +344,11 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('calling/click2call', [Admin\IntegrationController::class, 'click2call'])->middleware('perm:telephony.configure');
         Route::put('calling/click2call', [Admin\IntegrationController::class, 'saveClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
         Route::post('calling/click2call/test', [Admin\IntegrationController::class, 'testClick2call'])->middleware(['perm:telephony.configure', 'throttle:10,1']);
+        Route::post('calling/click2call/test-call', [Admin\IntegrationController::class, 'testCall'])->middleware(['perm:telephony.configure', 'feature:click2call', 'throttle:5,1']);
+        Route::get('calling/click2call/test-calls', [Admin\IntegrationController::class, 'testCalls'])->middleware('perm:telephony.configure');
+        Route::get('calling/click2call/test-call/numbers', [Admin\IntegrationController::class, 'testCallNumbers'])->middleware('perm:telephony.configure');
+        Route::post('calling/click2call/test-call/{id}/hangup', [Admin\IntegrationController::class, 'testCallHangup'])->whereNumber('id')->middleware('perm:telephony.configure');
+        Route::get('calling/click2call/test-call/{id}', [Admin\IntegrationController::class, 'testCallStatus'])->whereNumber('id')->middleware('perm:telephony.configure');
         Route::get('integrations/maps', [Admin\IntegrationController::class, 'maps'])->middleware('perm:system.health');
         Route::put('integrations/maps', [Admin\IntegrationController::class, 'saveMaps'])->middleware('perm:telephony.configure');
         Route::put('integrations/{system}', [Admin\IntegrationController::class, 'save'])->whereIn('system', ['smartprs', 'smartept'])->middleware(['perm:telephony.configure', 'feature:integrations']);
@@ -381,6 +386,7 @@ $c2cWebhook = function (\Illuminate\Http\Request $r, \App\Services\CallService $
     abort_if($secret !== '' && !hash_equals($secret, $given), 401);
     $p = $r->json()->all() ?: $r->except('secret');
     $ref = (string) ($p['ref_id'] ?? $p['REF_ID'] ?? $p['reference_id'] ?? $p['refId'] ?? '');
+    $ref = \App\Telephony\Click2CallAdapter::uuidFromRef($ref);   // LeadGER-format refs carry our uuid first
     $pid = (string) ($p['call_id'] ?? $p['CALL_ID'] ?? $p['CallId'] ?? $p['uniqueid'] ?? $p['unique_id'] ?? $p['uuid'] ?? '');
     $ctx = app(\App\Support\CurrentCompany::class);
     $call = $ctx->withoutScope(fn () => \App\Models\Call::query()->where('provider', 'click2call')
@@ -389,10 +395,17 @@ $c2cWebhook = function (\Illuminate\Http\Request $r, \App\Services\CallService $
     if (!$call) {
         return response()->json(['status' => 'ignored', 'message' => 'Unknown call']);   // 200: no endless retries
     }
-    $call = $ctx->run(\App\Models\Company::query()->findOrFail($call->company_id), fn () => $svc->syncProvider($call, $secret !== '' ? $p : null));
+    // LeadGER signs this webhook with the same TELEPHONY_SECRET as the OBD gateway (OBD guide 8/9): a header equal to the
+    // company's Gateway secret also makes the posted result trusted when C2C_WEBHOOK_SECRET is not set on the server.
+    $call = $ctx->run(\App\Models\Company::query()->findOrFail($call->company_id), function () use ($svc, $call, $secret, $given, $p) {
+        $gw = (string) (\App\Telephony\Click2CallSettings::effective()['gateway_secret'] ?? '');
+        $trusted = $secret !== '' || ($given !== '' && $gw !== '' && hash_equals($gw, $given));
+        return $svc->syncProvider($call, $trusted ? $p : null);
+    });
     return response()->json(['status' => 'success', 'call_state' => $call->state]);
 };
 Route::match(['get', 'post'], 'telephony/v1/click2call', $c2cWebhook)->name('telephony.click2call')->middleware('throttle:telephony');
 Route::match(['get', 'post'], 'click2call/webhook', $c2cWebhook)->name('click2call.webhook')->middleware('throttle:telephony');
+Route::post('telephony/webhook', $c2cWebhook)->name('telephony.webhook')->middleware('throttle:telephony');   // LeadGER's call-end URL (OBD guide 4.1)
 // AMAPI Pub/Sub push notifications (OIDC-verified).
 Route::post('amapi/v1/notifications', [AmapiNotificationController::class, 'store']);

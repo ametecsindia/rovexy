@@ -29,10 +29,10 @@ final class CallController extends Controller
     public function index(Request $r)
     {
         // Pull results/recordings for a few still-open click-to-call calls (no scheduler needed on a dev PC).
-        $this->scoped($r)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
+        $this->scoped($r)->where('is_test', false)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)->where('initiated_at', '>', now()->subHours(3))
             ->where(fn ($q) => $q->whereNotIn('state', \App\Domain\Calling\CallLifecycle::TERMINAL)->orWhere('recording_status', 'pending'))
             ->latest('initiated_at')->limit(5)->get()->each(fn ($c) => app(\App\Services\CallService::class)->syncProvider($c));
-        return response()->json($this->scoped($r)->where('provider', '!=', 'manual')
+        return response()->json($this->scoped($r)->where('is_test', false)->where('provider', '!=', 'manual')   // test calls: Calling configuration → Test calls
             ->with(['user:id,name,employee_code', 'customer:id,customer_ref,name', 'disposition:id,call_id,code,follow_up_at', 'recording:id,call_id,format,duration_seconds,last_error'])
             ->when($r->query('user_id'), fn ($q, $v) => $q->where('user_id', $v))
             ->when($r->query('customer_id'), fn ($q, $v) => $q->where('customer_id', $v))

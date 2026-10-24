@@ -431,6 +431,171 @@ final class AcceptanceTest extends TestCase
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'route_not_allowed');
     }
 
+    public function test_click2call_recording_late_link_long_url_checks_and_retry_sweep(): void
+    {
+        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
+            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
+            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => 'wh', 'timeout' => 15,
+            'timezone' => 'Asia/Kolkata', 'recording_hosts' => ['rec.gateway.test'], 'recording_wait_minutes' => 60]]);
+        $adapter = new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call'));
+        app(TelephonyManager::class)->swap($adapter);
+        $audio = 'RIFF' . str_repeat("\x00", 4000);
+        $ist = now('Asia/Kolkata');
+        $cdr = ['A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED', 'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(75)->format('dmYHis'),
+            'B_PARTY_END_TIME' => $ist->format('dmYHis'), 'EVENT_TYPE' => 'call_end', 'DURATION' => 82];
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ2']),
+            'obd.gateway.test/*' => \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => null]]),
+            'rec.gateway.test/html*' => \Illuminate\Support\Facades\Http::response('<html>expired</html>', 200, ['Content-Type' => 'text/html']),
+            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response($audio, 200, ['Content-Type' => 'audio/wav']),
+            'evil.test/*' => \Illuminate\Support\Facades\Http::response($audio),
+        ]);
+        // Download checks: allowed host + https + audio only.
+        $this->assertSame($audio, $adapter->fetchRecording('https://rec.gateway.test/r/a.wav'));
+        $this->assertNull($adapter->fetchRecording('https://rec.gateway.test/html/a.wav'));   // provider error page
+        $this->assertNull($adapter->fetchRecording('https://evil.test/a.wav'));               // host not allowed
+        $this->assertNull($adapter->fetchRecording('http://rec.gateway.test/a.wav'));         // not https
+
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
+
+        // Result arrives without a link → call completed, recording still waiting.
+        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid] + $cdr, ['Secret-Key' => 'wh'])->assertJsonPath('status', 'success');
+        $m->work('GET', "/api/mobile/v1/calls/{$uuid}")->assertJsonPath('state', 'completed')->assertJsonPath('recording_status', 'pending');
+        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
+        // 60-minute wait ran out: recording failed (no link).
+        app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->where('call_id', $call->id)->update(['status' => 'failed', 'last_error' => 'no recording']));
+        app(CurrentCompany::class)->withoutScope(fn () => Call::query()->whereKey($call->id)->update(['recording_status' => 'failed']));
+
+        // A late callback brings a long signed link (> 255 chars): it is stored whole and the recording becomes available.
+        $long = 'https://rec.gateway.test/r/TZ2.wav?X-Amz-Signature=' . str_repeat('a', 400);
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid] + $cdr + ['recording_url' => $long], ['Secret-Key' => 'wh'])->assertJsonPath('status', 'success');
+        $rec = app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->where('call_id', $call->id)->first());
+        $this->assertSame('available', $rec->status);
+        $this->assertSame($long, $rec->source_path);
+
+        // Retry sweep: a failed provider download older than 10 minutes is queued again.
+        app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->whereKey($rec->id)->update(['status' => 'failed', 'attempts' => 3, 'updated_at' => now()->subMinutes(11)]));
+        \Illuminate\Support\Facades\Queue::fake();
+        collect(app(\Illuminate\Console\Scheduling\Schedule::class)->events())->first(fn ($e) => $e->description === 'recordings:retry')->run(app());
+        \Illuminate\Support\Facades\Queue::assertPushed(\App\Jobs\FetchRecording::class, fn ($j) => $j->recordingId === $rec->id);
+        $this->assertSame('processing', app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->whereKey($rec->id)->value('status')));
+    }
+
+    public function test_admin_test_call_from_calling_options(): void
+    {
+        $cdr = ['A_DIAL_STATUS' => 'ANSWERED'];
+        $url = null;
+        $gwStatus = 200;
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.com/*' => \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ9']),
+            'obd.ametecsindia.com/*' => function () use (&$cdr, &$url, &$gwStatus) {
+                return $gwStatus === 400 ? \Illuminate\Support\Facades\Http::response(['status' => 400, 'message' => 'Secret Key not matched'])
+                    : ($gwStatus === 401 ? \Illuminate\Support\Facades\Http::response(['status' => 401, 'message' => 'Unauthorized'], 401)
+                    : \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => $url]]));
+            },
+            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000), 200, ['Content-Type' => 'audio/wav']),
+        ]);
+        app(TelephonyManager::class)->swap(null);   // the company's Click2Call setting picks the adapter
+        $adm = $this->admin('alpha');
+        $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '9876543210'])->assertStatus(422);   // Click2Call off
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '08047000001', 'gateway_secret' => 'gw'])->assertOk();
+        $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => 'abc', 'customer_number' => '9876543210'])->assertStatus(422);
+
+        $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '08047000001')->assertJsonPath('numbers.0.source', 'company');
+        $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '9876543210', 'from' => '8047999999'])
+            ->assertStatus(422)->assertJsonPath('message', 'That number is not one of your Click2Call numbers (or it has expired).');
+        // A voucher number is offered first and is the default "call from".
+        \App\Models\C2c\Vmn::query()->create(['virtual_number' => '8047000101', 'click2call' => true, 'expires_at' => now()->addMonth()]);
+        $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '8047000101')->assertJsonPath('numbers.0.source', 'voucher')
+            ->assertJsonPath('numbers.1.number', '08047000001');
+        $id = $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '+91 98765 43210'])
+            ->assertOk()->assertJsonPath('ok', true)->json('call_id');
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['a_party_no'] === '9811111111'
+            && $req['b_party_no'] === '9876543210' && $req['did'] === '8047000101' && $req['record'] === 1);
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id}")->assertJsonPath('state', 'ringing')->assertJsonPath('terminal', false)->assertJsonPath('gateway', null);
+        // Gateway refuses the key: the page says so at once instead of "ringing" for 15 minutes.
+        $gwStatus = 401;
+        \Illuminate\Support\Facades\Cache::flush();
+        $id2 = $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '9876543211'])->assertOk()->json('call_id');
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id2}")->assertJsonPath('state', 'initiated')->assertJsonPath('gateway.code', 'KEY_REFUSED');
+        // The real gateway answers HTTP 200 + status 400 "Secret Key not matched" (24 Oct): also treated as a refused key.
+        $gwStatus = 400;
+        \Illuminate\Support\Facades\Cache::flush();
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id2}")->assertJsonPath('gateway.code', 'KEY_REFUSED');
+        $adm->postJson('/api/admin/calling/click2call/test')->assertJsonPath('ok', false);
+        // Hang up before the customer is dialled → cancelled at once; once the customer rings → 409 (cut on the phone).
+        $adm->postJson("/api/admin/calling/click2call/test-call/{$id2}/hangup")->assertOk()->assertJsonPath('state', 'cancelled');
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id2}")->assertJsonPath('state', 'cancelled')->assertJsonPath('terminal', true);
+        $adm->postJson("/api/admin/calling/click2call/test-call/{$id}/hangup")->assertStatus(409);   // $id: customer ringing
+        $gwStatus = 200;
+
+        $ist = now('Asia/Kolkata');
+        $cdr = ['A_DIAL_STATUS' => 'ANSWERED', 'B_DIAL_STATUS' => 'ANSWERED', 'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(30)->format('dmYHis'),
+            'B_PARTY_END_TIME' => $ist->format('dmYHis'), 'EVENT_TYPE' => 'call_end', 'DURATION' => 40];
+        $url = 'https://rec.gateway.test/r/TZ9.wav';
+        \Illuminate\Support\Facades\Cache::flush();
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id}")->assertJsonPath('state', 'completed')->assertJsonPath('talk_seconds', 30)
+            ->assertJsonPath('recording_status', 'available');
+        $adm->postJson("/api/admin/calls/{$id}/recording/playback")->assertOk();   // the recording still plays
+        // Kept apart: Test calls lists them; Calls, Dashboard and the export do not.
+        $adm->getJson('/api/admin/calling/click2call/test-calls')->assertJsonPath('total', 2)->assertJsonPath('data.0.id', $id2)
+            ->assertJsonPath('data.1.recording_status', 'available')->assertJsonPath('data.1.caller_number', '8047000101');
+        $this->assertSame([], collect($adm->getJson('/api/admin/calls')->json('data'))->whereIn('id', [$id, $id2])->all());
+        $adm->getJson('/api/admin/overview')->assertOk()->assertJsonPath('calls_today.total', 0);
+    }
+
+    public function test_obd_gateway_guide_payloads_webhook_and_ringing_recording(): void
+    {
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.com/*' => \Illuminate\Support\Facades\Http::response(['status' => 'success']),
+            'obd.ametecsindia.com/*' => \Illuminate\Support\Facades\Http::response(['status' => 404, 'message' => 'Record not found']),
+            'rec.obd.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000), 200, ['Content-Type' => 'audio/wav']),
+        ]);
+        app(TelephonyManager::class)->swap(null);
+        $adm = $this->admin('alpha');
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '6744123493', 'gateway_secret' => " 'tel-secret', ", 'crm_id' => '776'])->assertOk();   // pasted from PHP: quotes dropped
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'click2call_data/connection-test_d_776_0_1/') && $req->header('Secret-Key')[0] === 'tel-secret');
+        $ist = now('Asia/Kolkata');
+        $place = fn (string $to) => $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '7322822761', 'customer_number' => $to])->assertOk()->json('call_id');
+
+        // 1) Connected (guide 3.3 spellings), http RecordVoice → stored over https; LeadGER webhook URL + Secret-Key = Gateway secret.
+        $id = $place('9640875757');
+        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id));
+        $ref = "{$call->uuid}_d_776_{$call->user_id}_1";
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['ref_id'] === $ref);
+        $connected = ['SERVICE_TYPE' => 'CLICK_TO_CALL', 'EVENT_TYPE' => 'Call End', 'REF_ID' => $ref, 'A_DIAL_STATUS' => 'Connected', 'B_DIAL_STATUS' => 'Connected',
+            'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(35)->format('dmYHis'), 'B_PARTY_END_TIME' => $ist->format('dmYHis'),
+            'DISCONNECTED_BY' => 'Customer', 'RecordVoice' => 'http://rec.obd.test/recordings/c2c/a.wav'];
+        $this->postJson('/api/telephony/webhook', ['ref_id' => $ref] + $connected, ['Secret-Key' => 'wrong'])->assertJsonPath('status', 'success');
+        $this->assertSame('initiated', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id))->state);   // wrong key: body not trusted (gateway read finds nothing yet)
+        \Illuminate\Support\Facades\Cache::flush();
+        $this->postJson('/api/telephony/webhook', ['ref_id' => $ref] + $connected, ['Secret-Key' => 'tel-secret'])->assertJsonPath('call_state', 'completed');
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id}")->assertJsonPath('talk_seconds', 35)->assertJsonPath('recording_status', 'available');
+        $this->assertSame('https://rec.obd.test/recordings/c2c/a.wav', app(CurrentCompany::class)->withoutScope(fn () => Recording::query()->where('call_id', $id)->value('source_path')));
+
+        // 2) Agent answered, customer "No Answer": no talk time, but the provider's ringing recording is kept (guide 10).
+        $id2 = $place('9777436222');
+        $c2 = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id2));
+        $ref2 = "{$c2->uuid}_d_776_{$c2->user_id}_1";
+        $this->postJson('/api/telephony/webhook', ['ref_id' => $ref2, 'EVENT_TYPE' => 'Call End', 'A_DIAL_STATUS' => 'Connected', 'B_DIAL_STATUS' => 'No Answer',
+            'A_PARTY_END_TIME' => $ist->format('dmYHis'), 'RecordVoice' => 'https://rec.obd.test/recordings/c2c/b.wav'], ['Secret-Key' => 'tel-secret'])
+            ->assertJsonPath('call_state', 'no_answer');
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id2}")->assertJsonPath('talk_seconds', 0)->assertJsonPath('recording_status', 'available');
+
+        // 3) Agent did not answer and no recording: nothing to keep.
+        $id3 = $place('9000186925');
+        $c3 = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id3));
+        $this->postJson('/api/telephony/webhook', ['ref_id' => "{$c3->uuid}_d_776_{$c3->user_id}_1", 'EVENT_TYPE' => 'Call End', 'A_DIAL_STATUS' => 'No Answer',
+            'RecordVoice' => 'No Voice'], ['Secret-Key' => 'tel-secret'])->assertJsonPath('call_state', 'agent_unanswered');
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id3}")->assertJsonPath('recording_status', 'not_required');
+    }
+
     public function test_app_crash_note_lands_in_audit_log(): void
     {
         $this->appOnlyMandatory();
@@ -581,7 +746,9 @@ final class AcceptanceTest extends TestCase
         $adm->patchJson("/api/admin/calling/users/{$emp->id}", ['c2c_default_number' => '8047000103'])->assertStatus(422);
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => '8047000103'])->assertStatus(422)->assertJsonPath('error', 'c2c_number_not_yours');
         $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
-        $this->assertSame(['8047000102', '9999911111', '9876543210', $uuid], [end($started)['did'], end($started)['a_party_no'], end($started)['b_party_no'], end($started)['ref_id']]);
+        $this->assertSame($uuid, \App\Telephony\Click2CallAdapter::uuidFromRef(strtoupper($uuid) . "_d_CRM77_{$emp->id}_1"));   // webhook matching
+        // CRM id set → LeadGER reference format {uuid}_d_{crm_id}_{user_id}_ (the OBD gateway answers 400 to a bare uuid).
+        $this->assertSame(['8047000102', '9999911111', '9876543210', "{$uuid}_d_CRM77_{$emp->id}_1"], [end($started)['did'], end($started)['a_party_no'], end($started)['b_party_no'], end($started)['ref_id']]);
 
         // Webhook with the secret: missing → 401; correct → the posted result is applied as final.
         $this->postJson('/api/click2call/webhook', ['ref_id' => $uuid])->assertStatus(401);

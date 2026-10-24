@@ -10,6 +10,7 @@ import android.os.IBinder
 import androidx.core.app.ServiceCompat
 import androidx.core.content.IntentCompat
 import ametecs.managedmobile.AmmpApp
+import ametecs.managedmobile.BuildConfig
 import ametecs.managedmobile.R
 
 /**
@@ -18,6 +19,10 @@ import ametecs.managedmobile.R
  */
 abstract class VisibleMediaService(private val kind: String, private val fgsType: Int) : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() {
+        if (BuildConfig.PLAY) getSystemService(android.app.NotificationManager::class.java).cancel(if (kind == "voice") 2003 else 2002)
+        super.onDestroy()
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val g = (application as AmmpApp).graph
@@ -36,7 +41,11 @@ abstract class VisibleMediaService(private val kind: String, private val fgsType
             .build()
         // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+). Android can refuse (app in the
         // background, permission revoked, OEM limits): that threw and restarted the app — now the session just ends.
-        try {
+        // Play build has no typed FGS permissions: camera/voice run while ROVEXY is on screen (sessions start from the
+        // Activity), the notification above is still shown so the session stays visible.
+        if (BuildConfig.PLAY) {
+            getSystemService(android.app.NotificationManager::class.java).notify(when (kind) { "voice" -> 2003; else -> 2002 }, n)
+        } else try {
             ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
         } catch (e: Exception) {
             g.media.lastError.value = "Android did not allow sharing to start. Open ROVEXY and try again."

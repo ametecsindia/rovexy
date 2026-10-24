@@ -13,7 +13,7 @@ import { DevicesPage } from './pages/Devices';
 import { PoliciesPage } from './pages/Policies';
 import { ImportsPage, CustomersPage, CustomerDetailPage } from './pages/Customers';
 import { CallingConfigPage, CallsPage, FollowUpsPage } from './pages/Calls';
-import { CallingOptionsPage, CallingSetupPage, CompanyNumbersPage, PeopleAccessPage } from './pages/CallingConfig';
+import { CallingOptionsPage, CallingSetupPage, CompanyNumbersPage, PeopleAccessPage, TestCallsPage } from './pages/CallingConfig';
 import { LocationPage, MediaPage, ChatPage } from './pages/Supervision';
 import { AuditPage, BrandingPage, HealthPage, ReportsPage, RetentionPage } from './pages/Settings';
 import { IntegrationsPage } from './pages/Integrations';
@@ -37,6 +37,7 @@ export const NAV: NavItem[] = [
   { to: '/calling/numbers', icon: 'contacts', label: 'Company numbers', perm: 'telephony.configure', group: 'Calling configuration' },
   { to: '/calling/people', icon: 'people', label: 'People & access', perm: 'telephony.configure', group: 'Calling configuration' },
   { to: '/calling/outcomes', icon: 'settings', label: 'Call outcome codes', perm: 'telephony.configure', group: 'Calling configuration' },
+  { to: '/calling/test-calls', icon: 'call', label: 'Test calls', perm: 'telephony.configure', group: 'Calling configuration' },
   { to: '/imports', icon: 'upload', label: 'Portfolios', perm: 'customers.view', group: 'Customers' },
   { to: '/allocation', icon: 'people', label: 'Assignment', perm: 'customers.assign', group: 'Customers' },
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
@@ -227,6 +228,7 @@ export function App() {
           <Route path="/calling" element={<Navigate to="/calling/setup" replace />} />
           <Route path="/calling/setup" element={<CallingSetupPage />} />
           <Route path="/calling/options" element={<CallingOptionsPage />} />
+          <Route path="/calling/test-calls" element={<TestCallsPage />} />
           <Route path="/calling/numbers" element={<CompanyNumbersPage />} />
           <Route path="/calling/people" element={<PeopleAccessPage />} />
           {['click2call', 'sim'].map((p) => <Route key={p} path={`/calling/${p}`} element={<Navigate to="/calling/options" replace />} />)}

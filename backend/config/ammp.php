@@ -109,6 +109,7 @@ return [
             'daily_limit' => (int) env('C2C_DAILY_LIMIT_PER_NUMBER', 100), // Click2Call attempts per customer number per day (LeadGER)
             'max_users' => (int) env('C2C_MAX_USERS', 0),                  // licensed Click2Call users per company, 0 = no limit
             'webhook_ips' => array_values(array_filter(array_map('trim', explode(',', (string) env('C2C_WEBHOOK_IPS', ''))))),
+            'recording_hosts' => array_values(array_filter(array_map(fn ($h) => strtolower(trim($h)), explode(',', (string) env('C2C_RECORDING_HOSTS', ''))))),
             'recording_wait_minutes' => 60,                                // no recording this long after the call → failed (LeadGER 60)
         ],
         'freeswitch' => [

@@ -237,7 +237,9 @@ final class CallService
     public function syncProvider(Call $call, ?array $finalPayload = null): Call
     {
         $adapter = in_array($call->provider, \App\Telephony\PolledTelephony::PROVIDERS, true) ? $this->telephony->adapter() : null;
-        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value)) {
+        // A late provider callback may still bring the link for a recording that had given up waiting (LeadGER: fills a missing URL).
+        $late = $finalPayload !== null && $call->recording_status === RecordingState::Failed->value;
+        if (!$adapter instanceof \App\Telephony\PolledTelephony || $adapter->name() !== $call->provider || ($call->isTerminal() && $call->recording_status !== RecordingState::Pending->value && !$late)) {
             return $call;
         }
         if ($finalPayload === null && !Cache::add("provider-sync:{$call->id}", 1, 5)) {
@@ -270,12 +272,15 @@ final class CallService
                 Audit::record('call.provider_result', $call, ['state' => $d['state'], 'talk' => $d['talk']]);
             }
             $rec = Recording::query()->where('call_id', $call->id)->lockForUpdate()->first();
+            if ($rec && $rec->status === RecordingState::Failed->value && !str_starts_with((string) $rec->source_path, 'https://') && $d['recording_url'] && $call->talk_seconds > 0) {
+                $rec->forceFill(['status' => RecordingState::Pending->value])->save();   // late link: take the normal path below
+            }
             if ($rec && $rec->status === RecordingState::Pending->value) {
-                if ($call->talk_seconds <= 0) {
+                if ($call->talk_seconds <= 0 && !$d['recording_url']) {
                     $rec->forceFill(['status' => RecordingState::NotRequired->value])->save();
                     $call->forceFill(['recording_status' => RecordingState::NotRequired->value])->save();
                 } elseif ($d['recording_url']) {
-                    $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => mb_substr($d['recording_url'], 0, 255)])->save();
+                    $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => $d['recording_url']])->save();
                     $call->forceFill(['recording_status' => RecordingState::Processing->value])->save();
                     DB::afterCommit(fn () => FetchRecording::dispatch($call->company_id, $rec->id));
                 } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes($call->provider === 'click2call' ? (int) config('ammp.telephony.click2call.recording_wait_minutes', 60) : 15))) {

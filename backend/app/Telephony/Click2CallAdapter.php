@@ -11,7 +11,8 @@ use Illuminate\Support\Facades\Http;
  * Click2Call (same provider setup as LeadGER): Telozar c2c_call rings the employee's phone (A party) first, then the
  * customer (B party) from the company VMN, and records the call. The result and recording URL are READ from the Ametecs
  * OBD gateway (click2call_data/{ref_id}/{vmn}); the provider's webhook only triggers that read, its body is never trusted.
- * ref_id = the call's uuid, so every lookup is exact (never "latest call to this number").
+ * ref_id = the call's uuid — in LeadGER's dialer format {uuid}_d_{crm_id}_{user_id}_1 when a CRM id is set (the OBD gateway reads the
+ * CRM from it and answers 400 to a bare uuid) — so every lookup is exact (never "latest call to this number").
  */
 final class Click2CallAdapter implements PolledTelephony
 {
@@ -31,6 +32,19 @@ final class Click2CallAdapter implements PolledTelephony
         return (strlen($n) === 12 && str_starts_with($n, '91')) ? substr($n, 2) : $n;
     }
 
+    /** Reference sent to the provider and used for the gateway lookup (LeadGER WebRTCController format when a CRM id is set). */
+    public function refFor(Call $call): string
+    {
+        $crm = preg_replace('/[^A-Za-z0-9-]/', '', (string) ($this->cfg['crm_id'] ?? ''));
+        return $crm !== '' ? "{$call->uuid}_d_{$crm}_{$call->user_id}_1" : $call->uuid;   // OBD guide 2.3: dialer Click2Call
+    }
+
+    /** Our call uuid from a provider reference (bare uuid or LeadGER format). */
+    public static function uuidFromRef(string $ref): string
+    {
+        return preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i', $ref, $m) ? strtolower($m[0]) : $ref;
+    }
+
     public function originate(Call $call, array $p): void
     {
         if (empty($this->cfg['start_url']) || (empty($this->cfg['did']) && empty($p['caller_number']))) {
@@ -41,7 +55,7 @@ final class Click2CallAdapter implements PolledTelephony
         try {
             $r = Http::timeout((int) $this->cfg['timeout'])->acceptJson()->post($this->cfg['start_url'], [
                 'did' => $did, 'a_party_no' => self::normalize($p['agent_target']),
-                'b_party_no' => self::normalize($p['customer_e164']), 'ref_id' => $call->uuid,
+                'b_party_no' => self::normalize($p['customer_e164']), 'ref_id' => $this->refFor($call),
                 // The provider records every call; all three flags are sent, as LeadGER does, to be safe with the gateway.
                 'record' => 1, 'recording' => 1, 'record_call' => 1,
             ]);
@@ -89,24 +103,53 @@ final class Click2CallAdapter implements PolledTelephony
     /** Fetch the gateway record. @return array{cdr:array,recording_url:?string,duration:?int}|null */
     /** Why the last gateway read gave nothing (e.g. HTTP401 = wrong gateway secret), shown on the call as its cause. */
     private string $why = '';
+    private string $whyText = '';
+
+    /** Why the last gateway read returned nothing ('' = it returned a record). */
+    /** Gateway's verdict on a Secret-Key from its answer to a lookup: true = refused. */
+    public static function keyRefused(int $http, mixed $json): bool
+    {
+        $msg = is_array($json) ? (string) ($json['message'] ?? $json['error'] ?? $json['msg'] ?? '') : '';
+        return in_array($http, [401, 403], true) || (is_array($json) && in_array((int) ($json['status'] ?? 0), [401, 403], true))
+            || preg_match('/secret.*(not|invalid|wrong|mismatch)|unauthori/i', $msg) === 1;
+    }
+
+    public function lastProblem(): string
+    {
+        return $this->why;
+    }
+
+    /** The gateway's own message for the last failed read (e.g. "Invalid ref_id"), '' when none. */
+    public function lastProblemText(): string
+    {
+        return $this->whyText;
+    }
 
     private function record(Call $call): ?array
     {
         $this->why = '';
+        $this->whyText = '';
         if (empty($this->cfg['cdr_url'])) {
             $this->why = 'NO_URL';
             return null;
         }
         try {
-            $r = Http::timeout(5)->acceptJson()->withHeaders(['Secret-Key' => (string) $this->cfg['gateway_secret']])
-                ->get(rtrim((string) $this->cfg['cdr_url'], '/') . '/' . rawurlencode($call->uuid) . '/' . rawurlencode($call->caller_number ?: self::normalize($this->cfg['did'])));
-        } catch (\Throwable) {
+            // ponytail: 10 s (LeadGER 3–5 s) — the gateway sometimes answers slowly while a call is in progress.
+            $r = Http::timeout(10)->connectTimeout(5)->acceptJson()->withHeaders(['Secret-Key' => (string) $this->cfg['gateway_secret']])
+                ->get(rtrim((string) $this->cfg['cdr_url'], '/') . '/' . rawurlencode($this->refFor($call)) . '/' . rawurlencode($call->caller_number ?: self::normalize($this->cfg['did'])));
+        } catch (\Throwable $e) {
             $this->why = 'UNREACHABLE';
+            $this->whyText = mb_substr(preg_replace('/[A-Fa-f0-9]{32}/', '…', $e->getMessage()), 0, 160);   // e.g. cURL error 28: timed out
             return null;
         }
         $j = $r->json();
         if (!is_array($j) || (int) ($j['status'] ?? 0) !== 200 || !is_array($j['data'] ?? null)) {
             $this->why = 'HTTP' . $r->status() . (is_array($j) && isset($j['status']) ? '_S' . (int) $j['status'] : '');
+            $msg = is_array($j) ? ($j['message'] ?? $j['error'] ?? $j['msg'] ?? null) : null;
+            $this->whyText = is_string($msg) ? mb_substr(strip_tags($msg), 0, 160) : '';
+            if (preg_match('/secret.*(not|invalid|wrong|mismatch)|unauthori/i', $this->whyText)) {
+                $this->why = 'KEY_REFUSED';   // the gateway answers HTTP 200 + {"status":400,"message":"Secret Key not matched"}
+            }
             return null;
         }
         $cdr = $j['data']['response'] ?? [];
@@ -115,16 +158,24 @@ final class Click2CallAdapter implements PolledTelephony
         }
         $cdr = is_array($cdr) ? $cdr : [];
         $url = $j['data']['recording_url'] ?? $cdr['RecordVoice'] ?? $cdr['recording_url'] ?? null;
-        return ['cdr' => $cdr, 'recording_url' => is_string($url) && $url !== '' ? $url : null,
+        return ['cdr' => $cdr, 'recording_url' => is_string($url) ? self::httpsUrl($url) : null,
             'duration' => isset($j['data']['duration']) ? (int) $j['data']['duration'] : null];
+    }
+
+    /** http(s) link → https link; anything else (e.g. "No Voice") → null. TLS stays on (OBD guide 10). */
+    public static function httpsUrl(string $u): ?string
+    {
+        $u = trim($u);
+        $u = str_starts_with($u, 'http://') ? 'https://' . substr($u, 7) : $u;
+        return str_starts_with($u, 'https://') && filter_var($u, FILTER_VALIDATE_URL) ? $u : null;
     }
 
     /** Recording URL from a provider payload (the spellings LeadGER accepts). */
     public static function recordingUrlIn(array $p): ?string
     {
         foreach (['recording_url', 'RecordVoice', 'record_voice', 'record_url', 'audio_url', 'file_url'] as $k) {
-            if (is_string($p[$k] ?? null) && str_starts_with($p[$k], 'https://')) {
-                return $p[$k];
+            if (is_string($p[$k] ?? null) && ($u = self::httpsUrl($p[$k]))) {
+                return $u;
             }
         }
         return null;
@@ -191,18 +242,26 @@ final class Click2CallAdapter implements PolledTelephony
         return ['terminal' => (bool) $terminal, 'state' => $state, 'talk' => $talk,
             'ring' => $terminal && $duration !== null ? max(0, (int) $duration - $talk) : null,
             'started' => null, 'ended' => $utc($bEnd ?? $aEnd),
-            'recording_url' => $talk > 0 ? $rec['recording_url'] : null, 'cause' => preg_replace('/[^A-Z0-9_\/-]/', '', $cause)];
+            // An unanswered call can carry the provider's recording of the ringing: kept, without talk time (OBD guide 10).
+            'recording_url' => $terminal ? $rec['recording_url'] : null, 'cause' => preg_replace('/[^A-Z0-9_\/-]/', '', $cause)];
     }
 
     public function fetchRecording(string $url): ?string
     {
-        // ponytail: the URL comes from the authenticated gateway record, never from the webhook body; https only.
-        // Add a host allow-list (C2C_RECORDING_HOSTS) if the provider's storage host is ever known to be fixed.
-        if (!str_starts_with($url, 'https://')) {
+        // The URL comes from the gateway record or the secret-checked webhook; https only, optional host allow-list
+        // (C2C_RECORDING_HOSTS), and the answer must be audio: no error pages saved as recordings (LeadGER guide 9).
+        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
+        $hosts = (array) ($this->cfg['recording_hosts'] ?? config('ammp.telephony.click2call.recording_hosts', []));
+        if (!str_starts_with($url, 'https://') || $host === '' || ($hosts && !in_array($host, $hosts, true))) {
             return null;
         }
         $r = Http::timeout(60)->connectTimeout(15)->get($url);
-        return $r->successful() && $r->body() !== '' ? $r->body() : null;
+        $body = $r->body();
+        if (!$r->successful() || $body === '' || strlen($body) > 200 * 1024 * 1024
+            || str_contains(strtolower((string) $r->header('Content-Type')), 'text/html') || str_starts_with(ltrim(substr($body, 0, 64)), '<')) {
+            return null;
+        }
+        return $body;
     }
 
     /** The employee is rung from the agent caller ID when set, else from the number this call goes out on. */

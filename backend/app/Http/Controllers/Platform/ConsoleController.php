@@ -84,7 +84,7 @@ final class ConsoleController extends Controller
         $users = DB::table('users')->whereIn('company_id', $ids)->where('status', 'active')->groupBy('company_id')->selectRaw('company_id, COUNT(*) n')->pluck('n', 'company_id');
         $phones = DB::table('managed_devices')->whereIn('company_id', $ids)->where('approval_state', 'approved')->groupBy('company_id')->selectRaw('company_id, COUNT(*) n')->pluck('n', 'company_id');
         // usage: calls placed in the last 30 days and the last time any phone was heard from
-        $calls = DB::table('calls')->whereIn('company_id', $ids)->where('initiated_at', '>=', now()->subDays(30))->groupBy('company_id')->selectRaw('company_id, COUNT(*) n')->pluck('n', 'company_id');
+        $calls = DB::table('calls')->where('is_test', false)->whereIn('company_id', $ids)->where('initiated_at', '>=', now()->subDays(30))->groupBy('company_id')->selectRaw('company_id, COUNT(*) n')->pluck('n', 'company_id');
         $seen = DB::table('managed_devices')->whereIn('company_id', $ids)->groupBy('company_id')->selectRaw('company_id, MAX(last_contact_at) t')->pluck('t', 'company_id');
         $adminEmails = DB::table('users')->whereIn('company_id', $ids)->where('employee_code', 'admin')->pluck('email', 'company_id');
         $lic = Licence::query()->whereIn('company_id', $ids)->where('status', '!=', 'superseded')->with('plan:id,name')->latest('id')->get()->unique('company_id')->keyBy('company_id');
@@ -588,7 +588,7 @@ final class ConsoleController extends Controller
             'console_url' => Workspaces::consoleUrl($c),
             'users' => DB::table('users')->where('company_id', $id)->where('status', 'active')->count(),
             'phones' => DB::table('managed_devices')->where('company_id', $id)->where('approval_state', 'approved')->count(),
-            'calls_30d' => DB::table('calls')->where('company_id', $id)->where('initiated_at', '>=', now()->subDays(30))->count(),
+            'calls_30d' => DB::table('calls')->where('is_test', false)->where('company_id', $id)->where('initiated_at', '>=', now()->subDays(30))->count(),
             'last_seen_at' => DB::table('managed_devices')->where('company_id', $id)->max('last_contact_at'),
             'licences' => Licence::query()->with('plan:id,name')->where('company_id', $id)->latest('id')->get(['id', 'key', 'kind', 'status', 'plan_id', 'max_users', 'expires_at', 'created_at']),
             'orders' => SalesOrder::query()->where('company_id', $id)->latest('id')->limit(20)->get(['id', 'number', 'kind', 'total', 'status', 'invoice_number', 'paid_at', 'created_at', 'failed_at', 'failure_reason']),
