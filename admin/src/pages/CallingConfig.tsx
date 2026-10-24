@@ -154,7 +154,7 @@ export function CallingOptionsPage() {
   );
 }
 
-type TestState = { call_id: number; state: string; terminal: boolean; cause: string | null; talk_seconds: number; recording_status: string; gateway?: { code: string; text: string } | null };
+type TestState = { call_id: number; state: string; terminal: boolean; cause: string | null; talk_seconds: number; recording_status: string; gateway?: { code: string; text: string; tone?: 'info' | 'warn' } | null };
 type FromNumber = { number: string; source: 'voucher' | 'company'; available: boolean; expires: string | null };
 const STEPS = [
   { key: 'agent', label: 'Your phone rings', states: ['initiated', 'agent_ringing'] },
@@ -268,7 +268,7 @@ function TestCall({ onChange }: { onChange?: () => void }) {
                   </li>
                 ))}
               </ol>
-              {!st.terminal && st.gateway && secs > 5 && <Notice tone="warn">{st.gateway.text}</Notice>}
+              {!st.terminal && st.gateway && secs > 5 && <Notice tone={st.gateway.tone ?? 'warn'}>{st.gateway.text}</Notice>}
               {st.terminal && st.cause && <p className="muted" style={{ fontSize: '.8rem' }}>Provider code: <span className="code">{st.cause}</span></p>}
               {st.terminal && st.talk_seconds > 0 && (st.recording_status === 'available'
                 ? <RecordingPlayer callId={st.call_id} status="available" canPlay canDownload />
@@ -289,6 +289,13 @@ export function TestCallsPage() {
   const cfg = useAsync(() => get('/calling/click2call'));
   const on = !!cfg.data?.mode && cfg.data.mode !== 'off';
   const d = list.data;
+  const open = (d?.data ?? []).some((c: any) => !['completed', 'busy', 'no_answer', 'failed', 'agent_unanswered', 'disconnected', 'cancelled', 'rejected'].includes(c.state)
+    || ['pending', 'processing'].includes(c.recording_status));
+  useEffect(() => {   // rows still waiting for the provider's result or recording: refresh every 15 s
+    if (!open) return;
+    const t = setInterval(() => list.reload(), 15000);
+    return () => clearInterval(t);
+  }, [open, page]);
   const when = (t: string) => { const x = new Date(t); return <><b style={{ whiteSpace: 'nowrap' }}>{x.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</b><br /><span className="muted" style={{ fontSize: '.8rem' }}>{x.toLocaleDateString([], { day: '2-digit', month: 'short' })}</span></>; };
   const phone = (n?: string | null) => n ? <span style={{ whiteSpace: 'nowrap' }}>+91 {fmt(n.replace(/^\+?91(?=\d{10}$)/, ''))}</span> : <span className="muted">—</span>;
   return (

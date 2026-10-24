@@ -256,7 +256,10 @@ final class IntegrationController extends Controller
             && ($cfg = \App\Telephony\Click2CallSettings::effective())) {
             $probe = new \App\Telephony\Click2CallAdapter($cfg);
             if ($probe->details($call) === null && ($why = $probe->lastProblem()) !== '') {
-                $gateway = ['code' => $why, 'text' => match (true) {
+                $notYet = str_starts_with($why, 'HTTP200_S') && stripos($probe->lastProblemText(), 'not found') !== false;
+                $gateway = ['code' => $why, 'tone' => $notYet ? 'info' : 'warn', 'text' => $notYet
+                    ? 'Call placed. The provider sends the result to the OBD gateway when the call ends; the steps and the recording appear here then.'
+                    : match (true) {
                     $why === 'KEY_REFUSED' || in_array($why, ['HTTP401', 'HTTP403'], true) || str_ends_with($why, '_S401') || str_ends_with($why, '_S403')
                         => 'The call was placed, but the OBD gateway refused the Gateway secret (…' . mb_substr((string) $cfg['gateway_secret'], -4) . '), so ROVEXY cannot read the result or recording. '
                             . $this->sameKeyHint((string) $cfg['gateway_secret']) . 'Enter the OBD Secret-Key in Click2Call connection → Gateway secret and Save.',

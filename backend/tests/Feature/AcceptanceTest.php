@@ -569,6 +569,13 @@ final class AcceptanceTest extends TestCase
         $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id));
         $ref = "{$call->uuid}_d_776_{$call->user_id}_1";
         \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['ref_id'] === $ref);
+        // The reference sent is kept: changing the CRM id later must not break the lookup of this call.
+        $this->assertSame($ref, app(CurrentCompany::class)->withoutScope(fn () => Call::query()->find($id))->provider_call_id);
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '6744123493', 'crm_id' => '7761'])->assertOk();
+        \Illuminate\Support\Facades\Cache::flush();
+        $adm->getJson("/api/admin/calling/click2call/test-call/{$id}")->assertJsonPath('gateway.tone', 'info');   // "Record not found" while ringing
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'click2call_data/' . rawurlencode($ref) . '/'));
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '6744123493', 'crm_id' => '776'])->assertOk();
         $connected = ['SERVICE_TYPE' => 'CLICK_TO_CALL', 'EVENT_TYPE' => 'Call End', 'REF_ID' => $ref, 'A_DIAL_STATUS' => 'Connected', 'B_DIAL_STATUS' => 'Connected',
             'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(35)->format('dmYHis'), 'B_PARTY_END_TIME' => $ist->format('dmYHis'),
             'DISCONNECTED_BY' => 'Customer', 'RecordVoice' => 'http://rec.obd.test/recordings/c2c/a.wav'];

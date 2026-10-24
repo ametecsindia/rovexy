@@ -35,6 +35,11 @@ final class Click2CallAdapter implements PolledTelephony
     /** Reference sent to the provider and used for the gateway lookup (LeadGER WebRTCController format when a CRM id is set). */
     public function refFor(Call $call): string
     {
+        // The reference actually sent is kept in provider_call_id (Telozar returns no call id): later lookups use it even
+        // if the CRM id in Calling options changes afterwards (otherwise the gateway answers "Click2call Not found" forever).
+        if (str_starts_with((string) $call->provider_call_id, $call->uuid . '_d_')) {
+            return (string) $call->provider_call_id;
+        }
         $crm = preg_replace('/[^A-Za-z0-9-]/', '', (string) ($this->cfg['crm_id'] ?? ''));
         return $crm !== '' ? "{$call->uuid}_d_{$crm}_{$call->user_id}_1" : $call->uuid;   // OBD guide 2.3: dialer Click2Call
     }
@@ -52,10 +57,11 @@ final class Click2CallAdapter implements PolledTelephony
         }
         $did = self::normalize($p['caller_number'] ?? null) ?: self::normalize($this->cfg['did']);
         $call->forceFill(['caller_number' => $did])->save();   // the CDR is looked up by ref_id + this number
+        $ref = $this->refFor($call);
         try {
             $r = Http::timeout((int) $this->cfg['timeout'])->acceptJson()->post($this->cfg['start_url'], [
                 'did' => $did, 'a_party_no' => self::normalize($p['agent_target']),
-                'b_party_no' => self::normalize($p['customer_e164']), 'ref_id' => $this->refFor($call),
+                'b_party_no' => self::normalize($p['customer_e164']), 'ref_id' => $ref,
                 // The provider records every call; all three flags are sent, as LeadGER does, to be safe with the gateway.
                 'record' => 1, 'recording' => 1, 'record_call' => 1,
             ]);
@@ -69,7 +75,7 @@ final class Click2CallAdapter implements PolledTelephony
         // The provider's own answer, kept on the call's audit trail (Audit log → call.provider_start) to see why a call never rang.
         \App\Support\Audit::record('call.provider_start', $call, ['http' => $r->status(), 'reply' => mb_substr($r->body(), 0, 500)]);
         $id = $body['call_id'] ?? $body['callId'] ?? $body['uuid'] ?? ($body['response']['call_id'] ?? null);
-        $call->forceFill(['provider_call_id' => mb_substr((string) ($id ?? $call->uuid), 0, 64)])->save();
+        $call->forceFill(['provider_call_id' => mb_substr((string) ($id ?? $ref), 0, 128)])->save();   // column is 128
     }
 
     /** Provider dial status text → leg result (LeadGER Helper::callStateFromDialStatus). */
