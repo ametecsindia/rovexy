@@ -101,7 +101,7 @@ final class ConsoleController extends Controller
     public function createCompany(Request $r)
     {
         $d = $r->validate(['name' => 'required|string|max:150', 'slug' => 'nullable|string|max:40', 'admin_name' => 'required|string|max:150',
-            'admin_email' => 'required|email|max:190', 'admin_password' => 'nullable|string|min:10|max:200', 'plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal',
+            'admin_email' => 'required|email|max:190', 'admin_password' => ['nullable', 'string', 'max:200', Password::defaults()], 'plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal',
             'users' => 'nullable|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly', 'send_email' => 'boolean', 'reason' => 'nullable|string|max:255']);
         // Workspace (= sub-domain) is made from the company name when not given, always unique.
         $d['slug'] = ($d['slug'] ?? '') !== '' ? strtolower($d['slug']) : Workspaces::slugFrom($d['name']);
@@ -438,7 +438,7 @@ final class ConsoleController extends Controller
     {
         $d = $r->validate(['name' => 'required|string|max:150', 'email' => ['required', 'email', 'max:190', Rule::unique('platform_admins')->ignore($id)],
             'phone' => ['nullable', 'string', 'max:20', 'regex:/^[0-9+\-\s()]{6,20}$/'], 'role' => ['required', Rule::in(array_keys(PlatformAccess::ROLES))], 'status' => 'in:active,disabled',
-            'password' => [$id ? 'nullable' : 'required', 'string', 'max:200', Password::min(12)->letters()->numbers()]], ['phone.regex' => 'Phone: digits, spaces, + and - only.']);
+            'password' => [$id ? 'nullable' : 'required', 'string', 'max:200', Password::defaults()]], ['phone.regex' => 'Phone: digits, spaces, + and - only.']);
         if ($id === auth('platform')->id() && (($d['role'] ?? 'super') !== 'super' || ($d['status'] ?? 'active') !== 'active')) {
             throw new DomainException('own_account', 'You cannot demote or disable your own account.');
         }
@@ -548,7 +548,7 @@ final class ConsoleController extends Controller
     {
         $d = $r->validate(['seller_name' => 'string|max:150', 'seller_address' => 'nullable|string|max:300', 'seller_gstin' => 'nullable|string|max:15',
             'seller_state' => 'digits:2', 'seller_email' => 'nullable|email|max:190', 'seller_phone' => 'nullable|string|max:20', 'invoice_prefix' => 'string|max:8|regex:/^[A-Z0-9]+$/',
-            'gst_rate' => 'numeric|min:0|max:40', 'trial_days' => 'integer|min:1|max:60', 'trial_users' => 'integer|min:1|max:100', 'grace_days' => 'integer|min:0|max:90',
+            'gst_rate' => 'numeric|min:0|max:40', 'trial_days' => 'integer|min:1|max:365', 'trial_users' => 'integer|min:1|max:100', 'grace_days' => 'integer|min:0|max:90',
             'razorpay_key_id' => 'nullable|string|max:60', 'razorpay_key_secret' => 'nullable|string|max:120', 'razorpay_webhook_secret' => 'nullable|string|max:120',
             'site_announcement' => 'nullable|string|max:200', 'site_hero_title' => 'nullable|string|max:120', 'site_hero_text' => 'nullable|string|max:400',
             'site_meta_description' => 'nullable|string|max:300', 'reminders_enabled' => 'in:0,1', 'trial_verify_email' => 'in:0,1', 'staff_mfa_required' => 'in:0,1',
@@ -678,7 +678,7 @@ final class ConsoleController extends Controller
     public function resetCompanyAdminPassword(Request $r, int $id)
     {
         $this->superOnly();
-        $d = $r->validate(['password' => ['required', 'string', 'max:200', Password::min(10)->letters()->numbers()], 'reason' => 'required|string|max:255']);
+        $d = $r->validate(['password' => ['required', 'string', 'max:200', Password::defaults()], 'reason' => 'required|string|max:255']);
         $c = Company::query()->findOrFail($id);
         $n = User::withoutGlobalScopes()->where('company_id', $c->id)->where('employee_code', 'admin')->first();
         if (!$n) {

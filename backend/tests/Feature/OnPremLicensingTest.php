@@ -289,7 +289,7 @@ final class OnPremLicensingTest extends TestCase
     public function test_website_sells_an_onprem_perpetual_licence_without_a_workspace(): void
     {
         $this->get('/buy?kind=perpetual&plan=business&users=40')->assertOk()->assertSee('Own · Perpetual', false)->assertSee('Pay securely');
-        $this->post('/buy', ['plan' => 'starter', 'kind' => 'perpetual', 'users' => 10, 'buyer_company' => 'Acme', 'buyer_name' => 'Imran', 'buyer_email' => 'it@acme.test',
+        $this->postWithEmailCode('/buy', ['plan' => 'starter', 'kind' => 'perpetual', 'users' => 10, 'buyer_company' => 'Acme', 'buyer_name' => 'Imran', 'buyer_email' => 'it@acme.test',
             'buyer_phone' => '9800000000', 'state_code' => '29', 'terms' => '1'])->assertRedirect();
         $o = SalesOrder::query()->firstOrFail();
         $this->assertSame(['onprem', 'perpetual', null, null], [$o->deployment, $o->licence_kind, $o->workspace, $o->billing]);

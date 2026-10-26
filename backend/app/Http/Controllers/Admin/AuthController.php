@@ -95,7 +95,7 @@ final class AuthController extends Controller
     public function password(Request $r)
     {
         $d = $r->validate(['current_password' => 'required|string|max:200', 'password' => ['required', 'string', 'max:200', 'confirmed', 'different:current_password',
-            \Illuminate\Validation\Rules\Password::min(10)->letters()->numbers()]], ['password.different' => 'The new password must be different from the current one.']);
+            \Illuminate\Validation\Rules\Password::defaults()]], ['password.different' => 'The new password must be different from the current one.']);
         $u = $r->user();
         if (!Hash::check($d['current_password'], $u->password)) {
             Audit::record('admin.password_change_failed', $u);

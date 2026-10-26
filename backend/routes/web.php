@@ -43,6 +43,8 @@ Route::middleware('central')->group(function () {
         Route::post('/enquiry', [SiteController::class, 'enquiry']);
         Route::post('/trial', [SiteController::class, 'trial']);
         Route::post('/trial/verify', [SiteController::class, 'verifyTrial']);
+        Route::post('/verify-email', [SiteController::class, 'verifyTrial']);
+        Route::post('/verify-email/resend', [SiteController::class, 'resendOtp']);
         Route::post('/buy', [SiteController::class, 'placeOrder']);
     });
     Route::post('/price-check', [SiteController::class, 'priceCheck'])->middleware('throttle:site-pay');

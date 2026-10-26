@@ -230,7 +230,7 @@ function PersonModal({ person, roles, teams, people, onClose, onDone }: { person
             <option value="">— no group —</option>{teams.map((t: any) => <option key={t.id} value={t.id}>{t.name}{t.managers?.length ? ` (manager: ${t.managers.map((m: any) => m.name).join(', ')})` : ''}</option>)}
           </select>
         </Field>
-        <Field label={isNew ? 'Password' : 'New password (optional)'} hint={isNew ? 'Leave blank to generate one' : 'Min 10 characters, letters and numbers'}>
+        <Field label={isNew ? 'Password' : 'New password (optional)'} hint={isNew ? 'Leave blank to generate one' : 'At least 8 characters, letters and numbers'}>
           <input type="password" autoComplete="new-password" value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} />
         </Field>
         {!isNew && <Field label="Status"><select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="active">Active</option><option value="suspended">Suspended</option><option value="left">Left the company</option></select></Field>}

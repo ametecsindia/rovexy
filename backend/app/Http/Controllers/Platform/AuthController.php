@@ -44,7 +44,7 @@ final class AuthController extends Controller
         $r->session()->regenerate();
         $r->session()->put('platform_pw', PlatformAccess::fingerprint((string) $a->password));
         $r->session()->put('platform_portal', $portal);
-        $mfa = $a->mfa_enabled_at ? 'verify' : (self::mfaRequired() ? 'enrol' : 'none');
+        $mfa = !self::mfaOn() ? 'none' : ($a->mfa_enabled_at ? 'verify' : (self::mfaRequired() ? 'enrol' : 'none'));
         if ($mfa !== 'none') {
             $r->session()->put('platform_mfa_pending', $mfa);
             PlatformAudit::record('super.password_ok', $a, ['portal' => $portal]);
@@ -53,9 +53,15 @@ final class AuthController extends Controller
         return $this->signedIn($r, $a);
     }
 
+    /** Authenticator codes at all (one server switch for every console: ADMIN_MFA_REQUIRED, default off). */
+    private static function mfaOn(): bool
+    {
+        return (bool) config('ammp.sessions.admin_mfa_required');
+    }
+
     private static function mfaRequired(): bool
     {
-        return PlatformSettings::get('staff_mfa_required') === '1';
+        return self::mfaOn() && PlatformSettings::get('staff_mfa_required') === '1';
     }
 
     private function signedIn(Request $r, PlatformAdmin $a)
@@ -136,7 +142,7 @@ final class AuthController extends Controller
             return response()->json(['mfa_required' => $pending, 'name' => $a->name, 'email' => $a->email]);
         }
         return response()->json(['id' => $a->id, 'name' => $a->name, 'email' => $a->email, 'phone' => $a->phone, 'role' => $a->role,
-            'role_label' => PlatformAccess::ROLES[$a->role] ?? $a->role, 'mfa_enabled' => (bool) $a->mfa_enabled_at, 'mfa_compulsory' => self::mfaRequired(),
+            'role_label' => PlatformAccess::ROLES[$a->role] ?? $a->role, 'mfa_enabled' => self::mfaOn() && (bool) $a->mfa_enabled_at, 'mfa_compulsory' => self::mfaRequired(), 'mfa_available' => self::mfaOn(),
             'last_login_at' => $a->last_login_at,
             'access' => collect(PlatformAccess::MODULES)->keys()->mapWithKeys(fn ($m) => [$m => PlatformAccess::level($a->role, $m)]),
         ]);
@@ -156,7 +162,7 @@ final class AuthController extends Controller
     /** Change your own password. Every other signed-in session of yours is signed out on its next request. */
     public function password(Request $r)
     {
-        $d = $r->validate(['current_password' => 'required|string|max:200', 'password' => ['required', 'string', 'max:200', 'confirmed', 'different:current_password', Password::min(12)->letters()->numbers()]],
+        $d = $r->validate(['current_password' => 'required|string|max:200', 'password' => ['required', 'string', 'max:200', 'confirmed', 'different:current_password', Password::defaults()]],
             ['password.different' => 'The new password must be different from the current one.']);
         $a = auth('platform')->user();
         if (!Hash::check($d['current_password'], $a->password)) {

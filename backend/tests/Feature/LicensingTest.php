@@ -85,7 +85,7 @@ final class LicensingTest extends TestCase
 
     public function test_free_trial_creates_a_workspace_with_a_trial_licence(): void
     {
-        $this->post('/trial', ['company' => 'Beta Recoveries', 'workspace' => 'beta-rec', 'name' => 'Bina', 'phone' => '9811111111', 'email' => 'bina@beta.test',
+        $this->postWithEmailCode('/trial', ['company' => 'Beta Recoveries', 'workspace' => 'beta-rec', 'name' => 'Bina', 'phone' => '9811111111', 'email' => 'bina@beta.test',
             'password' => 'Trial-pass-123', 'password_confirmation' => 'Trial-pass-123', 'terms' => '1'])->assertOk()->assertSee('Your trial is ready');
         $c = Company::query()->where('slug', 'beta-rec')->firstOrFail();
         $l = Licence::query()->where('company_id', $c->id)->firstOrFail();
@@ -132,7 +132,7 @@ final class LicensingTest extends TestCase
         PlatformSettings::set('razorpay_key_id', 'rzp_test_x');
         PlatformSettings::set('razorpay_key_secret', 'shh');
         Http::fake(['api.razorpay.com/v1/orders' => Http::response(['id' => 'order_RZ1'])]);
-        $res = $this->post('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
+        $res = $this->postWithEmailCode('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
             'buyer_phone' => '9822222222', 'state_code' => '29', 'workspace' => 'gamma', 'password' => 'Gamma-pass-123', 'password_confirmation' => 'Gamma-pass-123', 'terms' => '1']);
         $o = SalesOrder::query()->firstOrFail();
         $res->assertRedirect($o->payUrl());
@@ -217,7 +217,6 @@ final class LicensingTest extends TestCase
 
     public function test_trial_with_email_code(): void
     {
-        PlatformSettings::set('trial_verify_email', '1');
         $form = ['company' => 'Zeta', 'workspace' => 'zeta', 'name' => 'Zara', 'phone' => '9833333333', 'email' => 'z@zeta.test',
             'password' => 'Trial-pass-123', 'password_confirmation' => 'Trial-pass-123', 'terms' => '1'];
         $page = $this->post('/trial', $form)->assertOk()->assertSee('Check your e-mail');

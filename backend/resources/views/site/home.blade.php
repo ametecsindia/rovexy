@@ -501,7 +501,7 @@ $faqs = [
       <h2>Try it with your own team</h2>
       <p>Every feature switched on, for up to {{ $trialUsers }} users. No card needed.</p>
       <ol class="steps">
-        <li><b>Create your workspace</b><span>{{ $verify ? 'Confirm your e-mail with a code; takes a minute.' : 'Ready as soon as you submit.' }}</span></li>
+        <li><b>Create your workspace</b><span>Confirm your e-mail with a 6-digit code; takes a minute.</span></li>
         <li><b>Approve a company phone</b><span>Install the app, match the code, switch recording on.</span></li>
         <li><b>Upload a portfolio and call</b><span>Drop in the bank's Excel and assign it to your callers.</span></li>
       </ol>
@@ -523,8 +523,8 @@ $faqs = [
         </div>
         <label>Work e-mail<input type="email" name="email" value="{{ old('email') }}" required autocomplete="email"></label>
         <div class="grid2">
-          <label>Password<input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
-          <label>Confirm password<input type="password" name="password_confirmation" required minlength="10" autocomplete="new-password"></label>
+          <label>Password<input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+          <label>Confirm password<input type="password" name="password_confirmation" required minlength="8" autocomplete="new-password"></label>
         </div>
         <label class="check"><input type="checkbox" name="terms" value="1" required> <span>I agree to the <a href="/terms">terms</a> and <a href="/privacy">privacy policy</a></span></label>
         <button class="btn gold wide" type="submit">Create my workspace →</button>

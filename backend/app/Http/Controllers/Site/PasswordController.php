@@ -35,7 +35,7 @@ final class PasswordController extends Controller
         if (!$row) {
             return response()->view('site.password', ['mode' => 'set', 'token' => $token, 'row' => null, 'user' => null, 'company' => null], 410);
         }
-        $r->validate(['password' => ['required', 'string', 'max:200', 'confirmed', Password::min(10)->letters()->numbers()]],
+        $r->validate(['password' => ['required', 'string', 'max:200', 'confirmed', Password::defaults()]],
             ['password.confirmed' => 'The two passwords do not match.']);
         $user = User::withoutGlobalScopes()->findOrFail($row->user_id);
         $company = Company::query()->findOrFail($row->company_id);

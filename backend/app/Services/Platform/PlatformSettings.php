@@ -49,7 +49,7 @@ final class PlatformSettings
         'mail_from_name' => 'ROVEXY',
         // automation
         'reminders_enabled' => '1',      // renewal / trial / unpaid-order e-mails (ammp:reminders, hourly)
-        'trial_verify_email' => '0',     // 1 = a 6-digit code is e-mailed before a trial workspace is created (needs MAIL_* set)
+        'trial_verify_email' => '1',     // no longer read: trials and website purchases always confirm the e-mail with a code
         // security
         'staff_mfa_required' => '0',     // 1 = every staff / accountant sign-in needs a 2-step code (first sign-in enrols)
     ];
@@ -88,7 +88,7 @@ final class PlatformSettings
     /** True when e-mails really leave the server: SMTP saved here, or a real mailer in .env. */
     public static function mailReady(): bool
     {
-        return (bool) self::get('mail_host') || !in_array(config('mail.default'), ['log', 'array', null], true);
+        return (bool) self::get('mail_host') || !in_array(config('mail.default'), app()->runningUnitTests() ? ['log', null] : ['log', 'array', null], true);   // tests read the 'array' mailer's messages
     }
 
     /**

@@ -58,8 +58,8 @@ final class Sales
             if (!preg_match(Workspaces::SLUG, $ws) || Company::query()->where('slug', $ws)->exists()) {
                 throw new DomainException('workspace_taken', 'Choose another workspace name (3–40 lower-case letters, numbers or dashes; not already in use).');
             }
-            if (strlen((string) ($buyer['admin_password'] ?? '')) < 10) {
-                throw new DomainException('weak_password', 'Choose an admin password of at least 10 characters.');
+            if (\Illuminate\Support\Facades\Validator::make(['p' => (string) ($buyer['admin_password'] ?? '')], ['p' => \Illuminate\Validation\Rules\Password::defaults()])->fails()) {
+                throw new DomainException('weak_password', 'Choose an admin password of at least 8 characters, with letters and numbers.');
             }
         }
         return DB::transaction(function () use ($plan, $kind, $buyer, $licence, $createdBy, $gstin, $coupon, $pr, $newWorkspace) {

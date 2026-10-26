@@ -19,7 +19,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * Public website: marketing page with live packages, enquiry form, free trial (optional e-mail code), buy → Razorpay → workspace.
+ * Public website: marketing page with live packages, enquiry form, free trial and buy (both after an e-mail code) → Razorpay → workspace.
  * Forms are server-rendered with CSRF tokens; every POST is rate-limited and has a honeypot field.
  */
 final class SiteController extends Controller
@@ -36,7 +36,7 @@ final class SiteController extends Controller
         return view('site.home', ['plans' => $this->plans(), 'features' => Licensing::FEATURES, 'trialDays' => (int) PlatformSettings::get('trial_days'),
             'trialUsers' => (int) PlatformSettings::get('trial_users'), 'contact' => ['email' => $site('seller_email'), 'phone' => $site('seller_phone')],
             'site' => ['announcement' => $site('site_announcement'), 'hero_title' => $site('site_hero_title'), 'hero_text' => $site('site_hero_text'),
-                'meta' => $site('site_meta_description')], 'verify' => PlatformSettings::get('trial_verify_email') === '1', 'shots' => self::screenshots()]);
+                'meta' => $site('site_meta_description')], 'shots' => self::screenshots()]);
     }
 
     /**
@@ -76,43 +76,116 @@ final class SiteController extends Controller
             return redirect('/thank-you');
         }
         $d = $r->validate(['company' => 'required|string|max:150', 'name' => 'required|string|max:150', 'email' => 'required|email|max:190',
-            'phone' => 'required|string|max:20', 'workspace' => ['required', 'string', 'max:40', 'regex:' . Workspaces::SLUG], 'password' => 'required|string|min:10|max:200|confirmed',
+            'phone' => 'required|string|max:20', 'workspace' => ['required', 'string', 'max:40', 'regex:' . Workspaces::SLUG], 'password' => ['required', 'string', 'max:200', 'confirmed', \Illuminate\Validation\Rules\Password::defaults()],
             'terms' => 'accepted'], ['workspace.regex' => 'Workspace: 3–40 lower-case letters, numbers or dashes.']);
         $d['workspace'] = strtolower($d['workspace']);
         $back = fn (string $msg) => back()->withInput($r->except(['password', 'password_confirmation']))->withErrors(['trial' => $msg])->withFragment('trial');
-        if (PlatformSettings::get('trial_verify_email') !== '1') {
-            return $this->createTrial($d, $back);
-        }
-        // E-mail check first: the workspace is created only after the 6-digit code comes back (15 minutes, 5 tries).
+        // E-mail check first: the workspace is created only after the 6-digit code comes back.
         if ($why = Sales::trialProblem($d['workspace'], $d['email'])) {
             return $back($why);
         }
-        $token = bin2hex(random_bytes(16));
-        $code = (string) random_int(100000, 999999);
-        Cache::put("trial:{$token}", ['data' => ['password' => bcrypt($d['password'])] + $d, 'code' => hash('sha256', $code), 'tries' => 0], now()->addMinutes(15));
-        Sales::send($d['email'], "{$code} is your ROVEXY code", '<p>Your code to create the ROVEXY workspace <b>' . e($d['workspace']) . '</b> is</p><p style="font-size:26px;font-weight:bold;letter-spacing:4px">'
-            . $code . '</p><p>It expires in 15 minutes. If you did not ask for this, ignore this e-mail.</p>');
-        return view('site.verify', ['token' => $token, 'email' => $d['email']]);
+        return $this->startOtp('trial', ['password' => bcrypt($d['password'])] + $d, $d['email'], "the ROVEXY workspace <b>" . e($d['workspace']) . '</b>', $back);
     }
 
+    /**
+     * E-mail one-time code (free trial and website purchase). The form data waits in the cache until the code comes back.
+     * Code: 6 digits, valid OTP_MINUTES; OTP_TRIES wrong tries cancel the request; resend after OTP_RESEND_SECONDS, at most OTP_SENDS codes.
+     */
+    public const OTP_MINUTES = 15;
+    public const OTP_TRIES = 5;
+    public const OTP_RESEND_SECONDS = 60;
+    public const OTP_SENDS = 5;
+
+    private function startOtp(string $purpose, array $data, string $email, string $what, callable $fail)
+    {
+        if (!PlatformSettings::mailReady()) {
+            return $fail('We cannot send the confirmation e-mail right now. Please try again later, or contact us.');
+        }
+        $token = bin2hex(random_bytes(16));
+        $p = ['purpose' => $purpose, 'data' => $data, 'email' => $email, 'what' => $what, 'tries' => 0, 'sends' => 0, 'code' => '', 'sent_at' => 0];
+        if (!$this->sendOtp($token, $p)) {
+            return $fail('We could not send the e-mail to ' . $email . '. Check the address and try again.');
+        }
+        return view('site.verify', ['token' => $token, 'email' => $email, 'purpose' => $purpose, 'notice' => 'We sent a 6-digit code to ' . $email . '.']);
+    }
+
+    /** New code → e-mail → cache. False if the e-mail could not be sent (nothing is stored then). */
+    private function sendOtp(string $token, array $p): bool
+    {
+        $code = (string) random_int(100000, 999999);
+        try {
+            \Illuminate\Support\Facades\Mail::html('<p>Your code to confirm ' . $p['what'] . ' is</p><p style="font-size:26px;font-weight:bold;letter-spacing:4px">' . $code
+                . '</p><p>It expires in ' . self::OTP_MINUTES . ' minutes. If you did not ask for this, ignore this e-mail.</p>',
+                fn ($m) => $m->to($p['email'])->subject("{$code} is your ROVEXY code"));
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('site.otp_mail_failed', ['to' => $p['email'], 'error' => $e->getMessage()]);
+            return false;
+        }
+        $p['code'] = hash('sha256', $code);
+        $p['tries'] = 0;
+        $p['sends']++;
+        $p['sent_at'] = now()->getTimestamp();
+        $p['expires_at'] = now()->getTimestamp() + self::OTP_MINUTES * 60;
+        Cache::put("otp:{$token}", $p, now()->addMinutes(self::OTP_MINUTES));
+        return true;
+    }
+
+    private function otpExpired(string $purpose)
+    {
+        $back = $purpose === 'buy' ? url('/buy') : url('/#trial');
+        return view('site.message', ['title' => 'This code has expired', 'lines' => ['Codes work for ' . self::OTP_MINUTES . ' minutes. Please fill in the form again.'], 'action' => ['Back to the form', $back]]);
+    }
+
+    public function resendOtp(Request $r)
+    {
+        $d = $r->validate(['token' => 'required|string|size:32']);
+        $p = Cache::get("otp:{$d['token']}");
+        if (!$p) {
+            return $this->otpExpired($r->input('purpose') === 'buy' ? 'buy' : 'trial');
+        }
+        $view = fn (array $extra) => view('site.verify', ['token' => $d['token'], 'email' => $p['email'], 'purpose' => $p['purpose']] + $extra);
+        $wait = $p['sent_at'] + self::OTP_RESEND_SECONDS - now()->getTimestamp();
+        if ($wait > 0) {
+            return $view(['error' => "Please wait {$wait} seconds before asking for a new code."]);
+        }
+        if ($p['sends'] >= self::OTP_SENDS) {
+            return $view(['error' => 'We have already sent ' . self::OTP_SENDS . ' codes. Use the latest one, or fill in the form again.']);
+        }
+        if (!$this->sendOtp($d['token'], $p)) {
+            return $view(['error' => 'We could not send the e-mail just now. Please try again in a minute.']);
+        }
+        return $view(['notice' => 'A new code is on its way to ' . $p['email'] . '. Earlier codes no longer work.']);
+    }
+
+    /** POST /verify-email (also /trial/verify): check the code, then create the trial or place the order. */
     public function verifyTrial(Request $r)
     {
-        $d = $r->validate(['token' => 'required|string|size:32', 'code' => 'required|digits:6']);
-        $key = "trial:{$d['token']}";
+        $d = $r->validate(['token' => 'required|string|size:32', 'code' => ['required', 'string']]);
+        $key = "otp:{$d['token']}";
         $p = Cache::get($key);
         if (!$p) {
-            return view('site.message', ['title' => 'This code has expired', 'lines' => ['Please fill in the trial form again.'], 'action' => ['Back to the form', url('/#trial')]]);
+            return $this->otpExpired($r->input('purpose') === 'buy' ? 'buy' : 'trial');
         }
-        if (!hash_equals($p['code'], hash('sha256', $d['code']))) {
+        $view = fn (array $extra) => view('site.verify', ['token' => $d['token'], 'email' => $p['email'], 'purpose' => $p['purpose']] + $extra);
+        $code = preg_replace('/\D/', '', $d['code']);
+        if (strlen($code) !== 6) {
+            return $view(['error' => 'Enter the 6-digit code from the e-mail.']);
+        }
+        if (!hash_equals($p['code'], hash('sha256', $code))) {
             $p['tries']++;
-            if ($p['tries'] >= 5) {
+            if ($p['tries'] >= self::OTP_TRIES) {
                 Cache::forget($key);
-                return view('site.message', ['title' => 'Too many wrong codes', 'lines' => ['For safety this request was cancelled. Please fill in the trial form again.'], 'action' => ['Back to the form', url('/#trial')]]);
+                return view('site.message', ['title' => 'Too many wrong codes', 'lines' => ['For safety this request was cancelled. Please fill in the form again.'],
+                    'action' => ['Back to the form', $p['purpose'] === 'buy' ? url('/buy') : url('/#trial')]]);
             }
-            Cache::put($key, $p, now()->addMinutes(15));
-            return view('site.verify', ['token' => $d['token'], 'email' => $p['data']['email'], 'error' => 'That code is not right. Check the e-mail and try again.']);
+            Cache::put($key, $p, now()->setTimestamp($p['expires_at']));
+            $left = self::OTP_TRIES - $p['tries'];
+            return $view(['error' => "That code is not right. {$left} " . ($left === 1 ? 'try' : 'tries') . ' left.']);
         }
         Cache::forget($key);
+        if ($p['purpose'] === 'buy') {
+            return $this->createOrder($p['data'], fn (string $msg) => view('site.message', ['title' => 'We could not place the order', 'lines' => [$msg], 'action' => ['Back to Buy', url('/buy')]]));
+        }
         return $this->createTrial($p['data'], fn (string $msg) => view('site.message', ['title' => 'We could not create the workspace', 'lines' => [$msg], 'action' => ['Back to the form', url('/#trial')]]));
     }
 
@@ -153,14 +226,33 @@ final class SiteController extends Controller
             'buyer_company' => 'required|string|max:150', 'buyer_name' => 'required|string|max:150',
             'buyer_email' => 'required|email|max:190', 'buyer_phone' => 'required|string|max:20', 'state_code' => ['required', \Illuminate\Validation\Rule::in(array_keys(self::STATES))],
             'buyer_gstin' => 'nullable|string|max:15', 'coupon' => 'nullable|string|max:30', 'workspace' => ($own ? 'nullable' : 'required') . '|string|max:40',
-            'password' => ($own ? 'nullable' : 'required|min:10|confirmed') . '|string|max:200', 'terms' => 'accepted']);
-        $plan = Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->firstOrFail();
+            'password' => $own ? ['nullable', 'string', 'max:200'] : ['required', 'string', 'max:200', 'confirmed', \Illuminate\Validation\Rules\Password::defaults()], 'terms' => 'accepted']);
+        Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->firstOrFail();
+        $back = fn (string $msg) => back()->withInput($r->except(['password', 'password_confirmation']))->withErrors(['order' => $msg]);
+        if (!$own) {
+            $d['workspace'] = strtolower((string) $d['workspace']);
+            if (!preg_match(Workspaces::SLUG, $d['workspace']) || \App\Models\Company::query()->where('slug', $d['workspace'])->exists()) {
+                return $back('Choose another workspace name (3–40 lower-case letters, numbers or dashes; not already in use).');
+            }
+        }
+        unset($d['password_confirmation']);
+        // ponytail: the admin password waits in the cache (encrypted at rest only if the cache is); it is hashed when the workspace is created.
+        return $this->startOtp('buy', $d, $d['buyer_email'], 'your ROVEXY order', $back);
+    }
+
+    private function createOrder(array $d, callable $fail)
+    {
+        $own = ($d['kind'] ?? 'cloud') === 'perpetual';
+        $plan = Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->first();
+        if (!$plan) {
+            return $fail('This package is no longer on sale. Please choose another.');
+        }
         try {
             $o = Sales::createOrder('new', ['plan_id' => $plan->id, 'users' => $d['users'], 'billing' => $own ? null : $d['billing'], 'coupon' => $d['coupon'] ?? null,
                 'deployment' => $own ? 'onprem' : 'cloud', 'licence_kind' => $own ? 'perpetual' : 'subscription'],
-                $own ? $d : ['workspace' => strtolower((string) $d['workspace']), 'admin_password' => $d['password']] + $d, null, 'website');
+                $own ? $d : ['workspace' => $d['workspace'], 'admin_password' => $d['password']] + $d, null, 'website');
         } catch (DomainException $e) {
-            return back()->withInput($r->except(['password', 'password_confirmation']))->withErrors(['order' => $e->getMessage()]);
+            return $fail($e->getMessage());
         }
         return redirect($o->payUrl());
     }

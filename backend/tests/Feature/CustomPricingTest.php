@@ -133,11 +133,11 @@ final class CustomPricingTest extends TestCase
     {
         $this->staff()->postJson('/api/super/custom-prices', ['email' => 'Owner@Gamma.test', 'plan_id' => $this->plan('starter')->id, 'applies_to' => 'new', 'mode' => 'percent', 'value' => 50])->assertCreated();
         $this->staff()->postJson('/api/super/custom-prices', ['email' => 'x@y.test', 'applies_to' => 'renewal', 'mode' => 'percent', 'value' => 5])->assertStatus(422);   // renewals need a company
-        $this->post('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'G', 'buyer_email' => 'owner@gamma.test', 'buyer_phone' => '9822222222',
+        $this->postWithEmailCode('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'G', 'buyer_email' => 'owner@gamma.test', 'buyer_phone' => '9822222222',
             'state_code' => '29', 'workspace' => 'gamma', 'password' => 'Gamma-pass-123', 'password_confirmation' => 'Gamma-pass-123', 'terms' => '1']);
         $o = SalesOrder::query()->where('workspace', 'gamma')->firstOrFail();
         $this->assertSame(['custom', 11940.0, 14089.2], [$o->pricing, $o->amount, $o->total]);   // half of 10 × ₹199 × 12, + IGST
-        $this->post('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Delta', 'buyer_name' => 'D', 'buyer_email' => 'd@delta.test', 'buyer_phone' => '9822222223',
+        $this->postWithEmailCode('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Delta', 'buyer_name' => 'D', 'buyer_email' => 'd@delta.test', 'buyer_phone' => '9822222223',
             'state_code' => '29', 'workspace' => 'delta', 'password' => 'Delta-pass-123', 'password_confirmation' => 'Delta-pass-123', 'terms' => '1']);
         $this->assertSame('standard', SalesOrder::query()->where('workspace', 'delta')->value('pricing'));
     }

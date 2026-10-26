@@ -133,8 +133,8 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
       </div>
       <label class="f full cloud-only">Workspace name<input name="workspace" value="{{ old('workspace') }}" pattern="[a-z0-9][a-z0-9\-]{1,38}[a-z0-9]" title="3–40 lower-case letters, numbers or dashes" placeholder="acme-collections" autocapitalize="none">
         <span class="help">Your console address: …/w/<b id="wsprev">acme-collections</b>/admin</span></label>
-      <label class="f cloud-only">Choose a password <span class="opt">(min 10)</span><input type="password" name="password" minlength="10" autocomplete="new-password"></label>
-      <label class="f cloud-only">Confirm password<input type="password" name="password_confirmation" minlength="10" autocomplete="new-password"></label>
+      <label class="f cloud-only">Choose a password <span class="opt">(min 8, letters + numbers)</span><input type="password" name="password" minlength="8" autocomplete="new-password"></label>
+      <label class="f cloud-only">Confirm password<input type="password" name="password_confirmation" minlength="8" autocomplete="new-password"></label>
       <label class="f">State <span class="req">*</span><select name="state_code" required><option value="">Select…</option>@foreach($states as $code => $name)<option value="{{ $code }}" {{ old('state_code') === $code ? 'selected' : '' }}>{{ $name }}</option>@endforeach</select></label>
       <label class="f">GSTIN <span class="opt">(optional)</span><input name="buyer_gstin" value="{{ old('buyer_gstin') }}" maxlength="15" style="text-transform:uppercase" placeholder="36ABCDE1234F1Z5"></label>
       <p class="help full">Your state decides how GST appears on your invoice — CGST + SGST for Telangana, IGST for other states. A GSTIN lets you claim input credit.</p>

@@ -42,8 +42,9 @@ return [
         'work_access_ttl' => 900,           // 15 min
         'work_refresh_ttl' => 43200,        // 12 h
         'admin_absolute_hours' => 12,
-        // Authenticator (TOTP) step at admin sign-in. Off by default only in APP_ENV=local; set ADMIN_MFA_REQUIRED=false to drop it elsewhere.
-        'admin_mfa_required' => (bool) env('ADMIN_MFA_REQUIRED', env('APP_ENV', 'production') !== 'local'),
+        // Authenticator (TOTP) step at sign-in — client console, Super Admin and Accounts. Off (email + password only) unless
+        // ADMIN_MFA_REQUIRED=true; when off, codes are never asked, even for accounts that enrolled earlier.
+        'admin_mfa_required' => (bool) env('ADMIN_MFA_REQUIRED', false),
         'ws_revalidate_seconds' => 60,      // documented WebSocket revocation bound
     ],
 

@@ -10,7 +10,7 @@ import { AuthShell, EmailInput, GoButton, PasswordInput } from './Login';
  */
 
 export type StaffMe = {
-  id: number; name: string; email: string; phone: string | null; role: string; role_label: string; mfa_enabled: boolean; mfa_compulsory: boolean;
+  id: number; name: string; email: string; phone: string | null; role: string; role_label: string; mfa_enabled: boolean; mfa_compulsory: boolean; mfa_available?: boolean;
   last_login_at: string | null; access: Record<string, 'none' | 'view' | 'manage'>;
 };
 export type MfaPending = { mfa_required: 'verify' | 'enrol'; name: string; email: string };
@@ -149,19 +149,19 @@ export function MyProfile({ me, onChange, onSignOut }: { me: StaffMe; onChange: 
           <ErrorBox error={pass.error} />
           <form onSubmit={savePassword} className="form-grid">
             <Field label="Current password"><input type="password" autoComplete="current-password" value={pw.current_password} onChange={(e) => setPw({ ...pw, current_password: e.target.value })} required /></Field>
-            <Field label="New password" hint="At least 12 characters, with letters and numbers."><input type="password" autoComplete="new-password" minLength={12} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required /></Field>
-            <Field label="New password again"><input type="password" autoComplete="new-password" minLength={12} value={pw.password_confirmation} onChange={(e) => setPw({ ...pw, password_confirmation: e.target.value })} required /></Field>
+            <Field label="New password" hint="At least 8 characters, with letters and numbers."><input type="password" autoComplete="new-password" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required /></Field>
+            <Field label="New password again"><input type="password" autoComplete="new-password" minLength={8} value={pw.password_confirmation} onChange={(e) => setPw({ ...pw, password_confirmation: e.target.value })} required /></Field>
             <div className="row"><button disabled={pass.busy}>{pass.busy ? 'Changing…' : 'Change password'}</button></div>
           </form>
         </Card>
-        <Card title="2-step sign-in" actions={<Badge value={me.mfa_enabled ? 'active' : 'pending'} label={me.mfa_enabled ? 'On' : 'Off'} />}>
+        {me.mfa_available && <Card title="2-step sign-in" actions={<Badge value={me.mfa_enabled ? 'active' : 'pending'} label={me.mfa_enabled ? 'On' : 'Off'} />}>
           <p className="muted">{me.mfa_enabled ? 'Each sign-in asks for a 6-digit code from your authenticator app.' : 'Add a 6-digit code from your phone to every sign-in. Strongly recommended for anyone who can see money.'}</p>
           {me.mfa_compulsory && <Notice tone="info">2-step sign-in is compulsory for all staff.</Notice>}
           <div className="row">
             {!me.mfa_enabled && <button onClick={() => setMfa('enrol')}>Switch on</button>}
             {me.mfa_enabled && !me.mfa_compulsory && <button className="secondary" onClick={() => setMfa('off')}>Switch off</button>}
           </div>
-        </Card>
+        </Card>}
         <Card title="This sign-in">
           <dl className="kv">
             <dt>Role</dt><dd>{me.role_label}</dd>

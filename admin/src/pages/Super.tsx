@@ -231,7 +231,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
         {mode === 'password' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { const r: any = await post(`/companies/${id}/admin-password`, pw); setPw({ password: '', reason: '' }); await done(`New password set for ${r.email}`); }); }}>
           <Notice tone="warn">Sets a new password for this workspace's main admin. Tell them over a trusted channel and ask them to change it.</Notice>
           <div className="form-grid">
-            <Field label="New password" hint="At least 10 characters, letters and numbers"><input type="text" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} minLength={10} required /></Field>
+            <Field label="New password" hint="At least 8 characters, letters and numbers"><input type="text" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} minLength={10} required /></Field>
             <Field label="Reason (audit log)"><input value={pw.reason} onChange={(e) => setPw({ ...pw, reason: e.target.value })} required /></Field>
           </div>
           <div className="row"><button className="danger" disabled={a.busy}>Set password</button><button type="button" className="secondary" onClick={() => setMode('')}>Cancel</button></div></form>}
@@ -294,7 +294,7 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
             <label className="check"><input type="checkbox" checked={ownPassword} onChange={(e) => setOwnPassword(e.target.checked)} /> I'll set the admin's first password myself</label>
             {!ownPassword && <p className="muted small">The admin gets a welcome e-mail with the console address and a link to set their own password.</p>}
           </div>
-          {ownPassword && <Field label="Admin password" hint="At least 10 characters, letters and numbers"><input type="text" value={f.admin_password} onChange={(e) => set('admin_password', e.target.value)} minLength={10} required /></Field>}
+          {ownPassword && <Field label="Admin password" hint="At least 8 characters, letters and numbers"><input type="text" value={f.admin_password} onChange={(e) => set('admin_password', e.target.value)} minLength={10} required /></Field>}
           {ownPassword && <label className="check"><input type="checkbox" checked={f.send_email} onChange={(e) => set('send_email', e.target.checked)} /> Also e-mail a welcome with a set-password link</label>}
           <Field label="Plan"><select value={f.plan_id} onChange={(e) => set('plan_id', e.target.value)} required><option value="">Choose…</option>{(plans.data?.plans ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
           <Field label="Licence type"><select value={f.kind} onChange={(e) => set('kind', e.target.value)}>
@@ -829,7 +829,6 @@ function Staff({ me }: { me: Me }) {
           { key: 'name', label: 'Name', render: (s: any) => <>{s.name}{s.id === me.id ? ' (you)' : ''}{s.phone && <div className="muted small">{s.phone}</div>}</> }, { key: 'email', label: 'E-mail' },
           { key: 'role', label: 'Role', render: (s: any) => roles[s.role] ?? s.role },
           { key: 'status', label: 'Status', render: (s: any) => <Badge value={s.status === 'active' ? 'active' : 'revoked'} label={s.status === 'active' ? 'active' : 'deactivated'} /> },
-          { key: 'mfa', label: '2-step', render: (s: any) => (s.mfa_enabled_at ? <Badge value="active" label="on" /> : <span className="muted small">off</span>) },
           { key: 'last_login_at', label: 'Last sign-in', render: (s: any) => fmtDate(s.last_login_at) },
           { key: 'act', label: '', render: (s: any) => <div className="row" style={{ gap: 4 }} onClick={(e) => e.stopPropagation()}>
             <button type="button" className="ghost small" onClick={() => setEdit({ ...s, phone: s.phone ?? '', password: '' })}>Edit</button>
@@ -855,7 +854,7 @@ function Staff({ me }: { me: Me }) {
             <Field label="Phone"><input value={edit.phone ?? ''} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} inputMode="tel" maxLength={20} /></Field>
             <Field label="Role" hint={edit.role === 'accountant' ? 'Signs in at /accounts; sees the books only' : undefined}><select value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{Object.entries(roles).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
             <Field label="Status"><select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="active">Active</option><option value="disabled">Deactivated</option></select></Field>
-            <Field label={edit.id ? 'New password (blank = keep)' : 'Password'} hint="At least 12 characters, letters and numbers. A new password signs them out everywhere."><input type="password" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} minLength={12} required={!edit.id} /></Field>
+            <Field label={edit.id ? 'New password (blank = keep)' : 'Password'} hint="At least 8 characters, letters and numbers. A new password signs them out everywhere."><input type="password" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} minLength={12} required={!edit.id} /></Field>
           </div>
           <button disabled={a.busy} type="submit">Save</button>
         </form>
@@ -896,9 +895,11 @@ function Settings() {
           <Field label="Invoice prefix" hint="Capital letters and numbers, e.g. RVX → RVX/2026-27/0001"><input value={f.invoice_prefix ?? ''} onChange={(e) => set('invoice_prefix', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))} maxLength={8} /></Field>{box('gst_rate', 'GST %', undefined, 'number')}
         </div></Card>
         <Card title="Trials and expiry"><div className="form-grid">
-          {box('trial_days', 'Trial length (days)', undefined, 'number')}{box('trial_users', 'Users in a trial', undefined, 'number')}{box('grace_days', 'Grace after expiry (days)', 'Phones keep working this long after a paid package ends', 'number')}
+          <TrialDays value={f.trial_days ?? ''} onChange={(v) => set('trial_days', v)} />{box('trial_users', 'Users in a trial', undefined, 'number')}{box('grace_days', 'Grace after expiry (days)', 'Phones keep working this long after a paid package ends', 'number')}
         </div>
-          {toggle('trial_verify_email', 'Confirm the e-mail before creating a trial', s.data.mail_configured ? 'A 6-digit code is e-mailed; the workspace is created only after it is entered.' : 'Needs e-mail sending — set up "Outgoing e-mail (SMTP)" below first.')}
+          {s.data.mail_configured
+            ? <p className="muted small">New trials and website purchases confirm the buyer's e-mail with a 6-digit code first.</p>
+            : <Notice tone="warn">E-mail sending is not set up, so nobody can start a trial or buy on the website (they must confirm their e-mail with a code first). Set up "Outgoing e-mail (SMTP)" below.</Notice>}
         </Card>
         <Card title="Pricing rules">
           <p className="muted small">Package prices per user are on Plans &amp; pricing. These rules apply to every plan.</p>
@@ -910,9 +911,6 @@ function Settings() {
             {box('quote_validity_days', 'Order / quote valid for (days)', 'After this the pay link stops; raise a fresh order', 'number')}
           </div>
           {toggle('setup_on_cloud', 'Charge the setup fee on cloud first orders too', 'On-premises first orders always carry it (staff can waive it per order).')}
-        </Card>
-        <Card title="Staff sign-in security">
-          {toggle('staff_mfa_required', 'Require 2-step sign-in for all staff and accountants', 'Every sign-in to Super Admin and Accounts then needs a 6-digit code from an authenticator app. People without it set up are asked to set it up at their next sign-in. Anyone can switch it on for themselves under My profile.')}
         </Card>
         <Card title="Automatic e-mails">
           {toggle('reminders_enabled', 'Send renewal, trial-ending and unpaid-order reminders', 'Package: 30, 15, 7, 3, 1 and 0 days before expiry, and once after it expires. Trial: 3, 1 and 0 days before it ends. Unpaid website order: once, 3 hours later. Each goes once; see Sent e-mails.')}
@@ -1248,5 +1246,20 @@ function PriceHistory({ rule, onClose }: { rule: any; onClose: () => void }) {
         { key: 'at', label: 'When', render: (e: any) => fmtDate(e.at) }, { key: 'by', label: 'Who', render: (e: any) => e.by ?? '—' },
         { key: 'action', label: 'What', render: (e: any) => e.action.replace('custom_price.', '') }, { key: 'diff', label: 'Change', render: (e: any) => <span className="small">{diff(e)}</span> }]} />
     </Modal>
+  );
+}
+
+/** Trial length: 3 / 7 / 15 days, or any number of days (1–365). Super Admin only (Settings needs the settings module = super). */
+function TrialDays({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const presets = ['3', '7', '15'];
+  const [custom, setCustom] = useState(() => value !== '' && !presets.includes(String(value)));
+  return (
+    <Field label="Trial duration" hint="New free trials get this many days. Existing trials keep their end date.">
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap' }}>
+        {presets.map((d) => <button key={d} type="button" className={!custom && String(value) === d ? undefined : 'secondary'} aria-pressed={!custom && String(value) === d} onClick={() => { setCustom(false); onChange(d); }}>{d} days</button>)}
+        <button type="button" className={custom ? undefined : 'secondary'} aria-pressed={custom} onClick={() => setCustom(true)}>Custom</button>
+        {custom && <input type="number" min={1} max={365} value={value} onChange={(e) => onChange(e.target.value)} style={{ width: 90 }} aria-label="Trial days" />}
+      </div>
+    </Field>
   );
 }

@@ -40,7 +40,7 @@ final class PeopleController extends Controller
             'name' => 'required|string|max:150',
             'email' => ['nullable', 'email', 'max:190', Rule::unique('users')->where('company_id', $cid)],
             'phone' => 'nullable|string|max:20',
-            'password' => ['nullable', Password::min(10)->letters()->numbers()],
+            'password' => ['nullable', Password::defaults()],
             'roles' => 'required|array|min:1', 'roles.*' => 'string',
             'team_ids' => 'array', 'team_ids.*' => 'integer',
             'teams' => 'array', 'teams.*.id' => 'required|integer', 'teams.*.membership' => 'required|in:member,supervisor',
@@ -70,7 +70,7 @@ final class PeopleController extends Controller
     {
         $user = User::query()->findOrFail($id);
         $data = $r->validate(['name' => 'string|max:150', 'phone' => 'nullable|string|max:20', 'status' => 'in:active,suspended,left',
-            'roles' => 'array', 'roles.*' => 'string', 'password' => ['nullable', Password::min(10)->letters()->numbers()],
+            'roles' => 'array', 'roles.*' => 'string', 'password' => ['nullable', Password::defaults()],
             'email' => ['nullable', 'email', 'max:190', Rule::unique('users')->where('company_id', $user->company_id)->ignore($user->id)],
             'teams' => 'array', 'teams.*.id' => 'required|integer', 'teams.*.membership' => 'required|in:member,supervisor']);
         if (array_key_exists('email', $data)) {
