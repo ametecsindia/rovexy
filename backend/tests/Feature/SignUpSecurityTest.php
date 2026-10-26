@@ -30,7 +30,7 @@ final class SignUpSecurityTest extends TestCase
 
     public function test_trial_needs_the_email_code_resend_replaces_it_and_wrong_codes_are_limited(): void
     {
-        $t = $this->token($this->post('/trial', $this->trial)->assertOk()->assertSee('Check your e-mail')->assertSee('Send a new code')->getContent());
+        $t = $this->token($this->post('/trial', $this->trial)->assertOk()->assertSee('Check your e-mail')->assertSee('send a new code')->getContent());
         $first = $this->lastEmailCode();
         $this->assertSame(0, Company::query()->where('slug', 'zeta')->count());                       // nothing before the code
         $this->post('/verify-email/resend', ['token' => $t])->assertSee('Please wait');                  // too soon
