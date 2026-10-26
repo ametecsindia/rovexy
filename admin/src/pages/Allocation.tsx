@@ -167,6 +167,7 @@ export function AllocationPage() {
             <tr><th>Employees</th><td>{!team ? <span className="muted">—</span> : who === 'pool' ? 'None yet — kept in the group for its manager to assign' : receivers.length === 0 ? <Badge value="pending" label="choose employees" /> : <>{receivers.map((m: any) => <span key={m.id} className="tag">{m.name}</span>)}<br /><small className="muted">Shared evenly at random: about {Math.ceil(n / receivers.length)} each</small></>}</td></tr>
           </tbody></table>
           <button disabled={a.busy || !ready} onClick={confirmAssign}>Confirm — {tab === 'assign' ? 'assign' : 'transfer'} {n || ''} cases</button>
+          {ready1 && count !== null && n === 0 && <Notice tone="warn">No cases match step 1{tab === 'assign' && onlyNew ? ' — every case in this portfolio is already assigned. To move them, choose “All cases of the portfolio” in step 1.' : '. Change the filters in step 1.'}</Notice>}
           {done && <Notice tone="ok">{done}</Notice>}
         </div></div>
       </Card>
