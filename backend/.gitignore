@@ -11,3 +11,4 @@
 !/storage/**/.gitkeep
 /public/admin
 .phpunit.result.cache
+/storage/framework/testing/
