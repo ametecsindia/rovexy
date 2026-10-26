@@ -176,9 +176,9 @@ export function AllocationPage() {
             <tr><th>Group</th><td>{team ? <strong>{team.name}</strong> : <span className="muted">—</span>}{team?.managers?.length ? <small className="muted"> · manager {team.managers.map((m: any) => m.name).join(', ')}</small> : null}</td></tr>
             <tr><th>Employees</th><td>{!team ? <span className="muted">—</span> : who === 'pool' ? 'None yet — kept in the group for its manager to assign' : receivers.length === 0 ? <Badge value="pending" label="choose employees" /> : <>{receivers.map((m: any) => <span key={m.id} className="tag">{m.name}</span>)}<br /><small className="muted">Shared evenly at random: about {Math.ceil(n / receivers.length)} each</small></>}</td></tr>
           </tbody></table>
-          <button disabled={a.busy || !ready} onClick={confirmAssign}>{a.busy ? 'Assigning…' : `Confirm — ${tab === 'assign' ? 'assign' : 'transfer'} ${n || ''} cases`}</button>
+          <button disabled={a.busy || !ready || !!done} onClick={confirmAssign}>{a.busy ? 'Assigning…' : `Confirm — ${tab === 'assign' ? 'assign' : 'transfer'} ${n || ''} cases`}</button>
           {!done && missing && <p className="muted small" role="status" style={{ marginTop: 8 }}>{missing}</p>}
-          {done && <Notice tone="ok">{done} <Link to={`/customers${tab === 'assign' && pf ? `?import_id=${pf}` : ''}`}>See the cases →</Link></Notice>}
+          {done && <Notice tone="ok">{done} <Link to={`/customers${tab === 'assign' && pf ? `?import_id=${pf}` : ''}`}>See the cases →</Link> <button type="button" className="ghost small" onClick={() => setDone(null)}>Assign more</button></Notice>}
         </div></div>
       </Card>
     </Page>

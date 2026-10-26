@@ -576,8 +576,10 @@ final class CallService
         if (!array_key_exists($mode, \App\Support\Outcomes::PAYMENT_MODES)) {
             throw new DomainException('payment_mode_required', 'Choose how the customer paid.');
         }
-        $paidOn = !empty($pay['paid_on']) ? new \DateTimeImmutable((string) $pay['paid_on']) : new \DateTimeImmutable('today');
-        if ($paidOn > new \DateTimeImmutable('tomorrow')) {
+        // "Today" is the company's today (an Indian company at 00:30 IST is still "yesterday" in UTC).
+        $today = new \DateTimeImmutable('today', new \DateTimeZone($this->current->get()->timezone ?: 'Asia/Kolkata'));
+        $paidOn = !empty($pay['paid_on']) ? new \DateTimeImmutable((string) $pay['paid_on'] . ' 00:00:00', $today->getTimezone()) : $today;
+        if ($paidOn > $today) {
             throw new DomainException('paid_on_future', 'Payment date cannot be in the future.');
         }
         return ['amount' => $amount, 'payment_mode' => $mode, 'payment_ref' => isset($pay['payment_ref']) ? mb_substr(trim((string) $pay['payment_ref']), 0, 64) ?: null : null,

@@ -51,6 +51,7 @@ export function ImportsPage() {
   }, [job]);
 
   const open = (j: any) => { setJob(j); setName(j.portfolio ?? ''); setMapping(j.mapping ?? {}); setPreview(null); };
+  const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const MAX_MB = 20;   // = config ammp.uploads.import_max_mb
   const upload = (file: File) => a.run(async () => {
     if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error('Choose a .csv or .xlsx file. Other formats (e.g. .xls, .pdf) cannot be read — in Excel use File → Save As → CSV or Excel Workbook.');
@@ -72,11 +73,15 @@ export function ImportsPage() {
 
   return (
     <Page title="Portfolios" subtitle="Each uploaded lead file is a portfolio. Upload it here, then give its cases to a group and its employees under Assignment."
-      actions={<a className="button secondary" href={fileUrl('/api/admin/imports/template')}>Download sample file</a>}>
+      actions={can('customers.import') && <a className="button secondary" href={fileUrl('/api/admin/imports/template')}>Download sample file</a>}>
       <ErrorBox error={a.error ?? imports.error ?? portfolios.error} />
       <Card title="Portfolios">
         <Table rows={portfolios.data} empty="No portfolios yet — upload a lead file below." columns={[
-          { key: 'name', label: 'Portfolio', render: (p: any) => <><strong>{p.name}</strong><br /><small className="muted">{p.file} · {fmtDate(p.uploaded_at)}</small></> },
+          { key: 'name', label: 'Portfolio', render: (p: any) => renaming?.id === p.id
+              ? <form className="row" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { await api('PATCH', `/imports/${p.id}`, { portfolio: (renaming?.name ?? '').trim() }); setRenaming(null); await portfolios.reload(); }); }}>
+                  <input value={renaming?.name ?? ''} onChange={(e) => setRenaming({ id: p.id, name: e.target.value })} maxLength={150} required aria-label="New portfolio name" autoFocus style={{ maxWidth: 240 }} />
+                  <button type="submit" disabled={a.busy}>Save</button><button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button></form>
+              : <><strong>{p.name}</strong>{can('customers.import') && <button type="button" className="ghost small" onClick={() => setRenaming({ id: p.id, name: p.name })} aria-label={`Rename ${p.name}`}>Rename</button>}<br /><small className="muted">{p.file} · {fmtDate(p.uploaded_at)}</small></> },
           { key: 'total', label: 'Cases', align: 'right' },
           { key: 'unassigned', label: 'Not assigned', align: 'right', render: (p: any) => p.unassigned ? <Badge value="pending" label={String(p.unassigned)} /> : <Badge value="ok" label="0" /> },
           { key: 'groups', label: 'Groups', render: (p: any) => p.groups.filter((g: any) => g.team_id).map((g: any) => <span key={g.team_id} className="tag">{g.name} · {g.total}</span>) },

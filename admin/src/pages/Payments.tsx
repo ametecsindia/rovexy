@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { get, post, fmtDate, qs } from '../lib/api';
+import { get, post, fmtDate, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Icon, Modal, Notice, Page, Stat, Table, useAction, useAsync } from '../components/ui';
 
 const inr = (v: any) => `₹ ${Number(v ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const slipUrl = (id: number, dl = false) => `/api/admin/payments/${id}/slip${dl ? '?dl=1' : ''}`;
+const slipUrl = (id: number, dl = false) => fileUrl(`/api/admin/payments/${id}/slip${dl ? '?dl=1' : ''}`);   // ?workspace= for /w/<slug>/admin
 const lastTo = () => { try { return localStorage.getItem('pay.mailto') ?? ''; } catch { return ''; } };
 const emails = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
 

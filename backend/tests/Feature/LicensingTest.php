@@ -169,7 +169,7 @@ final class LicensingTest extends TestCase
         $sales->postJson("/api/super/orders/{$o['id']}/payment", ['method' => 'bank', 'reference' => 'UTR123'])->assertOk()->assertJsonPath('status', 'paid');
         $l->refresh();
         $this->assertSame(50, $l->max_users);
-        $csv = $sales->get('/api/super/orders.csv?from=' . now()->subDay()->toDateString() . '&to=' . now()->toDateString())->assertOk()->streamedContent();
+        $csv = $sales->get('/api/super/orders.csv?from=' . now(\App\Services\Accounts\Ledger::TZ)->subDay()->toDateString() . '&to=' . now(\App\Services\Accounts\Ledger::TZ)->toDateString())->assertOk()->streamedContent();
         $this->assertStringContainsString('UTR123', $csv);
         $sales->getJson('/api/super/companies')->assertOk()->assertJsonPath('data.0.slug', 'alpha')->assertJsonPath('data.0.calls_30d', 0);
         $this->assertSame(now()->addDays(20)->startOfDay()->addMonthsNoOverflow(12)->toDateString(), $l->expires_at->toDateString());

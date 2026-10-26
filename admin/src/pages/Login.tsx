@@ -125,10 +125,10 @@ export function LoginPage() {
   return (
     <AuthShell eyebrow="Company console" title="Your workforce," accent="always on record."
       points={['Every call recorded with its outcome', "Field visits verified at the customer's address", 'Company phones under policy, live']}>
-      <ol className="lx-steps" aria-label="Sign-in steps">
-        <li className={onCode ? 'done' : 'on'}><b>{onCode ? '✓' : '1'}</b>Account</li>
-        <li className={onCode ? 'on' : ''}><b>2</b>Two-step</li>
-      </ol>
+      {onCode && <ol className="lx-steps" aria-label="Sign-in steps">
+        <li className="done"><b>✓</b>Account</li>
+        <li className="on"><b>2</b>Two-step</li>
+      </ol>}
       {step === 'password' ? (
         <>
           <h1>Welcome back</h1>

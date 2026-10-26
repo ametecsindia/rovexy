@@ -110,9 +110,9 @@ final class ImportService
                 throw new DomainException('invalid_mapping');
             }
         }
-        foreach (['customer_ref', 'name', 'phone'] as $req) {
+        foreach (['customer_ref' => 'Customer ID', 'name' => 'Customer name', 'phone' => 'Phone number'] as $req => $label) {
             if ($clean[$req] === null) {
-                throw new DomainException('mapping_incomplete', "Map a column to {$req}.");
+                throw new DomainException('mapping_incomplete', "Choose which column of your file is the {$label} (required).");
             }
         }
         $scope = $actor?->supervisedTeamIds();

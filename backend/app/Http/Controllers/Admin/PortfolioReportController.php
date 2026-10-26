@@ -52,7 +52,7 @@ final class PortfolioReportController extends Controller
             $u = $users[$uid] ?? null;
             $c = $byUserCalls[$uid] ?? null;
             return ['user_id' => (int) $uid, 'name' => $u?->name ?? "#{$uid}", 'employee_code' => $u?->employee_code,
-                'groups' => $u?->teams->pluck('name')->values() ?? [], 'portfolios' => ($pfByUser[$uid] ?? collect())->map(fn ($x) => $pfNames[$x->pid ?? 0] ?? 'Added by hand')->unique()->values(),
+                'groups' => $u?->teams->pluck('name')->values() ?? [], 'group_ids' => $u?->teams->pluck('id')->map(fn ($i) => (int) $i)->values() ?? [], 'portfolios' => ($pfByUser[$uid] ?? collect())->map(fn ($x) => $pfNames[$x->pid ?? 0] ?? 'Added by hand')->unique()->values(),
                 'cases' => (int) ($owned[$uid]->cases ?? 0), 'pending_cases' => (int) ($owned[$uid]->pending ?? 0),
                 'calls' => (int) ($c->calls ?? 0), 'connected' => (int) ($c->connected ?? 0), 'not_connected_cases' => (int) ($notConnected[$uid] ?? 0),
                 'not_made' => (int) ($notMade[$uid] ?? 0), 'callbacks' => (int) ($byUserFu[$uid]->n ?? 0), 'callbacks_overdue' => (int) ($byUserFu[$uid]->overdue ?? 0),
@@ -65,7 +65,7 @@ final class PortfolioReportController extends Controller
         $teamNames = Team::query()->pluck('name', 'id');
         $groups = $teamCases->map(function ($t) use ($employees, $teamNames) {
             $name = $t->tid ? ($teamNames[$t->tid] ?? '?') : null;
-            $emps = $employees->filter(fn ($e) => $name !== null && collect($e['groups'])->contains($name));
+            $emps = $employees->filter(fn ($e) => $t->tid !== null && collect($e['group_ids'])->contains((int) $t->tid));   // by id: two groups with one name never double-count
             return ['team_id' => $t->tid, 'name' => $name ?? 'No group', 'cases' => (int) $t->cases, 'unassigned' => (int) $t->unassigned, 'employees' => $emps->count(),
                 'calls' => $emps->sum('calls'), 'connected' => $emps->sum('connected'), 'collected' => round($emps->sum('collected'), 2), 'callbacks' => $emps->sum('callbacks')];
         })->sortByDesc('cases')->values();
@@ -168,7 +168,8 @@ final class PortfolioReportController extends Controller
             ->withCount(['calls as calls_count' => $inRange, 'calls as connected_count' => fn ($q) => $inRange($q)->whereNotNull('answered_at')])
             ->withMax(['calls as last_call_at' => $inRange], 'initiated_at')
             ->addSelect(['collected' => CallDisposition::query()->selectRaw('COALESCE(SUM(amount),0)')->whereNotNull('payment_mode')->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))
-                ->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))])
+                ->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))
+                ->when($range[2], fn ($q) => $q->where('paid_on', '>=', $range[2]))->when($range[3], fn ($q) => $q->where('paid_on', '<', $range[3]))])   // same dates as the Collections tile
             ->addSelect(['last_outcome' => CallDisposition::query()->select('code')->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))->orderByDesc('submitted_at')->limit(1)])
             ->addSelect(['callback_due' => FollowUp::query()->selectRaw('MIN(due_at)')->where('status', 'open')->whereColumn('follow_ups.customer_id', 'customers.id')])
             ->orderBy($sort, in_array($sort, ['name', 'id'], true) ? 'asc' : 'desc')->paginate(50);
@@ -233,12 +234,13 @@ final class PortfolioReportController extends Controller
 
     private function withoutCall(Builder $cases, array $range): Builder
     {
-        return $cases->whereDoesntHave('calls', fn ($w) => $w->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1])));
+        return $cases->whereDoesntHave('calls', fn ($w) => $w->where('provider', '!=', 'manual')   // a field entry without a call is not a call (same as Total calls)
+            ->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1])));
     }
 
     private function calledNotConnected(Builder $cases, array $range): Builder
     {
-        $in = fn ($w) => $w->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1]));
+        $in = fn ($w) => $w->where('provider', '!=', 'manual')->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1]));
         return $cases->whereHas('calls', $in)->whereDoesntHave('calls', fn ($w) => $in($w)->whereNotNull('answered_at'));
     }
 
