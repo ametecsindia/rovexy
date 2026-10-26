@@ -6,6 +6,7 @@
   <p>Enter the 6-digit code we sent to <b>{{ $email }}</b> to {{ $buy ? 'continue to payment' : 'create your workspace' }}. The code works for {{ \App\Http\Controllers\Site\SiteController::OTP_MINUTES }} minutes.</p>
   @if(!empty($notice) && empty($error))<div class="ok" role="status" style="background:#e8f6ee;border:1px solid #9ad3b1;color:#1d6b3f;padding:10px 12px;border-radius:8px;margin:12px 0">{{ $notice }}</div>@endif
   @if(!empty($error))<div class="err" role="alert">{{ $error }}</div>@endif
+  @if(!empty($dev_code))<div role="status" style="background:#fff4d6;border:1px solid #f0c75e;color:#6b4a00;padding:10px 12px;border-radius:8px;margin:12px 0">Local test server — e-mail is not set up, so your code is <b style="letter-spacing:3px">{{ $dev_code }}</b>. A live server always e-mails it.</div>@endif
   <form method="post" action="/verify-email" onsubmit="this.querySelector('button').disabled=true;this.querySelector('button').textContent='Checking…'">
     @csrf<input type="hidden" name="token" value="{{ $token }}"><input type="hidden" name="purpose" value="{{ $purpose ?? 'trial' }}">
     <label>Code<input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required autocomplete="one-time-code" autofocus style="font-size:1.6rem;letter-spacing:.3em;max-width:220px" title="6 digits"></label>

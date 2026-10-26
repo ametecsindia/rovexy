@@ -231,7 +231,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
         {mode === 'password' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { const r: any = await post(`/companies/${id}/admin-password`, pw); setPw({ password: '', reason: '' }); await done(`New password set for ${r.email}`); }); }}>
           <Notice tone="warn">Sets a new password for this workspace's main admin. Tell them over a trusted channel and ask them to change it.</Notice>
           <div className="form-grid">
-            <Field label="New password" hint="At least 8 characters, letters and numbers"><input type="text" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} minLength={8} required /></Field>
+            <Field label="New password" hint="At least 8 characters"><input type="text" value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} minLength={8} required /></Field>
             <Field label="Reason (audit log)"><input value={pw.reason} onChange={(e) => setPw({ ...pw, reason: e.target.value })} required /></Field>
           </div>
           <div className="row"><button className="danger" disabled={a.busy}>Set password</button><button type="button" className="secondary" onClick={() => setMode('')}>Cancel</button></div></form>}
@@ -294,7 +294,7 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
             <label className="check"><input type="checkbox" checked={ownPassword} onChange={(e) => setOwnPassword(e.target.checked)} /> I'll set the admin's first password myself</label>
             {!ownPassword && <p className="muted small">The admin gets a welcome e-mail with the console address and a link to set their own password.</p>}
           </div>
-          {ownPassword && <Field label="Admin password" hint="At least 8 characters, letters and numbers"><input type="text" value={f.admin_password} onChange={(e) => set('admin_password', e.target.value)} minLength={8} required /></Field>}
+          {ownPassword && <Field label="Admin password" hint="At least 8 characters"><input type="text" value={f.admin_password} onChange={(e) => set('admin_password', e.target.value)} minLength={8} required /></Field>}
           {ownPassword && <label className="check"><input type="checkbox" checked={f.send_email} onChange={(e) => set('send_email', e.target.checked)} /> Also e-mail a welcome with a set-password link</label>}
           <Field label="Plan"><select value={f.plan_id} onChange={(e) => set('plan_id', e.target.value)} required><option value="">Choose…</option>{(plans.data?.plans ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
           <Field label="Licence type"><select value={f.kind} onChange={(e) => set('kind', e.target.value)}>
@@ -854,7 +854,7 @@ function Staff({ me }: { me: Me }) {
             <Field label="Phone"><input value={edit.phone ?? ''} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} inputMode="tel" maxLength={20} /></Field>
             <Field label="Role" hint={edit.role === 'accountant' ? 'Signs in at /accounts; sees the books only' : undefined}><select value={edit.role} onChange={(e) => setEdit({ ...edit, role: e.target.value })}>{Object.entries(roles).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
             <Field label="Status"><select value={edit.status} onChange={(e) => setEdit({ ...edit, status: e.target.value })}><option value="active">Active</option><option value="disabled">Deactivated</option></select></Field>
-            <Field label={edit.id ? 'New password (blank = keep)' : 'Password'} hint="At least 8 characters, letters and numbers. A new password signs them out everywhere."><input type="password" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} minLength={8} required={!edit.id} /></Field>
+            <Field label={edit.id ? 'New password (blank = keep)' : 'Password'} hint="At least 8 characters. A new password signs them out everywhere."><input type="password" autoComplete="new-password" value={edit.password} onChange={(e) => setEdit({ ...edit, password: e.target.value })} minLength={8} required={!edit.id} /></Field>
           </div>
           <button disabled={a.busy} type="submit">Save</button>
         </form>

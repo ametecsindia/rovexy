@@ -80,7 +80,7 @@
   <form method="post" action="/password/{{ $token }}">
     @csrf
     <label for="pw">New password</label><input id="pw" type="password" name="password" required minlength="8" autocomplete="new-password" autofocus>
-    <p class="hint">At least 8 characters, with letters and numbers.</p>
+    <p class="hint">At least 8 characters.</p>
     <label for="pw2">New password again</label><input id="pw2" type="password" name="password_confirmation" required minlength="8" autocomplete="new-password">
     <button type="submit">Save password</button>
   </form>

@@ -59,7 +59,7 @@ final class Sales
                 throw new DomainException('workspace_taken', 'Choose another workspace name (3–40 lower-case letters, numbers or dashes; not already in use).');
             }
             if (\Illuminate\Support\Facades\Validator::make(['p' => (string) ($buyer['admin_password'] ?? '')], ['p' => \Illuminate\Validation\Rules\Password::defaults()])->fails()) {
-                throw new DomainException('weak_password', 'Choose an admin password of at least 8 characters, with letters and numbers.');
+                throw new DomainException('weak_password', 'Choose an admin password of at least 8 characters.');
             }
         }
         return DB::transaction(function () use ($plan, $kind, $buyer, $licence, $createdBy, $gstin, $coupon, $pr, $newWorkspace) {

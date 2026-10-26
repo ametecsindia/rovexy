@@ -98,7 +98,7 @@ final class SiteController extends Controller
 
     private function startOtp(string $purpose, array $data, string $email, string $what, callable $fail)
     {
-        if (!PlatformSettings::mailReady()) {
+        if (!PlatformSettings::mailReady() && !self::showCodeOnScreen()) {
             return $fail('We cannot send the confirmation e-mail right now. Please try again later, or contact us.');
         }
         $token = bin2hex(random_bytes(16));
@@ -106,14 +106,28 @@ final class SiteController extends Controller
         if (!$this->sendOtp($token, $p)) {
             return $fail('We could not send the e-mail to ' . $email . '. Check the address and try again.');
         }
-        return view('site.verify', ['token' => $token, 'email' => $email, 'purpose' => $purpose, 'notice' => 'We sent a 6-digit code to ' . $email . '.']);
+        return view('site.verify', ['token' => $token, 'email' => $email, 'purpose' => $purpose, 'notice' => 'We sent a 6-digit code to ' . $email . '.']
+            + $this->devCode($token));
+    }
+
+    /** Local test server without e-mail (APP_ENV=local, no SMTP): the code is shown on the page. Never on a live server. */
+    private static function showCodeOnScreen(): bool
+    {
+        return app()->environment('local') && !PlatformSettings::mailReady();
+    }
+
+    private function devCode(string $token): array
+    {
+        return self::showCodeOnScreen() ? ['dev_code' => Cache::get("otp:{$token}")['plain'] ?? null] : [];
     }
 
     /** New code → e-mail → cache. False if the e-mail could not be sent (nothing is stored then). */
     private function sendOtp(string $token, array $p): bool
     {
         $code = (string) random_int(100000, 999999);
-        try {
+        if (self::showCodeOnScreen()) {
+            $p['plain'] = $code;   // local test server only: shown on the page instead of e-mailed
+        } else try {
             \Illuminate\Support\Facades\Mail::html('<p>Your code to confirm ' . $p['what'] . ' is</p><p style="font-size:26px;font-weight:bold;letter-spacing:4px">' . $code
                 . '</p><p>It expires in ' . self::OTP_MINUTES . ' minutes. If you did not ask for this, ignore this e-mail.</p>',
                 fn ($m) => $m->to($p['email'])->subject("{$code} is your ROVEXY code"));
@@ -154,7 +168,7 @@ final class SiteController extends Controller
         if (!$this->sendOtp($d['token'], $p)) {
             return $view(['error' => 'We could not send the e-mail just now. Please try again in a minute.']);
         }
-        return $view(['notice' => 'A new code is on its way to ' . $p['email'] . '. Earlier codes no longer work.']);
+        return $view(['notice' => 'A new code is on its way to ' . $p['email'] . '. Earlier codes no longer work.'] + $this->devCode($d['token']));
     }
 
     /** POST /verify-email (also /trial/verify): check the code, then create the trial or place the order. */

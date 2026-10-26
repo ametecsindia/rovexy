@@ -23,7 +23,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->guardProductionConfig();
         // One password rule everywhere a password is set (console, staff, employees, website sign-up and buy).
-        \Illuminate\Validation\Rules\Password::defaults(fn () => \Illuminate\Validation\Rules\Password::min(8)->letters()->numbers());
+        \Illuminate\Validation\Rules\Password::defaults(fn () => \Illuminate\Validation\Rules\Password::min(8));   // any characters, at least 8
         // Links built from a request (set-password, console, payment) keep https even when a proxy (Cloudflare "Flexible",
         // a load balancer) reaches PHP over plain http.
         if (str_starts_with((string) config('app.url'), 'https://')) {

@@ -149,7 +149,7 @@ export function MyProfile({ me, onChange, onSignOut }: { me: StaffMe; onChange: 
           <ErrorBox error={pass.error} />
           <form onSubmit={savePassword} className="form-grid">
             <Field label="Current password"><input type="password" autoComplete="current-password" value={pw.current_password} onChange={(e) => setPw({ ...pw, current_password: e.target.value })} required /></Field>
-            <Field label="New password" hint="At least 8 characters, with letters and numbers."><input type="password" autoComplete="new-password" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required /></Field>
+            <Field label="New password" hint="At least 8 characters."><input type="password" autoComplete="new-password" minLength={8} value={pw.password} onChange={(e) => setPw({ ...pw, password: e.target.value })} required /></Field>
             <Field label="New password again"><input type="password" autoComplete="new-password" minLength={8} value={pw.password_confirmation} onChange={(e) => setPw({ ...pw, password_confirmation: e.target.value })} required /></Field>
             <div className="row"><button disabled={pass.busy}>{pass.busy ? 'Changing…' : 'Change password'}</button></div>
           </form>

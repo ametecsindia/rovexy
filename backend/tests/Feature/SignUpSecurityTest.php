@@ -82,13 +82,14 @@ final class SignUpSecurityTest extends TestCase
         $this->assertSame(0, Company::query()->count());
     }
 
-    public function test_one_password_rule_minimum_8_with_letters_and_numbers(): void
+    public function test_one_password_rule_minimum_8_any_characters(): void
     {
         $short = ['password' => 'Abc1234', 'password_confirmation' => 'Abc1234'] + $this->trial;              // 7
         $this->post('/trial', $short)->assertSessionHasErrors('password');
-        $digits = ['password' => '12345678', 'password_confirmation' => '12345678'] + $this->trial;         // no letters
-        $this->post('/trial', $digits)->assertSessionHasErrors('password');
-        $this->post('/trial', $this->trial)->assertOk()->assertSee('Check your e-mail');                     // 8, letters + numbers
+        foreach (['12345678', 'abcdefgh', 'Hyd@2026'] as $i => $pw) {                                     // only digits / only letters / anything: fine
+            $this->post('/trial', ['password' => $pw, 'password_confirmation' => $pw, 'workspace' => "zeta-pw{$i}", 'email' => "pw{$i}@zeta.test"] + $this->trial)
+                ->assertOk()->assertSee('Check your e-mail');
+        }
     }
 
     public function test_trial_duration_is_set_by_super_admin_only_and_used_for_new_trials(): void

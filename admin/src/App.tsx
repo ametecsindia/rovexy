@@ -293,7 +293,7 @@ function ChangePassword({ onClose }: { onClose: () => void }) {
         }}>
           <ErrorBox error={a.error} />
           <Field label="Current password"><input type="password" autoComplete="current-password" value={f.current_password} onChange={(e) => setF({ ...f, current_password: e.target.value })} required autoFocus /></Field>
-          <Field label="New password" hint="At least 8 characters, with letters and numbers"><input type="password" autoComplete="new-password" minLength={8} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required /></Field>
+          <Field label="New password" hint="At least 8 characters"><input type="password" autoComplete="new-password" minLength={8} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} required /></Field>
           <Field label="New password again"><input type="password" autoComplete="new-password" minLength={8} value={f.password_confirmation} onChange={(e) => setF({ ...f, password_confirmation: e.target.value })} required /></Field>
           <div className="row"><button disabled={a.busy}>{a.busy ? 'Saving…' : 'Change password'}</button><button type="button" className="secondary" onClick={onClose}>Cancel</button></div>
         </form>
