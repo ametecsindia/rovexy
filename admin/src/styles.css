@@ -865,3 +865,8 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
 @keyframes dialer-pulse { 50% { box-shadow: 0 0 0 6px rgba(29,95,168,.15); } }
 @media (prefers-reduced-motion: reduce) { .dialer-steps li.now::before { animation: none; } }
 .dialer-call.hangup { background: #d92d20; border-color: #d92d20; box-shadow: 0 4px 12px rgba(217,45,32,.35); }
+
+/* Phones waiting for approval: blinking pill in the top bar on every page. */
+.top-alert { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: #fff4d6; color: #8a5a00; border: 1px solid #f0c75e; font-size: 13px; font-weight: 600; text-decoration: none; animation: vpulse 1.2s ease-in-out infinite; }
+.top-alert:hover { animation: none; background: #ffe9a8; }
+@media (prefers-reduced-motion: reduce) { .top-alert { animation: none; } }

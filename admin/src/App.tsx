@@ -121,7 +121,27 @@ function Sidebar({ items, name, logo, me, logout, unread }: { items: NavItem[]; 
   );
 }
 
-function TopBar({ items, me, logout }: { items: NavItem[]; me: any; logout: () => void }) {
+/** Phones waiting for approval: polled on every page (not only the Dashboard), chime + desktop note when a new one arrives. */
+function usePendingPhones(enabled: boolean, everyMs = 15000) {
+  const [n, setN] = useState(0);
+  const prev = useRef<number | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let alive = true;
+    const tick = () => get<{ total: number }>('/devices?state=pending').then((d) => {
+      if (!alive) return;
+      if (prev.current !== null && d.total > prev.current) { chime(); desktopNotify('Phone waiting for approval', 'A new phone asked to join. Open Devices to approve it.'); }
+      prev.current = d.total;
+      setN(d.total);
+    }).catch(() => undefined);
+    tick();
+    const t = setInterval(tick, everyMs);
+    return () => { alive = false; clearInterval(t); };
+  }, [enabled, everyMs]);
+  return n;
+}
+
+function TopBar({ items, me, logout, pendingPhones }: { items: NavItem[]; me: any; logout: () => void; pendingPhones: number }) {
   const loc = useLocation();
   const page = items.find((i) => (i.to === '/' ? loc.pathname === '/' : loc.pathname === i.to || loc.pathname.startsWith(i.to + '/')));
   const [now, setNow] = useState(() => new Date());
@@ -134,6 +154,7 @@ function TopBar({ items, me, logout }: { items: NavItem[]; me: any; logout: () =
         <i>/</i><strong>{page?.label ?? (loc.pathname.startsWith('/customers/') ? 'Customer' : 'Dashboard')}</strong>
       </nav>
       <div className="top-right">
+        {pendingPhones > 0 && <Link to="/devices" className="top-alert" title="Review phone requests">📱 {pendingPhones} phone{pendingPhones > 1 ? 's' : ''} waiting for approval</Link>}
         <span className="top-time">{now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
         <SoundToggle />
         <span className="top-user"><span className="avatar sm">{(me.name ?? '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}</span>{me.name}</span>
@@ -189,6 +210,7 @@ function MessageToast({ unread }: { unread: Unread | null }) {
 export function App() {
   const { me, loading, can, setMe } = useAuth();
   const [unread] = useUnread(!!me && can('chat.use'));
+  const pendingPhones = usePendingPhones(!!me && can('devices.approve'));
   useTabBadge(unread?.total ?? 0);
   const [branding, setBranding] = useState<{ display_name: string; logo_url: string | null } | null>(null);
   useEffect(() => {
@@ -212,7 +234,7 @@ export function App() {
       <Sidebar items={items} name={name} logo={branding?.logo_url ?? null} me={me} logout={logout} unread={unread?.total ?? 0} />
       <MessageToast unread={unread} />
       <main className="main">
-        <TopBar items={items} me={me} logout={logout} />
+        <TopBar items={items} me={me} logout={logout} pendingPhones={pendingPhones} />
         {licenceMsg && <div className="alert warn" role="status" style={{ margin: '0 24px 12px' }}>{licenceMsg} <Link to="/licence">Plan & licence</Link></div>}
         <Routes>
           <Route path="/" element={<OverviewPage />} />
