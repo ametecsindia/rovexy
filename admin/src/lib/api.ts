@@ -7,15 +7,10 @@ export class ApiError extends Error {
   }
 }
 
-// The company's workspace: from the address /w/<slug>/admin (servers without a sub-domain per company), else the build
-// setting. On <slug>.<base-domain> no header is needed: the server reads the sub-domain.
+// The company's workspace: from the address /w/<slug>/admin, else the build setting (on-premises builds).
 const pathWorkspace = /^\/w\/([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\/admin(?:\/|$)/.exec(location.pathname)?.[1];
 const workspace = pathWorkspace ?? (import.meta.env.VITE_WORKSPACE as string | undefined) ?? undefined;
-export const currentWorkspace = (): string | undefined => {
-  if (workspace) return workspace;
-  const h = location.hostname;
-  return /^\d+\.\d+\.\d+\.\d+$/.test(h) || h.split('.').length < 3 ? undefined : h.split('.')[0];   // <slug>.<base-domain>
-};
+export const currentWorkspace = (): string | undefined => workspace;
 /** A download link (<a href>) for an API path: adds ?workspace= because links can't send the X-Workspace header. */
 export const fileUrl = (path: string): string => workspace ? `${path}${path.includes('?') ? '&' : '?'}workspace=${encodeURIComponent(workspace)}` : path;
 export const consoleBase = pathWorkspace ? `/w/${pathWorkspace}/admin` : '/admin';

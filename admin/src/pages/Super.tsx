@@ -197,7 +197,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
           <Kpi icon="people" tone="blue" label="Active users" value={x.users} sub={live ? `of ${live.max_users || 'unlimited'}` : 'no licence'} />
           <Kpi icon="phone" tone="green" label="Approved phones" value={x.phones} sub={x.last_seen_at ? `seen ${day(x.last_seen_at)}` : 'none yet'} />
           <Kpi icon="call" tone="teal" label="Calls, 30 days" value={x.calls_30d} />
-          <Kpi icon="shield" tone="gold" label="Workspace" value={x.status} sub={x.slug} />
+          <Kpi icon="shield" tone="gold" label="Workspace" value={x.status} sub={`slug: ${x.slug}`} />
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <a className="button secondary" href={x.console_url} target="_blank" rel="noreferrer">Open console ↗</a>
@@ -206,7 +206,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
           {can && <button className="secondary" disabled={a.busy} onClick={() => void a.run(async () => { const r: any = await post(`/companies/${id}/invite`); toast(r.mail_ready ? `Set-password e-mail sent to ${r.email}` : `E-mail sending is not set up; copy the link from the audit-safe box below`, r.mail_ready ? 'ok' : 'bad'); setInviteLink(r.mail_ready ? null : r.set_password_url); })}>E-mail set-password link</button>}
           {isSuper && <button className="secondary" onClick={() => setMode('password')}>Set admin password</button>}
         </div>
-        <p className="small">Console address: <a href={x.console_url} target="_blank" rel="noreferrer">{x.console_url}</a> · workspace <code>{x.slug}</code></p>
+        <p className="small">Console address: <a href={x.console_url} target="_blank" rel="noreferrer">{x.console_url}</a> · slug <code>{x.slug}</code> <button type="button" className="ghost small" onClick={() => { void navigator.clipboard?.writeText(x.console_url); toast('Console address copied'); }}>Copy</button></p>
         {inviteLink && <div className="row"><input readOnly value={inviteLink} onFocus={(e) => e.target.select()} aria-label="Set-password link" /><button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(inviteLink).then(() => toast('Link copied'))}>Copy</button></div>}
         <p className="small muted">Billing: {[x.billing_email, x.billing_phone, x.state_code ? STATES[x.state_code] ?? x.state_code : null, x.gstin ? `GSTIN ${x.gstin}` : null, x.address].filter(Boolean).join(' · ') || 'not set — renewals ask for the GST state each time'}</p>
         {mode === 'edit' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { await put(`/companies/${id}`, det); await done('Company details saved'); }); }}>
@@ -268,7 +268,7 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
       <Notice tone="ok">The workspace <b>{done.slug}</b> is ready.</Notice>
       <dl className="kv">
         <dt>Console address</dt><dd><a href={done.console_url} target="_blank" rel="noreferrer">{done.console_url}</a></dd>
-        <dt>Workspace</dt><dd><code>{done.slug}</code></dd>
+        <dt>Workspace slug</dt><dd><code>{done.slug}</code></dd>
         <dt>Admin sign-in</dt><dd>{done.admin_email}</dd>
         <dt>Welcome e-mail</dt><dd>{done.email_sent ? (done.mail_ready ? `Sent to ${done.admin_email} with a link to set their password (valid 72 hours).` : 'Not delivered: e-mail sending is not set up (Settings → Outgoing e-mail). Share the link below instead.') : 'Not sent (you set the password yourself).'}</dd>
       </dl>
@@ -287,7 +287,7 @@ function NewCompany({ isSuper, onClose, onDone, prefill }: { isSuper: boolean; o
         <ErrorBox error={a.error} />
         <div className="form-grid">
           <Field label="Company name"><input value={f.name} onChange={(e) => { set('name', e.target.value); if (!slugTouched) set('slug', slugFrom(e.target.value)); }} required /></Field>
-          <Field label="Workspace (web address)" hint={RESERVED.includes(f.slug) ? `"${f.slug}" is kept for ROVEXY's own addresses — use ${f.slug}-team or another name` : `Made from the company name; must be unique. Console: …/w/${f.slug || 'workspace'}/admin, or ${f.slug || 'workspace'}.<your domain> once the domain is set`}><input value={f.slug} onChange={(e) => { setSlugTouched(true); set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" placeholder="automatic" /></Field>
+          <Field label="Workspace slug" hint={RESERVED.includes(f.slug) ? `"${f.slug}" is kept for ROVEXY's own addresses — use ${f.slug}-team or another name` : `Made from the company name; must be unique. Console: ${location.origin}/w/${f.slug || 'slug'}/admin`}><input value={f.slug} onChange={(e) => { setSlugTouched(true); set('slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')); }} pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" placeholder="automatic" /></Field>
           <Field label="Admin name"><input value={f.admin_name} onChange={(e) => set('admin_name', e.target.value)} required /></Field>
           <Field label="Admin e-mail"><input type="email" value={f.admin_email} onChange={(e) => set('admin_email', e.target.value)} required /></Field>
           <div className="span-all">

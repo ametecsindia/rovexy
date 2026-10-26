@@ -16,7 +16,7 @@ final class Workspaces
 {
     public const SLUG = '/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/';
 
-    /** Names that are web addresses of ROVEXY itself (or would be confusing as a client's sub-domain). */
+    /** Names that are web addresses of ROVEXY itself (or would be confusing as a client's workspace name). */
     public const RESERVED = ['admin', 'super', 'api', 'www', 'app', 'buy', 'pay', 'accounts', 'password', 'mail', 'smtp', 'ftp', 'support', 'help', 'status', 'static', 'cdn', 'rovexy', 'ametecs'];
 
     public static function slugFrom(string $name): string
@@ -54,14 +54,9 @@ final class Workspaces
         return $company;
     }
 
-    /**
-     * Where the company's admins sign in. With TENANCY_BASE_DOMAIN set (and a wildcard DNS record *.<base> pointing at
-     * the server): its own sub-domain https://<slug>.<base>/admin. Without it: a path on this server, /w/<slug>/admin,
-     * which works straight away (the console sends the workspace with every request).
-     */
+    /** Where the company's admins sign in: /w/<slug>/admin on this server (the console sends the workspace with every request). */
     public static function consoleUrl(Company $c): string
     {
-        $base = config('ammp.tenancy.base_domain');
-        return $base ? "https://{$c->slug}.{$base}/admin" : url("/w/{$c->slug}/admin");
+        return url("/w/{$c->slug}/admin");
     }
 }

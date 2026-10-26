@@ -42,8 +42,7 @@ final class WorkspaceOnboardingTest extends TestCase
         $this->assertStringEndsWith('/w/delta-collections-pvt-ltd/admin', $first['console_url']);
         $this->createCompany(['admin_email' => 'b@delta.test'])->assertCreated()->assertJsonPath('slug', 'delta-collections-pvt-ltd-2');
         $this->createCompany(['name' => 'Admin', 'admin_email' => 'c@x.test'])->assertCreated()->assertJsonPath('slug', 'admin-team');     // reserved name
-        config(['ammp.tenancy.base_domain' => 'rovexy.in']);
-        $this->createCompany(['name' => 'Orbit', 'admin_email' => 'o@orbit.test'])->assertCreated()->assertJsonPath('console_url', 'https://orbit.rovexy.in/admin');
+        $this->createCompany(['name' => 'Orbit', 'admin_email' => 'o@orbit.test'])->assertCreated()->assertJsonPath('console_url', url('/w/orbit/admin'));   // always the slug address
         // the path address serves the console and the API finds the company from the workspace header
         $this->get('/w/delta-collections-pvt-ltd/admin')->assertOk();
     }

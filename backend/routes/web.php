@@ -11,7 +11,7 @@ Route::get('/admin/{path?}', function () {
     return response()->file($index, ['Cache-Control' => 'no-store']);
 })->where('path', '.*'); // real files (admin/assets/*) are served by the web server before Laravel
 
-// A company's console by path, for servers without a sub-domain per company (no TENANCY_BASE_DOMAIN): /w/<slug>/admin.
+// A company's console by path: /w/<slug>/admin (the only console address on the shared server).
 Route::get('/w/{slug}/admin/{path?}', function () {
     return response()->file(public_path('admin/index.html'), ['Cache-Control' => 'no-store']);
 })->where(['slug' => '[a-z0-9][a-z0-9-]{1,38}[a-z0-9]', 'path' => '.*']);

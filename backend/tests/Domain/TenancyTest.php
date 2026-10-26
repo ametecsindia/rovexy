@@ -34,21 +34,20 @@ final class TenancyTest extends TestCase
         return 'none';
     }
 
-    public function test_resolves_verified_domain_and_subdomain_slug(): void
+    public function test_resolves_verified_domain_and_workspace_slug_never_a_subdomain(): void
     {
-        $r = new CompanyResolver($this->dir(), null, 'ammp.example');
+        $r = new CompanyResolver($this->dir());
         self::assertSame(1, $r->resolve('mobile.acme.in'));
-        self::assertSame(2, $r->resolve('globex.ammp.example:443'));
         self::assertSame(2, $r->resolve('ammp.example', 'GLOBEX'));
+        self::assertSame('company_unresolved', $this->code(fn () => $r->resolve('globex.ammp.example:443')));   // sub-domains name no company
     }
 
     public function test_rejects_unresolved_and_conflicting_identity(): void
     {
-        $r = new CompanyResolver($this->dir(), null, 'ammp.example');
+        $r = new CompanyResolver($this->dir());
         self::assertSame('company_unresolved', $this->code(fn () => $r->resolve('unknown.example')));
         self::assertSame('company_unresolved', $this->code(fn () => $r->resolve('ammp.example', 'nosuch')));
         self::assertSame('company_conflict', $this->code(fn () => $r->resolve('mobile.acme.in', 'globex')));
-        self::assertSame('company_conflict', $this->code(fn () => $r->resolve('acme.ammp.example', 'globex')));
         self::assertSame('company_unresolved', $this->code(fn () => $r->resolve('ammp.example', '../etc')));
     }
 

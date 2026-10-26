@@ -8,7 +8,6 @@ return [
         // 'shared' (SaaS: resolve from verified domain or workspace slug) | 'fixed' (on-prem single company)
         'mode' => env('TENANCY_MODE', 'shared'),
         'fixed_company_id' => env('TENANCY_FIXED_COMPANY_ID') ? (int) env('TENANCY_FIXED_COMPANY_ID') : null,
-        'base_domain' => env('TENANCY_BASE_DOMAIN'),
         // APP_ENV=local only: workspace used for http://127.0.0.1 / localhost requests that carry no X-Workspace.
         'local_workspace' => env('TENANCY_LOCAL_WORKSPACE', 'demo-collections'),
     ],

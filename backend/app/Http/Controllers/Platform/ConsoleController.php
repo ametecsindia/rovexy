@@ -103,7 +103,7 @@ final class ConsoleController extends Controller
         $d = $r->validate(['name' => 'required|string|max:150', 'slug' => 'nullable|string|max:40', 'admin_name' => 'required|string|max:150',
             'admin_email' => 'required|email|max:190', 'admin_password' => ['nullable', 'string', 'max:200', Password::defaults()], 'plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal',
             'users' => 'nullable|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly', 'send_email' => 'boolean', 'reason' => 'nullable|string|max:255']);
-        // Workspace (= sub-domain) is made from the company name when not given, always unique.
+        // Workspace (= slug, /w/<slug>/admin) is made from the company name when not given, always unique.
         $d['slug'] = ($d['slug'] ?? '') !== '' ? strtolower($d['slug']) : Workspaces::slugFrom($d['name']);
         $plan = Plan::query()->findOrFail($d['plan_id']);
         $this->checkFreeAccess($d);

@@ -136,7 +136,7 @@ Two independent code reviews of the unexecuted Laravel and Android layers ran on
 5. **SIM calling** is implemented as the default route. The recording comes from the phone's own dialer recorder: it works only where the OEM offers auto-record and stores files in shared storage (Xiaomi/Redmi, Samsung, OPPO/Realme/OnePlus, Vivo typically do; Google Pixel does not). If no file is found the recording is marked Failed with that reason, never faked. AMR/3GP files cannot play in browsers (download instead). READ_CALL_LOG is a restricted permission on public Google Play; distribute as a private/managed app or sideload.
 6. **Protected content** (`FLAG_SECURE` apps) appears black in screen sessions. It cannot be detected reliably. The console and the employee disclosure say so.
 7. **On-prem TLS**: the app trusts system CAs only. On-prem servers need a publicly trusted certificate, or a per-customer build with the company CA pinned.
-8. **Sanctum stateful domains**: every company host (wildcard subdomains plus verified custom domains) must be listed in `SANCTUM_STATEFUL_DOMAINS`.
+8. **Sanctum stateful domains**: every company host (the main server plus any verified custom domains) must be listed in `SANCTUM_STATEFUL_DOMAINS`.
 9. **AMAPI field and enum names** (e.g. `playStoreMode` values, `usbDataAccess`) follow the public reference. Confirm them against a sandbox enterprise.
 10. **FreeSWITCH bridge-outcome variables** (`originate_disposition`, `last_bridge_hangup_cause`) must be confirmed on the target FreeSWITCH build.
 11. **Location view** lists fixes with OpenStreetMap links. There is no embedded map, to avoid third-party tile dependencies.

@@ -23,7 +23,6 @@ final class ResolveCompany
         $resolver = new CompanyResolver(
             new DbCompanyDirectory(),
             $cfg['mode'] === 'fixed' ? ($cfg['fixed_company_id'] ?? throw new \RuntimeException('TENANCY_FIXED_COMPANY_ID is required in fixed mode.')) : null,
-            $cfg['base_domain'],
         );
         $slug = $request->header('X-Workspace');
         // Plain download links (<a href>) can't send headers: they carry ?workspace= instead. Same trust as the header (the session still decides access).

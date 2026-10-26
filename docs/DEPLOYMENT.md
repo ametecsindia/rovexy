@@ -52,7 +52,7 @@ Internet ───┤               ├─ /app/* → Reverb :8080 (WebSockets)
 
 ## 3. Cloud (multi-company SaaS)
 
-- `TENANCY_MODE=shared`, `TENANCY_BASE_DOMAIN=mdm.example.com`, with a wildcard DNS record and certificate for `*.mdm.example.com`.
+- `TENANCY_MODE=shared`. Every company console is `https://<server>/w/<slug>/admin` (no per-company sub-domains, no wildcard DNS).
 - Custom company domains: add them with `ammp:create-company --domain=` (they start **unverified**). Verify through a DNS TXT record before use. Add each one to `SANCTUM_STATEFUL_DOMAINS`.
 - Recordings go to S3-compatible storage with:
   - a private bucket and Block Public Access

@@ -9,8 +9,8 @@ use App\Domain\DomainException;
 /**
  * Resolves exactly one company for a request, or throws. Never falls back.
  *
- * Order: fixed-company mode → verified custom domain → workspace slug
- * (explicit header/claim, else subdomain of the shared base domain).
+ * Order: fixed-company mode → verified custom domain → workspace slug (X-Workspace header / ?workspace=, from the
+ * /w/<slug>/ address). There are no per-company sub-domains.
  * If both a domain and a slug resolve and disagree, the request is rejected.
  */
 final class CompanyResolver
@@ -18,7 +18,6 @@ final class CompanyResolver
     public function __construct(
         private readonly CompanyDirectory $directory,
         private readonly ?int $fixedCompanyId = null,
-        private readonly ?string $sharedBaseDomain = null,
     ) {
     }
 
@@ -44,20 +43,6 @@ final class CompanyResolver
 
         $byDomain = $host !== '' ? $this->directory->idForVerifiedDomain($host) : null;
 
-        $subSlug = null;
-        if ($this->sharedBaseDomain !== null) {
-            $base = strtolower($this->sharedBaseDomain);
-            if (str_ends_with($host, '.' . $base)) {
-                $candidate = substr($host, 0, -strlen('.' . $base));
-                if ($candidate !== '' && !str_contains($candidate, '.')) {
-                    $subSlug = $candidate;
-                }
-            }
-        }
-        if ($slug !== null && $subSlug !== null && $slug !== $subSlug) {
-            throw new DomainException('company_conflict', 'Workspace header conflicts with host.');
-        }
-        $slug ??= $subSlug;
         $bySlug = $slug !== null ? $this->directory->idForSlug($slug) : null;
 
         if ($slug !== null && $bySlug === null) {
