@@ -64,6 +64,8 @@ final class CustomerController extends Controller
     {
         $job = $this->job($r, $id);
         abort_unless(in_array($job->status, ['uploaded', 'ready'], true), 409);
+        // ponytail: set before queueing, so the page sees it at once and polls (else it shows a stale "ready")
+        $job->forceFill(['status' => 'validating'])->save();
         $svc->start($job, 'validate', $r->user());
         return response()->json(['status' => 'queued'], 202);
     }
@@ -71,7 +73,9 @@ final class CustomerController extends Controller
     public function commit(Request $r, int $id, ImportService $svc)
     {
         $job = $this->job($r, $id);
-        abort_unless($job->status === 'ready', 409, 'Validate the import first.');
+        abort_unless($job->status === 'ready', 409, in_array($job->status, ['committing', 'completed'], true)
+            ? 'This file is already imported (or importing). Refresh the page.' : 'Validate the import first.');
+        $job->forceFill(['status' => 'committing'])->save();   // set before queueing: a second click is refused, the page shows progress
         $svc->start($job, 'commit', $r->user());
         return response()->json(['status' => 'queued'], 202);
     }
