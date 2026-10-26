@@ -97,9 +97,9 @@ function DeviceDetail({ id, onClose, onChanged }: { id: number; onClose: () => v
       <ErrorBox error={d.error ?? a.error} />
       {dev && (
         <>
-          <p><Badge value={dev.approval_state} /> <Badge value={dev.policy_state} /> <Badge value={dev.compliant} label={dev.compliant ? 'compliant' : 'not compliant'} /></p>
+          <p><Badge value={dev.approval_state} /> <Badge value={dev.policy_state} label={`policy ${String(dev.policy_state ?? '').replace(/_/g, ' ')}`} /> <Badge value={dev.compliant} label={dev.compliant ? 'compliant' : 'not compliant'} /></p>
           <p className="muted">Installation {dev.installation_id} · epoch {dev.credential_epoch} · {dev.management_mode} · last contact {fmtDate(dev.last_contact_at)}</p>
-          {dev.compliance_detail?.failing_mandatory?.length > 0 && <Notice tone="bad">Mandatory controls not verified: {dev.compliance_detail.failing_mandatory.join(', ')}</Notice>}
+          {!dev.compliant && <Notice tone="bad"><strong>Why not compliant:</strong> {nonCompliantReason(dev)}</Notice>}
           {dev.approval_state === 'approved' && can('devices.revoke') && (
             <Card title="Revoke access">
               <p className="muted">Revocation blocks all work access immediately. It does not wipe the phone and does not remove management restrictions.</p>
@@ -123,4 +123,14 @@ function DeviceDetail({ id, onClose, onChanged }: { id: number; onClose: () => v
       )}
     </Modal>
   );
+}
+
+/** Plain-words reason for "not compliant" (the policy table's Capability column says what the phone CAN do, not what it reported). */
+function nonCompliantReason(dev: any): string {
+  const failing: string[] = dev.compliance_detail?.failing_mandatory ?? [];
+  if (dev.approval_state !== 'approved') return 'the phone is not approved.';
+  if (!dev.last_contact_at) return 'the phone has not connected since it was approved. Open the ROVEXY app on the phone and sign in; it reports its policy within a minute.';
+  if (dev.policy_state === 'pending' || dev.policy_state === 'applying') return `the phone has not yet confirmed the current policy${failing.length ? ` (waiting on: ${failing.join(', ')})` : ''}. Keep the ROVEXY app open with internet on.`;
+  if (failing.length) return `these required controls are not applied on the phone: ${failing.join(', ')}. Open Policy status in the ROVEXY app to fix them.`;
+  return 'the phone\'s last policy report failed. Open Policy status in the ROVEXY app.';
 }
