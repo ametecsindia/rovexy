@@ -99,6 +99,7 @@ function DeviceDetail({ id, onClose, onChanged }: { id: number; onClose: () => v
         <>
           <p><Badge value={dev.approval_state} /> <Badge value={dev.policy_state} label={`policy ${String(dev.policy_state ?? '').replace(/_/g, ' ')}`} /> <Badge value={dev.compliant} label={dev.compliant ? 'compliant' : 'not compliant'} /></p>
           <p className="muted">Installation {dev.installation_id} · epoch {dev.credential_epoch} · {dev.management_mode} · last contact {fmtDate(dev.last_contact_at)}</p>
+          {d.data?.last_session && <p className="muted">Last sign-in: {signOutReason(d.data.last_session, dev)}</p>}
           {!dev.compliant && <Notice tone="bad"><strong>Why not compliant:</strong> {nonCompliantReason(dev)}</Notice>}
           {dev.approval_state === 'approved' && can('devices.revoke') && (
             <Card title="Revoke access">
@@ -133,4 +134,24 @@ function nonCompliantReason(dev: any): string {
   if (dev.policy_state === 'pending' || dev.policy_state === 'applying') return `the phone has not yet confirmed the current policy${failing.length ? ` (waiting on: ${failing.join(', ')})` : ''}. Keep the ROVEXY app open with internet on.`;
   if (failing.length) return `these required controls are not applied on the phone: ${failing.join(', ')}. Open Policy status in the ROVEXY app to fix them.`;
   return 'the phone\'s last policy report failed. Open Policy status in the ROVEXY app.';
+}
+
+/** Why the employee on this phone was signed out, in plain words. */
+function signOutReason(ws: any, dev: any): string {
+  const when = ws.ended_at ? ` (${fmtDate(ws.ended_at)})` : '';
+  if (!ws.ended_at) {
+    if (ws.epoch !== dev.credential_epoch) return 'ended — the phone was approved again after this sign-in, so the employee must sign in again.';
+    if (ws.refresh_expires_at && new Date(ws.refresh_expires_at) < new Date()) return 'expired — the phone was not online for 12 hours, so the employee must sign in again.';
+    return `signed in since ${fmtDate(ws.created_at)}.`;
+  }
+  const why: Record<string, string> = {
+    logout: 'the employee pressed Sign out',
+    superseded: 'a new sign-in on this phone replaced it',
+    reassigned: 'the phone was given to another employee',
+    revoked: 'the phone\'s access was revoked',
+    no_longer_authorised: 'the employee or phone is no longer allowed to work (not approved, account inactive, or phone assigned to someone else)',
+    employee_inactive: 'the employee account was deactivated',
+    employee_suspended: 'the employee account was suspended',
+  };
+  return `signed out${when} — ${why[ws.end_reason] ?? String(ws.end_reason).replace(/_/g, ' ')}.`;
 }

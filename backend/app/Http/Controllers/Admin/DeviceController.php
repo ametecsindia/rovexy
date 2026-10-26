@@ -42,6 +42,9 @@ final class DeviceController extends Controller
         return response()->json([
             'device' => $d,
             'history' => DeviceApprovalEvent::query()->where('device_id', $id)->latest('id')->limit(50)->get(),
+            // Last sign-in on this phone and how it ended ('rotated' = routine token refresh, not a sign-out).
+            'last_session' => \App\Models\WorkSession::query()->where('device_id', $id)->where(fn ($q) => $q->whereNull('end_reason')->orWhere('end_reason', '!=', 'rotated'))
+                ->latest('id')->first(['id', 'user_id', 'epoch', 'created_at', 'ended_at', 'end_reason', 'refresh_expires_at']),
         ]);
     }
 
