@@ -62,7 +62,9 @@ final class LicenceIssuer
             'internal' => [null, 0, null, null],
         };
         $l = Licence::query()->create(['key' => self::newKey(), 'company_id' => $companyId, 'plan_id' => $plan->id, 'holder_name' => $holder, 'holder_email' => $email ? strtolower($email) : null,
-            'kind' => $kind, 'deployment' => $deployment, 'billing' => $billing, 'max_users' => $kind === 'internal' ? 0 : $users, 'features' => $plan->features, 'status' => 'active',
+            'kind' => $kind, 'deployment' => $deployment, 'billing' => $billing, 'max_users' => $kind === 'internal' ? 0 : $users,
+            // A trial (website or staff-made) and an internal licence carry every feature, so a client can try everything.
+            'features' => in_array($kind, ['trial', 'internal'], true) ? array_keys(Licensing::FEATURES) : $plan->features, 'status' => 'active',
             'starts_at' => $now, 'expires_at' => $expires, 'grace_days' => $graceDays, 'amc_expires_at' => $amc]);
         $l->log('issued', array_filter(['plan' => $plan->code, 'kind' => $kind, 'deployment' => $deployment, 'users' => $l->max_users, 'billing' => $billing,
             'expires_at' => $expires?->toDateString(), 'amc_until' => $amc?->toDateString()], fn ($v) => $v !== null), $actor);

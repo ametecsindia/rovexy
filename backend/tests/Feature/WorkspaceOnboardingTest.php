@@ -121,4 +121,25 @@ final class WorkspaceOnboardingTest extends TestCase
         }
         $this->get('/api/mobile/v1/branding/no-such-co/logo')->assertNotFound();
     }
+
+    /** Smart31: in the top plan and every trial; a plan's feature change reaches the licences that follow it (27 Oct 2026). */
+    public function test_smart31_reaches_trials_top_plan_and_plan_edits(): void
+    {
+        $this->assertContains('smart31', Plan::query()->where('code', 'enterprise')->value('features'));   // migration: the plan with every feature
+        $this->assertNotContains('smart31', Plan::query()->where('code', 'starter')->value('features'));
+        // A staff-made trial on Starter still gets every feature (like a website trial).
+        $trial = $this->createCompany(['name' => 'Trial Co', 'admin_email' => 't@trial.test', 'kind' => 'trial'])->assertCreated()->json();
+        $this->assertContains('smart31', \App\Models\Platform\Licence::query()->where('company_id', $trial['id'])->value('features'));
+        // A paid Starter licence follows the plan when Super Admin ticks Smart31; one with its own list does not.
+        $paid = $this->createCompany(['name' => 'Paid Co', 'admin_email' => 'p@paid.test'])->assertCreated()->json();
+        $custom = $this->createCompany(['name' => 'Custom Co', 'admin_email' => 'c@custom.test'])->assertCreated()->json();
+        \App\Models\Platform\Licence::query()->where('company_id', $custom['id'])->update(['features' => json_encode(['calling'])]);
+        $p = Plan::query()->with('cloudTiers', 'perpetualBands')->where('code', 'starter')->firstOrFail();
+        $this->super()->putJson("/api/super/plans/{$p->id}", ['code' => 'starter', 'name' => $p->name, 'min_users' => $p->min_users,
+            'features' => array_merge($p->features, ['smart31']), 'is_public' => true, 'active' => true,
+            'cloud_tiers' => $p->cloudTiers->map->only(['min_users', 'max_users', 'rate_inr'])->all(),
+            'perpetual_bands' => $p->perpetualBands->map->only(['min_users', 'max_users', 'price_inr'])->all()])->assertOk();
+        $this->assertContains('smart31', \App\Models\Platform\Licence::query()->where('company_id', $paid['id'])->value('features'));
+        $this->assertSame(['calling'], \App\Models\Platform\Licence::query()->where('company_id', $custom['id'])->value('features'));
+    }
 }

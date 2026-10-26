@@ -233,7 +233,16 @@ final class ConsoleController extends Controller
         $plan = $id ? Plan::query()->findOrFail($id) : new Plan(['max_users' => 0, 'months' => 12]);
         $before = $id ? ['plan' => $plan->only(['name', 'min_users', 'features', 'is_public', 'active']), 'cloud' => $plan->cloudTiers()->get(['min_users', 'max_users', 'rate_inr'])->toArray(),
             'perpetual' => $plan->perpetualBands()->get(['min_users', 'max_users', 'price_inr'])->toArray()] : null;
-        DB::transaction(function () use ($plan, $d) {
+        $oldFeatures = $id ? array_values((array) $plan->features) : null;
+        DB::transaction(function () use ($plan, $d, $oldFeatures) {
+            if ($oldFeatures !== null && isset($d['features'])) {
+                // Feature changes reach the paid licences that follow this plan as it was (a licence given its own
+                // feature list stays as it is). Trials and internal licences already carry every feature.
+                $sorted = fn (array $f) => collect($f)->unique()->sort()->values()->all();
+                Licence::query()->where('plan_id', $plan->id)->whereIn('status', ['active', 'suspended'])->whereNotIn('kind', ['trial', 'internal'])->get()
+                    ->filter(fn ($l) => $sorted((array) $l->features) === $sorted($oldFeatures))
+                    ->each(fn ($l) => $l->forceFill(['features' => array_values($d['features'])])->save());
+            }
             $plan->fill(array_intersect_key($d, array_flip(['code', 'name', 'tagline', 'min_users', 'features', 'is_public', 'active', 'sort'])))->save();
             $plan->cloudTiers()->delete();
             $plan->perpetualBands()->delete();
