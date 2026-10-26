@@ -33,6 +33,19 @@ final class ImportService
     {
     }
 
+    /** Group in a lead file: its code or its name, any letter case → team id. */
+    private static function teamLookup(): array
+    {
+        $map = [];
+        foreach (Team::query()->get(['id', 'code', 'name']) as $t) {
+            $map[mb_strtolower(trim((string) $t->name))] = $t->id;
+            if ($t->code) {
+                $map[mb_strtolower(trim((string) $t->code))] = $t->id;
+            }
+        }
+        return $map;
+    }
+
     public function upload(UploadedFile $file, User $actor, ?string $portfolio = null): ImportJob
     {
         $ext = strtolower($file->getClientOriginalExtension());
@@ -43,7 +56,10 @@ final class ImportService
             throw new DomainException('invalid_upload', 'Upload a .csv or .xlsx file.');
         }
         if ($file->getSize() > config('ammp.uploads.import_max_mb') * 1024 * 1024) {
-            throw new DomainException('upload_too_large');
+            throw new DomainException('upload_too_large', 'The file is larger than ' . config('ammp.uploads.import_max_mb') . ' MB. Split it into smaller files.');
+        }
+        if ($file->getSize() === 0) {
+            throw new DomainException('empty_file', 'The file is empty.');
         }
         $cid = $this->current->id();
         $key = $file->storeAs("companies/{$cid}/imports", bin2hex(random_bytes(16)) . '.' . $ext, 'company_files');
@@ -52,9 +68,16 @@ final class ImportService
             'portfolio' => mb_substr(trim((string) $portfolio) ?: pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME), 0, 150),
             'format' => $ext, 'size_bytes' => $file->getSize(), 'sha256' => hash_file('sha256', $file->getRealPath()), 'status' => 'uploaded',
         ]);
-        $headers = $this->readRows($job, 1)[0] ?? [];
-        if ($headers === []) {
-            throw new DomainException('empty_file', 'The file has no header row.');
+        try {
+            $headers = array_map(fn ($h) => trim((string) $h), $this->readRows($job, 1)[0] ?? []);
+        } catch (\Throwable $e) {
+            $headers = null;
+        }
+        if (!$headers || implode('', $headers) === '') {
+            // Never leave a half-made upload behind (it would show as "not imported — click to finish" and could not be opened).
+            \Illuminate\Support\Facades\Storage::disk('company_files')->delete($key);
+            $job->delete();
+            throw new DomainException('empty_file', $headers === null ? 'We could not read this file. Save it again as .csv or .xlsx and retry.' : 'The file has no header row. The first row must hold the column names.');
         }
         $job->forceFill(['headers' => $headers, 'mapping' => ImportValidator::suggestMapping($headers)])->save();
         Audit::record('import.uploaded', $job, ['name' => $job->original_name, 'sha256' => $job->sha256]);
@@ -146,7 +169,7 @@ final class ImportService
         $rows = array_slice($this->readRows($job), 1);
         $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping));
         $users = User::query()->pluck('id', 'employee_code');
-        $teams = Team::query()->pluck('id', 'code');
+        $teams = self::teamLookup();
         $created = $updated = $skipped = 0;
         $random = ($job->options['allocation'] ?? 'column') === 'random';
         if ($random) {
@@ -166,7 +189,7 @@ final class ImportService
             DB::transaction(function () use ($chunk, $job, $actor, $users, $teams, $random, &$created, &$updated, &$skipped) {
                 foreach ($chunk as $row) {
                     $userId = $random ? $row['user_id'] : ($row['assigned_employee'] ? $users[$row['assigned_employee']] ?? null : null);
-                    $teamId = $random ? $job->options['team_id'] : ($row['assigned_team'] ? $teams[$row['assigned_team']] ?? null : null);
+                    $teamId = $random ? $job->options['team_id'] : ($row['assigned_team'] ? $teams[mb_strtolower($row['assigned_team'])] ?? null : null);
                     if ($teamId === null && !empty($job->options['scope'])) {
                         // A manager's upload stays inside the manager's group (so they can see and allocate it).
                         $teamId = $userId ? (int) (DB::table('team_user')->where('user_id', $userId)->whereIn('team_id', $job->options['scope'])->value('team_id') ?? $job->options['scope'][0]) : $job->options['scope'][0];
@@ -226,12 +249,12 @@ final class ImportService
     {
         $country = $this->current->get()->default_country;
         $employees = User::query()->where('status', 'active')->pluck('employee_code')->flip();
-        $teams = Team::query()->pluck('code')->flip();
+        $teams = self::teamLookup();
         $r = ImportValidator::validate(
             $mapped, $country,
             fn (string $phone) => Customer::query()->where('phone', $phone)->value('customer_ref'),
             fn (string $code) => isset($employees[$code]),
-            fn (string $code) => isset($teams[$code]),
+            fn (string $code) => isset($teams[mb_strtolower($code)]),
         );
         $opt = $job->options ?? [];
         $column = ($opt['allocation'] ?? 'file') === 'column';

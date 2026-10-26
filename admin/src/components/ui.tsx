@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { ApiError, post } from '../lib/api';
+import { post } from '../lib/api';
 
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
@@ -17,7 +17,7 @@ export function useAsync<T>(fn: () => Promise<T>, deps: unknown[] = []) {
       const d = await fn();
       if (n === seq.current) setData(d);
     } catch (e) {
-      if (n === seq.current) setError(e instanceof ApiError ? e.message : String(e));
+      if (n === seq.current) setError(e instanceof Error ? e.message : String(e));
     } finally {
       if (n === seq.current) setLoading(false);
     }
@@ -39,7 +39,7 @@ export function useAction() {
     try {
       return await fn();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      setError(e instanceof Error ? e.message : String(e));
       return undefined;
     } finally {
       setBusy(false);
@@ -207,7 +207,7 @@ export function RecordingPlayer({ callId, status, format, canPlay, canDownload, 
       a.onerror = () => setErr('Could not play this file');
       audio.current = a;
       await a.play();
-    } catch (x) { setErr(x instanceof ApiError ? x.message : String(x)); } finally { setBusy(false); }
+    } catch (x) { setErr(x instanceof Error ? x.message : String(x)); } finally { setBusy(false); }
   };
   const seek = (e: MouseEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -217,7 +217,7 @@ export function RecordingPlayer({ callId, status, format, canPlay, canDownload, 
   };
   const download = async (e: MouseEvent) => {
     e.stopPropagation(); setErr(null);
-    try { window.location.assign((await post(`/calls/${callId}/recording/download`)).url); } catch (x) { setErr(x instanceof ApiError ? x.message : String(x)); }
+    try { window.location.assign((await post(`/calls/${callId}/recording/download`)).url); } catch (x) { setErr(x instanceof Error ? x.message : String(x)); }
   };
   return (
     <span className={`player ${compact ? 'compact' : ''} ${on ? 'on' : ''}`} onClick={stop}>

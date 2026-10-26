@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { get, post } from '../lib/api';
 import { Badge, Card, ErrorBox, Field, Notice, Page, useAction, useAsync } from '../components/ui';
 
@@ -87,6 +87,15 @@ export function AllocationPage() {
   const receivers = who === 'pool' ? [] : who === 'all' ? members : members.filter((m: any) => picked.includes(m.id));
   const n = part ? Math.min(Number(limit) || 0, count ?? 0) : count ?? 0;
   const ready = ready1 && !!teamId && n > 0 && (who === 'pool' || receivers.length > 0);
+  // What is still missing, in order — shown under the Confirm button so it is never a mystery why it is off.
+  const missing = !ready1 ? (tab === 'assign' ? 'Step 1: choose a portfolio.' : 'Step 1: choose the employee whose cases to move.')
+    : count === null ? 'Counting cases…'
+    : part && !(Number(limit) > 0) ? 'Step 1: enter how many cases (“Only some”), or untick it.'
+    : n === 0 ? (tab === 'assign' && onlyNew ? 'No cases left to assign: every case in this portfolio already has an employee. To move them, choose “All cases of the portfolio” in step 1.' : 'No cases match step 1. Change the filters.')
+    : !teamId ? 'Step 2: choose a group.'
+    : who !== 'pool' && members.length === 0 ? 'Step 3: this group has no active employees. Add them under Team → Groups & people, or choose “Nobody yet”.'
+    : who !== 'pool' && receivers.length === 0 ? 'Step 3: tick at least one employee, or choose “All employees”.'
+    : null;
 
   useEffect(() => {
     if (!ready1) { setCount(null); return; }
@@ -101,7 +110,8 @@ export function AllocationPage() {
     if (who === 'pool') body.target = 'group';
     else { body.target = 'random'; body.user_ids = receivers.map((m: any) => m.id); }
     const r = await post('/customers/allocate', body);
-    setDone(`Done — ${r.updated} cases given to ` + (r.per_caller ? Object.entries(r.per_caller).map(([u, k]) => `${name(u)} (${k})`).join(', ') : `the ${team?.name} group (manager to assign)`) + '. Phones get them at the next sync.');
+    const to = r.per_caller ? Object.entries(r.per_caller).filter(([, k]) => Number(k) > 0).map(([u, k]) => `${name(u)} (${k})`).join(', ') : `the ${team?.name} group (its manager assigns them)`;
+    setDone(`Done — ${r.updated} case${r.updated === 1 ? '' : 's'} given to ${to || 'nobody new'}.${r.unchanged ? ` ${r.unchanged} already had that employee, so they were left as they were.` : ''} Employees' phones get them at the next sync (about a minute).`);
     void portfolios.reload();
   });
 
@@ -166,9 +176,9 @@ export function AllocationPage() {
             <tr><th>Group</th><td>{team ? <strong>{team.name}</strong> : <span className="muted">—</span>}{team?.managers?.length ? <small className="muted"> · manager {team.managers.map((m: any) => m.name).join(', ')}</small> : null}</td></tr>
             <tr><th>Employees</th><td>{!team ? <span className="muted">—</span> : who === 'pool' ? 'None yet — kept in the group for its manager to assign' : receivers.length === 0 ? <Badge value="pending" label="choose employees" /> : <>{receivers.map((m: any) => <span key={m.id} className="tag">{m.name}</span>)}<br /><small className="muted">Shared evenly at random: about {Math.ceil(n / receivers.length)} each</small></>}</td></tr>
           </tbody></table>
-          <button disabled={a.busy || !ready} onClick={confirmAssign}>Confirm — {tab === 'assign' ? 'assign' : 'transfer'} {n || ''} cases</button>
-          {ready1 && count !== null && n === 0 && <Notice tone="warn">No cases match step 1{tab === 'assign' && onlyNew ? ' — every case in this portfolio is already assigned. To move them, choose “All cases of the portfolio” in step 1.' : '. Change the filters in step 1.'}</Notice>}
-          {done && <Notice tone="ok">{done}</Notice>}
+          <button disabled={a.busy || !ready} onClick={confirmAssign}>{a.busy ? 'Assigning…' : `Confirm — ${tab === 'assign' ? 'assign' : 'transfer'} ${n || ''} cases`}</button>
+          {!done && missing && <p className="muted small" role="status" style={{ marginTop: 8 }}>{missing}</p>}
+          {done && <Notice tone="ok">{done} <Link to={`/customers${tab === 'assign' && pf ? `?import_id=${pf}` : ''}`}>See the cases →</Link></Notice>}
         </div></div>
       </Card>
     </Page>

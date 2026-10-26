@@ -9,7 +9,7 @@ import { Badge, Card, ErrorBox, Field, Notice, Page, RecordingPlayer, Stat, Tabl
 
 const FIELDS: [string, string, boolean][] = [
   ['customer_ref', 'Customer ID', true], ['name', 'Customer name', true], ['phone', 'Phone number', true], ['alt_phone', 'Alternate number', false],
-  ['campaign', 'Campaign', false], ['assigned_employee', 'Caller ID (optional — assigns each lead)', false], ['assigned_team', 'Assigned team (code)', false],
+  ['campaign', 'Campaign', false], ['assigned_employee', 'Caller ID (optional — assigns each lead)', false], ['assigned_team', 'Group (name or code)', false],
   ['city', 'City', false], ['area', 'Area / branch', false], ['pincode', 'Pincode', false],
   ['notes', 'Notes', false], ['status', 'Status', false], ['follow_up_date', 'Follow-up date', false],
   ['address', 'Address', false], ['state', 'State', false], ['email', 'Email', false], ['preferred_time', 'Preferred contact time', false],
@@ -51,7 +51,11 @@ export function ImportsPage() {
   }, [job]);
 
   const open = (j: any) => { setJob(j); setName(j.portfolio ?? ''); setMapping(j.mapping ?? {}); setPreview(null); };
+  const MAX_MB = 20;   // = config ammp.uploads.import_max_mb
   const upload = (file: File) => a.run(async () => {
+    if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error('Choose a .csv or .xlsx file. Other formats (e.g. .xls, .pdf) cannot be read — in Excel use File → Save As → CSV or Excel Workbook.');
+    if (file.size === 0) throw new Error('The file is empty.');
+    if (file.size > MAX_MB * 1024 * 1024) throw new Error(`The file is larger than ${MAX_MB} MB. Split it into smaller files.`);
     const fd = new FormData();
     fd.append('file', file);
     if (name.trim()) fd.append('portfolio', name.trim());
@@ -85,7 +89,8 @@ export function ImportsPage() {
           {!job ? (
             <div className="form-grid">
               <Field label="1. Portfolio name" hint="e.g. HDFC Oct-2026 Bucket 1. Leave blank to use the file name."><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-              <Field label="2. Lead file (.csv or .xlsx)"><input type="file" accept=".csv,.xlsx" onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} aria-label="Lead file" /></Field>
+              <Field label="2. Lead file (.csv or .xlsx)" hint={`Up to ${MAX_MB} MB. Needs Customer ID, Customer name and Phone number columns — see the sample file.`}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
+              {a.busy && <Notice tone="info">Uploading and reading the file…</Notice>}
             </div>
           ) : (
             <>
@@ -106,7 +111,9 @@ export function ImportsPage() {
                 <button className={job.status === 'ready' ? 'secondary' : undefined} disabled={a.busy || busyJob || job.status === 'completed'} onClick={check}>Check file</button>
                 <button disabled={a.busy || busyJob || job.status !== 'ready' || !job.valid_rows} onClick={commit}>Import {job.valid_rows ? `${job.valid_rows} leads` : ''} into “{name || job.portfolio}”</button>
               </div>
-              {busyJob && <Notice tone="info">{job.status === 'validating' ? 'Checking every row…' : 'Importing…'}</Notice>}
+              {a.busy && !busyJob && <Notice tone="info">Working…</Notice>}
+              {busyJob && <Notice tone="info">{job.status === 'validating' ? 'Checking every row…' : 'Importing… this page updates by itself.'}</Notice>}
+              {job.status === 'uploaded' && !a.busy && <p className="muted">Next: press <b>Check file</b>. Nothing is imported until you press Import.</p>}
               {job.status === 'ready' && <Notice tone={job.error_rows ? 'warn' : 'ok'}>{job.total_rows} rows: {job.valid_rows} ready to import, {job.error_rows} with problems (they will be skipped). {job.error_rows > 0 && <a href={fileUrl(`/api/admin/imports/${job.id}/errors.csv`)}>Download the problem rows</a>}</Notice>}
               {job.status === 'completed' && <Notice tone="ok">Done: {job.created_count} new, {job.updated_count} updated, {job.skipped_count} skipped. {can('customers.assign') && <Link to={`/allocation?portfolio=${job.id}`}>Assign this portfolio →</Link>}</Notice>}
               {job.status === 'failed' && <Notice tone="bad">Import failed: {job.failure}</Notice>}
@@ -136,7 +143,8 @@ const StatusBadge = ({ s }: { s: string }) => <span className={`badge ${STATUS_T
 export function CustomersPage() {
   const { can } = useAuth();
   const nav = useNavigate();
-  const [f, setF] = useState({ q: '', status: '', assigned: '', team_id: '', import_id: '' });
+  const [urlParams] = useSearchParams();
+  const [f, setF] = useState({ q: '', status: '', assigned: '', team_id: '', import_id: urlParams.get('import_id') ?? '' });
   const customers = useAsync(() => get(`/customers${qs(f)}`), [f.q, f.status, f.assigned, f.team_id, f.import_id]);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const teams = useAsync(() => (can('employees.view') ? get<any[]>('/teams') : Promise.resolve([])));

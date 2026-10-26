@@ -42,6 +42,9 @@ final class CustomerAssignmentService
         $n = DB::transaction(function () use ($customerIds, $userId, $teamId, $actor) {
             $n = 0;
             foreach (Customer::query()->whereIn('id', $customerIds)->lockForUpdate()->get() as $c) {
+                if ($c->assigned_user_id === $userId && $c->assigned_team_id === $teamId && $c->withdrawn_at === null) {
+                    continue;   // already exactly here: no duplicate history row, not counted as changed
+                }
                 $action = ($c->assigned_user_id || $c->assigned_team_id) ? 'reassigned' : 'assigned';
                 $c->forceFill(['assigned_user_id' => $userId, 'assigned_team_id' => $teamId, 'withdrawn_at' => null])->save();
                 CustomerAssignment::query()->create(['customer_id' => $c->id, 'user_id' => $userId, 'team_id' => $teamId, 'action' => $action, 'actor_user_id' => $actor->id]);

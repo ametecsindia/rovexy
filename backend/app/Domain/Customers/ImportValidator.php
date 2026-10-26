@@ -129,11 +129,11 @@ final class ImportValidator
             }
             $emp = $get('assigned_employee') ?: null;
             if ($emp !== null && !$employeeExists($emp)) {
-                $err('assigned_employee', 'unknown_employee', 'Employee not found or inactive in this company.');
+                $err('assigned_employee', 'unknown_employee', "Caller ID \"{$emp}\" is not an active employee's User ID here. Fix it, or leave Caller ID blank and assign later.");
             }
             $team = $get('assigned_team') ?: null;
             if ($team !== null && !$teamExists($team)) {
-                $err('assigned_team', 'unknown_team', 'Team not found in this company.');
+                $err('assigned_team', 'unknown_team', "Group \"{$team}\" does not exist here. Use a group name from Team → Groups & people, or leave it blank.");
             }
             $acct = [];
             foreach (self::MONEY as $f) {
@@ -225,7 +225,7 @@ final class ImportValidator
 
     public static function parseDate(string $s): ?string
     {
-        foreach (['!Y-m-d', '!d/m/Y', '!d-m-Y', '!d.m.Y'] as $fmt) {
+        foreach (['!Y-m-d', '!d/m/Y', '!d-m-Y', '!d.m.Y', '!j/n/Y', '!j-n-Y', '!j.n.Y'] as $fmt) {   // j/n: Excel saves 5/1/2026 without leading zeros
             $d = \DateTimeImmutable::createFromFormat($fmt, $s);
             if ($d !== false && $d->format(substr($fmt, 1)) === $s) {
                 return $d->format('Y-m-d');

@@ -42,8 +42,8 @@ describe('api client', () => {
 });
 
 describe('navigation', () => {
-  it('lists all 24 modules and filters by permission', async () => {
-    expect(NAV).toHaveLength(24);   // + Plan & licence (12 Oct 2026)
+  it('lists every module and filters by permission', async () => {
+    expect(NAV).toHaveLength(29);   // menu as of 27 Oct 2026 (portfolios, assignment, address report, payments, calling configuration…)
     mockFetch((u) => {
       if (u.endsWith('/auth/me')) return { status: 200, body: ME };
       if (u.endsWith('/branding')) return { status: 200, body: { display_name: 'Alpha', logo_url: null } };

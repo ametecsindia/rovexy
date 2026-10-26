@@ -18,13 +18,28 @@ final class CustomerController extends Controller
 {
     public function template()
     {
+        // Sample lead file: imports cleanly as downloaded (no Caller ID / group, so nothing depends on this company's people).
+        // Dates are relative to today so they never look stale. Amounts add up: total = principal + interest + charges; overdue = EMI × overdue EMIs.
+        $d = fn (int $days) => now()->addDays($days)->format('Y-m-d');
         $rows = [
             ['Customer ID', 'Customer Name', 'Phone Number', 'Alternate Number', 'Email', 'Address', 'Area', 'City', 'State', 'Pincode', 'Latitude', 'Longitude',
                 'Preferred Time', 'Campaign', 'Caller ID', 'Assigned Team', 'Loan Amount', 'Total Outstanding', 'Principal Outstanding', 'Interest Outstanding',
                 'Charges', 'Overdue Amount', 'EMI Amount', 'Due Date', 'DPD', 'Overdue EMIs', 'Last Payment Date', 'Last Payment Amount', 'Notes', 'Status', 'Follow-up Date'],
-            ['CUST-0001', 'Sample Customer', '9876543210', '', 'sample@example.com', '12-3-45, MG Road', 'Kondapur', 'Hyderabad', 'Telangana', '500084', '', '',
-                'After 6 pm', 'Campaign A', 'EMP001', '', '250000', '182500', '170000', '9500', '3000', '24600', '8200', '2026-11-05', '45', '3', '2026-08-05', '8200',
-                'Example row — replace', 'new', '2026-10-15'],
+            ['LN-100001', 'Ravi Kumar', '9876543210', '9876501234', 'ravi.kumar@example.com', 'Flat 304, Sai Residency, Road No 2', 'Kondapur', 'Hyderabad', 'Telangana', '500084', '17.4600', '78.3570',
+                'After 6 pm', 'Personal Loan', '', '', '300000', '224500', '210000', '12000', '2500', '19000', '9500', $d(9), '38', '2', $d(-38), '9500',
+                'Promised to pay by month end', 'new', $d(1)],
+            ['LN-100002', 'Lakshmi Devi', '9876543211', '', 'lakshmi.devi@example.com', 'Plot 21, Ayyappa Society', 'Madhapur', 'Hyderabad', 'Telangana', '500081', '17.4483', '78.3915',
+                '10 am - 1 pm', 'Personal Loan', '', '', '150000', '98300', '92000', '4800', '1500', '12400', '6200', $d(14), '22', '2', $d(-22), '6200',
+                'Asked for EMI restructuring', 'new', $d(2)],
+            ['LN-100003', 'Mohammed Imran', '9876543212', '', '', 'H.No 8-2-120, Lane 4', 'Gachibowli', 'Hyderabad', 'Telangana', '500032', '17.4401', '78.3489',
+                '2 pm - 5 pm', 'Two-wheeler Loan', '', '', '85000', '61500', '58000', '2500', '1000', '9000', '3000', $d(5), '65', '3', $d(-65), '3000',
+                'Not reachable on first attempt', 'follow_up', $d(1)],
+            ['LN-100004', 'Sunita Reddy', '9876543213', '', 'sunita.reddy@example.com', '7-1-55, Lal Bungalow Road', 'Ameerpet', 'Hyderabad', 'Telangana', '500016', '17.4375', '78.4483',
+                'Anytime', 'Consumer Durable', '', '', '40000', '18600', '17800', '600', '200', '4700', '4700', $d(20), '12', '1', $d(-12), '4700',
+                'Partial payment made', 'in_progress', $d(3)],
+            ['LN-100005', 'Venkatesh Rao', '9876543214', '', '', '2-3-410, Main Road', 'Secunderabad', 'Hyderabad', 'Telangana', '500003', '', '',
+                'After 7 pm', 'Credit Card', '', '', '120000', '54000', '50000', '3000', '1000', '0', '5000', $d(25), '0', '0', $d(-5), '5000',
+                'Paying on time — reminder call only', 'new', ''],
         ];
         return response()->streamDownload(function () use ($rows) {
             $out = fopen('php://output', 'w');
@@ -231,7 +246,7 @@ final class CustomerController extends Controller
             'group' => ['updated' => $svc->assign($ids, null, (int) ($d['team_id'] ?? 0) ?: null, $r->user())],
             default => ['updated' => $svc->assign($ids, (int) ($d['user_id'] ?? 0) ?: null, null, $r->user())],
         };
-        return response()->json($res + ['matching' => $matching]);
+        return response()->json($res + ['matching' => $matching, 'selected' => count($ids), 'unchanged' => count($ids) - $res['updated']]);
     }
 
     public function assign(Request $r, CustomerAssignmentService $svc)

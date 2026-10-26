@@ -952,6 +952,41 @@ final class AcceptanceTest extends TestCase
         $this->admin('alpha')->postJson('/api/admin/customers/withdraw', ['customer_ids' => [$c1->id]])->assertOk()->assertJsonPath('withdrawn', 1);
     }
 
+    /** The downloaded sample re-imports with no problem rows; bad files leave no half-made upload; groups by name; Excel dates. */
+    public function test_sample_file_round_trip_and_upload_errors(): void
+    {
+        app(CurrentCompany::class)->withoutScope(fn () => Customer::query()->delete());   // fixture customers would share the sample's phone numbers
+        $as = $this->admin('alpha');
+        $sample = $as->get('/api/admin/imports/template')->assertOk()->streamedContent();
+        $this->assertGreaterThanOrEqual(4, substr_count(trim($sample), "\n") + 1);   // header + at least 3 rows
+        $job = $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('customer-import-template.csv', $sample), 'portfolio' => 'Sample'],
+            ['Accept' => 'application/json'])->assertCreated()->json();
+        $prev = $as->postJson("/api/admin/imports/{$job['id']}/preview", ['mapping' => $job['mapping']])->assertOk()->json('result');
+        $this->assertSame([], $prev['errors']);
+        $this->assertGreaterThanOrEqual(3, count($prev['valid']));
+        $as->postJson("/api/admin/imports/{$job['id']}/validate")->assertStatus(202);
+        $as->postJson("/api/admin/imports/{$job['id']}/commit")->assertStatus(202);
+        $st = $as->getJson("/api/admin/imports/{$job['id']}")->json();
+        $this->assertSame(['completed', 0, count($prev['valid'])], [$st['status'], $st['error_rows'], $st['created_count']]);
+        $as->postJson("/api/admin/imports/{$job['id']}/commit")->assertStatus(409)->assertJsonPath('message', 'This file is already imported (or importing). Refresh the page.');
+
+        $before = $as->getJson('/api/admin/imports')->json('total');
+        $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('blank.csv', "\n\n")], ['Accept' => 'application/json'])->assertStatus(422);
+        $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('leads.pdf', '%PDF-1.4')], ['Accept' => 'application/json'])->assertStatus(422)
+            ->assertJsonPath('message', 'Upload a .csv or .xlsx file.');
+        $this->assertSame($before, $as->getJson('/api/admin/imports')->json('total'));   // nothing half-made left in Upload history
+
+        app(CurrentCompany::class)->run($this->a, fn () => \App\Models\Team::query()->create(['code' => 'G1', 'name' => 'Recovery East']));
+        $csv = "Customer ID,Customer Name,Phone Number,Assigned Team,Caller ID,Due Date\nX1,Ex One,9000033333,recovery east,,5/1/2026\nX2,Ex Two,9000044444,Nowhere,GHOST,05/01/2026\n";
+        $j2 = $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('g.csv', $csv)], ['Accept' => 'application/json'])->assertCreated()->json();
+        $r = $as->postJson("/api/admin/imports/{$j2['id']}/preview", ['mapping' => $j2['mapping']])->assertOk()->json('result');
+        $this->assertCount(1, $r['valid']);
+        $this->assertSame('2026-01-05', $r['valid'][0]['account']['due_date']);
+        $msgs = collect($r['errors'])->pluck('message')->implode(' | ');
+        $this->assertStringContainsString('Group "Nowhere" does not exist here', $msgs);
+        $this->assertStringContainsString('Caller ID "GHOST" is not an active employee', $msgs);
+    }
+
     /** SmartDCM lead upload: random allocation inside a group, Caller ID-wise allocation, managers limited to their group. */
     public function test_lead_upload_random_and_caller_id_allocation_with_manager_scope(): void
     {
@@ -1001,13 +1036,18 @@ final class AcceptanceTest extends TestCase
         $this->assertGreaterThanOrEqual(3, count($this->admin('alpha')->getJson('/api/admin/imports')->json('data')));
         // Customers page: random re-assignment of selected customers to chosen callers of a group, and list filters.
         $rIds = $ctx->run($this->a, fn () => Customer::query()->where('customer_ref', 'like', 'R%')->pluck('id')->all());
+        $moving = $ctx->run($this->a, fn () => Customer::query()->whereIn('id', $rIds)->where(fn ($q) => $q->where('assigned_user_id', '!=', $ids['TA1'])->orWhereNull('assigned_user_id'))->count());
         $this->admin('alpha')->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamA, 'user_ids' => [$ids['TA1']]])
-            ->assertOk()->assertJsonPath('updated', 5)->assertJsonPath('per_caller.' . $ids['TA1'], 5);
+            ->assertOk()->assertJsonPath('updated', $moving)->assertJsonPath('per_caller.' . $ids['TA1'], $moving);   // cases already with TA1 are not re-written
+        $this->admin('alpha')->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamA, 'user_ids' => [$ids['TA1']]])
+            ->assertOk()->assertJsonPath('updated', 0);                                                              // same again: no duplicate assignment
         $this->admin('alpha')->getJson('/api/admin/customers?assigned=' . $ids['TA1'] . '&team_id=' . $teamA)->assertOk()->assertJsonCount(5, 'data');
         $this->admin('alpha')->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamA, 'user_ids' => [$ids['TB1']]])->assertStatus(422);
         $asMgr = $this->actingAs($mgr, 'web');   // admin() above switched the signed-in user
         $asMgr->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamB])->assertForbidden();
-        $asMgr->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamA])->assertOk()->assertJsonPath('updated', 5);
+        $upd = $asMgr->postJson('/api/admin/customers/assign', ['customer_ids' => $rIds, 'mode' => 'random', 'team_id' => $teamA])->assertOk()->json('updated');
+        $this->assertLessThanOrEqual(5, $upd);   // random share: cases that land on the employee who already had them are left as they are
+        $this->assertSame(5, $ctx->run($this->a, fn () => Customer::query()->whereIn('id', $rIds)->where('assigned_team_id', $teamA)->whereIn('assigned_user_id', [$ids['TA1'], $ids['TA2']])->count()));
         // Transfer cases: a manager cannot move them to another group; the admin can, with follow-ups and group.
         $ctx->run($this->a, fn () => \App\Models\FollowUp::query()->create(['customer_id' => $rIds[0], 'user_id' => Customer::query()->whereKey($rIds[0])->value('assigned_user_id'), 'due_at' => now()->addDay(), 'status' => 'open']));
         $asMgr->postJson('/api/admin/customers/transfer', ['from_user_id' => $ids['TA1'], 'user_id' => $ids['TB1']])->assertForbidden();
