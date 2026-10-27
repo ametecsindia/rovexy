@@ -43,7 +43,8 @@ return Application::configure(basePath: dirname(__DIR__))
         // Company resolution must precede authentication (users are tenant-scoped), and device/work-session
         // authentication must precede rate limiting so limits are keyed per device/user rather than shared.
         $middleware->prependToPriorityList(before: \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class, prepend: ResolveCompany::class);
-        foreach ([VerifyDeviceSignature::class, AuthenticateDeviceSession::class, AuthenticateWorkSession::class] as $mw) {
+        // CentralOnly then PlatformAccess too (on-prem still 404s first): PlatformAccess switches to the staff guard, so `throttle:N,M` on /api/super never reads a company-console login.
+        foreach ([VerifyDeviceSignature::class, AuthenticateDeviceSession::class, AuthenticateWorkSession::class, \App\Http\Middleware\CentralOnly::class, \App\Http\Middleware\PlatformAccess::class] as $mw) {
             $middleware->prependToPriorityList(before: \Illuminate\Routing\Middleware\ThrottleRequests::class, prepend: $mw);
         }
         $middleware->trustProxies(at: env('TRUSTED_PROXIES') ? explode(',', env('TRUSTED_PROXIES')) : []);

@@ -243,6 +243,16 @@ final class LicensingTest extends TestCase
         $this->artisan('ammp:reminders')->expectsOutputToContain('switched off')->assertSuccessful();
     }
 
+    public function test_super_admin_works_while_also_signed_in_to_a_company_console(): void
+    {
+        // 27 Oct 2026: same browser signed in to /w/<slug>/admin and /super → `throttle:6,1` read the company login → 500.
+        $s = PlatformAdmin::query()->create(['email' => 'super@ametecs.test', 'name' => 'Super', 'password' => 'Staff-password-1', 'role' => 'super', 'status' => 'active']);
+        // Both logins only in the session, as in a browser (actingAs() would switch the default guard and hide the bug).
+        $this->withSession([auth()->guard('web')->getName() => $this->u['admin']->id, auth()->guard('platform')->getName() => $s->id])
+            ->withHeaders(['Referer' => 'http://localhost/'])
+            ->postJson('/api/super/settings/test-mail', ['to' => 'me@ametecs.test'])->assertOk();
+    }
+
     public function test_smtp_settings_are_saved_encrypted_and_applied(): void
     {
         $super = $this->staff('super');
