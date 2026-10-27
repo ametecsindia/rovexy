@@ -64,6 +64,9 @@ final class PlatformAccess
                 return response()->json(['error' => 'forbidden', 'message' => "Your role does not have permission to " . ($request->isMethodSafe() ? 'see' : 'make changes in') . " '{$name}'. Ask a super admin if you need it."], 403);
             }
         }
+        // Super Admin routes act as the staff user: rate limits (throttle:N,M) call $request->user(), which would otherwise
+        // read the company-console login in the same browser session and crash (tenant-scoped User, no company bound).
+        Auth::shouldUse('platform');
         return $next($request);
     }
 }
