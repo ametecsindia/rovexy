@@ -147,6 +147,7 @@ tar -xf "%OUT%\ROVEXY-OnPrem-%VER%.zip" -C "%SSTAGE%" || ( echo [ERROR] Could no
 move "%SSTAGE%\ROVEXY-OnPrem-%VER%\rovexy" "%SSTAGE%\rovexy" >nul || ( echo [ERROR] Unexpected package layout. & goto :fail )
 copy /y "%SSTAGE%\ROVEXY-OnPrem-%VER%\activate-licence.bat" "%SSTAGE%\" >nul
 copy /y "%SSTAGE%\ROVEXY-OnPrem-%VER%\INSTALL.md" "%SSTAGE%\" >nul
+copy /y "%SSTAGE%\ROVEXY-OnPrem-%VER%\CLOUDFLARE-TUNNEL.md" "%SSTAGE%\" >nul
 rmdir /s /q "%SSTAGE%\ROVEXY-OnPrem-%VER%"
 tar -xf "%CACHE%\%PHP_ZIP%" -C "%SSTAGE%\php" || ( echo [ERROR] Could not unpack PHP. & goto :fail )
 if not exist "%SSTAGE%\php\extras\ssl" mkdir "%SSTAGE%\php\extras\ssl"
@@ -170,6 +171,20 @@ rem ---- 8. setup.exe ----------------------------------------------------------
 echo [8/8] Compiling ROVEXY-Setup-%VER%.exe (Inno Setup - takes a few minutes)
 if exist "%OUT%\ROVEXY-Setup-%VER%.exe" del /q "%OUT%\ROVEXY-Setup-%VER%.exe"
 "%ISCC%" /Q "/DAppVersion=%VER%" "/DStage=%SSTAGE%" "/O%OUT%" "%ROOT%\deploy\windows\rovexy-setup.iss" || ( echo [ERROR] Inno Setup could not compile the installer - see above. & goto :fail )
+rem G2: code signing, so Windows SmartScreen shows "Ametecs India" instead of "Unknown publisher". Code-signing
+rem certificates now live on a USB token or in Windows: set ROVEXY_SIGN_THUMBPRINT to the certificate's thumbprint
+rem (certmgr.msc - Personal - Certificates - the certificate - Details - Thumbprint) before running this script.
+if not defined ROVEXY_SIGN_THUMBPRINT goto :unsigned
+set "SIGNTOOL="
+for /f "delims=" %%S in ('where signtool.exe 2^>nul') do if not defined SIGNTOOL set "SIGNTOOL=%%S"
+if not defined SIGNTOOL for /f "delims=" %%S in ('dir /b /s "%ProgramFiles(x86)%\Windows Kits\10\bin\signtool.exe" 2^>nul ^| findstr /i "\\x64\\"') do set "SIGNTOOL=%%S"
+if not defined SIGNTOOL ( echo [ERROR] signtool.exe was not found. Install the Windows SDK ^(Signing Tools for Desktop Apps^). & goto :fail )
+echo       signing ROVEXY-Setup-%VER%.exe
+"%SIGNTOOL%" sign /sha1 %ROVEXY_SIGN_THUMBPRINT% /fd sha256 /tr http://timestamp.digicert.com /td sha256 /d "ROVEXY Setup" "%OUT%\ROVEXY-Setup-%VER%.exe" || ( echo [ERROR] Signing failed - is the USB token plugged in? & goto :fail )
+goto :signed
+:unsigned
+echo [WARN] ROVEXY-Setup-%VER%.exe is NOT signed ^(ROVEXY_SIGN_THUMBPRINT is not set^). Windows will warn "Unknown publisher" on client servers.
+:signed
 php -r "file_put_contents($argv[1] . '.sha256', hash_file('sha256', $argv[1]) . '  ' . basename($argv[1]) . PHP_EOL);" -- "%OUT%\ROVEXY-Setup-%VER%.exe"
 rmdir /s /q "%SSTAGE%" 2>nul
 

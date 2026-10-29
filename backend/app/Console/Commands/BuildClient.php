@@ -14,7 +14,7 @@ use ZipArchive;
  *
  *   ROVEXY-OnPrem-<version>/
  *     rovexy/            the app — exactly the files of an update package (BuildUpdate::files), plus empty storage folders
- *     install.bat/.sh, activate-licence.bat/.sh, env.onprem, INSTALL.md   (from deploy/onprem)
+ *     install.bat/.sh, activate-licence.bat/.sh, env.onprem, INSTALL.md, CLOUDFLARE-TUNNEL.md   (from deploy/onprem)
  *
  * Nothing client-specific is inside: no .env, no app key, no database, no licence, no signing private key. Each client's
  * server makes its own key, database and company at install time, and is activated with its own .lic file, which is
@@ -32,7 +32,7 @@ final class BuildClient extends Command
 
     private const STORAGE = ['storage/app/public', 'storage/app/private', 'storage/framework/cache/data', 'storage/framework/sessions',
         'storage/framework/views', 'storage/logs', 'bootstrap/cache'];
-    private const EXTRAS = ['install.bat', 'install.sh', 'activate-licence.bat', 'activate-licence.sh', 'env.onprem', 'INSTALL.md'];
+    private const EXTRAS = ['install.bat', 'install.sh', 'activate-licence.bat', 'activate-licence.sh', 'env.onprem', 'INSTALL.md', 'CLOUDFLARE-TUNNEL.md'];
 
     public function handle(): int
     {

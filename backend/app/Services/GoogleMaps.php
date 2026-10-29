@@ -12,13 +12,26 @@ use Illuminate\Support\Facades\Log;
 /**
  * Google Maps Platform, server side: Routes API (driving distance / time, route lines, multi-stop order) and
  * Geocoding API (address → pin). Keys are set by an admin in Integrations → Google Maps (stored encrypted per company,
- * nowhere else). The phone only ever gets the map-display key. Results are cached briefly; Google's raw errors are logged.
+ * nowhere else). The phone only ever gets the map-display key (never the server key). Google's raw errors are logged.
+ *
+ * Cost (on-premises clients pay Google themselves, so every call must be necessary): the field map uses BASIC routing
+ * only — DRIVE without live traffic, no more than 10 stops — which is billed as Routes "Essentials" (the largest free
+ * allowance). Two-wheeler routing is billed as "Enterprise" (small free allowance, highest price), so it is kept for
+ * the admin day plan only (PLAN_MODE, one call per employee per day). Without traffic an answer does not change during
+ * the day, so it is cached for hours instead of minutes.
  */
 final class GoogleMaps
 {
-    private const CACHE_SECONDS = 600;   // 10 min: traffic changes, a route from the same spot does not
-    /** Field agents ride bikes: two-wheeler routes and ETAs (Routes API TWO_WHEELER, supported in India). */
-    private const MODE = 'TWO_WHEELER';
+    private const CACHE_SECONDS = 21600;   // 6 h: basic (no-traffic) distances and routes don't change during the day
+    /** Field map on the phone: basic driving distance / time (Routes Essentials). */
+    private const MODE = 'DRIVE';
+    private const PREF = 'TRAFFIC_UNAWARE';
+    /** Admin day plan only (one optimised call per employee per day): two-wheeler routes for bikes (Routes Enterprise). */
+    public const PLAN_MODE = 'TWO_WHEELER';
+    /** Most destinations asked in one road-distance request (older apps ask for 10; only the first 5 are sent to Google). */
+    public const MAX_MATRIX = 5;
+    /** Basic (Essentials) routing allows up to 10 intermediate stops. */
+    public const MAX_INTERMEDIATES = 10;
 
     /** Integrations rows: 'gmaps' = server key (Routes + Geocoding), 'gmaps_web' = optional separate map-display key. */
     public const SERVER = 'gmaps';
@@ -29,10 +42,14 @@ final class GoogleMaps
         return $this->stored(self::SERVER) !== null;
     }
 
-    /** Key the phone's map view loads Maps JavaScript with: the display key, else the server key. */
+    /**
+     * Key the phone's map view loads Maps JavaScript with: the separate map-display key only. There is deliberately no
+     * fallback to the server key — that key can call Routes and Geocoding on the client's Google bill, and anything sent
+     * to a phone can be copied. No display key = the phone shows "Map not set up" (distances and the list still work).
+     */
     public function displayKey(): ?string
     {
-        return $this->stored(self::DISPLAY) ?? $this->stored(self::SERVER);
+        return $this->stored(self::DISPLAY);
     }
 
     /** Admin "Save & test": one uncached Geocoding call with the given key. */
@@ -42,7 +59,7 @@ final class GoogleMaps
         try {
             $g = Http::timeout(10)->connectTimeout(5)->acceptJson()->get('https://maps.googleapis.com/maps/api/geocode/json', ['address' => 'Hyderabad, India', 'key' => $key]);
             $r = Http::timeout(10)->connectTimeout(5)->acceptJson()->withHeaders(['X-Goog-Api-Key' => $key, 'X-Goog-FieldMask' => 'routes.distanceMeters'])
-                ->post('https://routes.googleapis.com/directions/v2:computeRoutes', ['origin' => self::waypoint([17.4485, 78.3908]), 'destination' => self::waypoint([17.4399, 78.4983]), 'travelMode' => self::MODE]);
+                ->post('https://routes.googleapis.com/directions/v2:computeRoutes', ['origin' => self::waypoint([17.4485, 78.3908]), 'destination' => self::waypoint([17.4399, 78.4983]), 'travelMode' => self::MODE, 'routingPreference' => self::PREF]);
         } catch (\Illuminate\Http\Client\HttpClientException) {   // connection / proxy failures
             return ['ok' => false, 'detail' => 'The server could not reach Google (internet / firewall).'];
         }
@@ -75,8 +92,9 @@ final class GoogleMaps
      */
     public function matrix(array $origin, array $dests): array
     {
+        $dests = array_slice(array_values($dests), 0, self::MAX_MATRIX);
         $origin = self::round($origin);
-        $keys = array_map(fn ($d) => 'maps:mx2:' . $this->pref() . ':' . implode(',', $origin) . ':' . implode(',', self::round($d)), $dests);
+        $keys = array_map(fn ($d) => 'maps:mx3:' . self::MODE . ':' . implode(',', $origin) . ':' . implode(',', self::round($d)), $dests);
         $out = [];
         $miss = [];
         foreach ($keys as $i => $k) {
@@ -87,7 +105,7 @@ final class GoogleMaps
             $rows = $this->post('/distanceMatrix/v2:computeRouteMatrix', [
                 'origins' => [['waypoint' => self::waypoint($origin)]],
                 'destinations' => array_map(fn ($i) => ['waypoint' => self::waypoint($dests[$i])], $miss),
-                'travelMode' => self::MODE, 'routingPreference' => $this->pref(),
+                'travelMode' => self::MODE, 'routingPreference' => self::PREF,
             ], 'originIndex,destinationIndex,distanceMeters,duration,condition');
             $got = [];
             foreach ($rows as $e) {   // proto3 JSON leaves out zero values, so index 0 arrives as "missing"
@@ -113,7 +131,8 @@ final class GoogleMaps
      */
     public function route(array $origin, array $stops, bool $optimize): array
     {
-        $key = 'maps:rt2:' . $this->pref() . ':' . sha1(json_encode([self::round($origin), $stops, $optimize]));
+        $stops = array_slice(array_values($stops), 0, self::MAX_INTERMEDIATES + 1);
+        $key = 'maps:rt3:' . self::MODE . ':' . sha1(json_encode([self::round($origin), $stops, $optimize]));
         if (($hit = Cache::get($key)) !== null) return $hit;
 
         $idx = array_keys($stops);
@@ -123,7 +142,7 @@ final class GoogleMaps
             $last = array_search(max($far), $far, true);
         }
         $between = array_values(array_filter($idx, fn ($i) => $i !== $last));
-        $body = ['origin' => self::waypoint($origin), 'destination' => self::waypoint($stops[$last]), 'travelMode' => self::MODE, 'routingPreference' => $this->pref()];
+        $body = ['origin' => self::waypoint($origin), 'destination' => self::waypoint($stops[$last]), 'travelMode' => self::MODE, 'routingPreference' => self::PREF];
         if ($between) {
             $body['intermediates'] = array_map(fn ($i) => self::waypoint($stops[$i]), $between);
             if ($optimize) $body['optimizeWaypointOrder'] = true;
@@ -233,11 +252,6 @@ final class GoogleMaps
     {
         return $this->stored(self::SERVER)
             ?? throw new DomainException('maps_not_configured', 'Driving distances are not set up yet (admin: Integrations → Google Maps). Straight-line distance is shown instead.');
-    }
-
-    private function pref(): string
-    {
-        return config('ammp.maps.traffic_aware') ? 'TRAFFIC_AWARE' : 'TRAFFIC_UNAWARE';
     }
 
     private static function waypoint(array $p): array

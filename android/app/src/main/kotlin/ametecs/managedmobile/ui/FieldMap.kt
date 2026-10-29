@@ -114,15 +114,15 @@ import java.time.format.DateTimeFormatter
  * API use is kept small on purpose:
  *  1. Straight-line distance to every case is worked out on the phone (free) and used for the radius filter and to
  *     pick the ROAD_CANDIDATES nearest.
- *  2. Road distance / time is asked from the server (Google Routes, one matrix call) for those few only, again only
- *     after moving RECALC_METERS or when the employee taps Refresh; the server also caches answers for 10 minutes.
- *  3. A route line is asked only when the employee taps Route / Find nearest / Show route.
+ *  2. Road distance / time is asked from the server (Google Routes, one basic matrix call) for those few only, and
+ *     ONLY when the employee taps Find nearest or Refresh — never by itself while moving, and never while the map is
+ *     not on screen (each client pays Google directly; G4 cost rules). The server also caches answers for hours.
+ *  3. A route line is asked only when the employee taps Route / Find nearest / Show route / a customer.
  * Positions come from the work-session tracker (LocationService) plus a fresh fix on open / Refresh — no second tracker.
  */
 
 private val RADII = listOf(0 to "All", 1 to "1 km", 2 to "2 km", 5 to "5 km", 10 to "10 km", 25 to "25 km")
-private const val ROAD_CANDIDATES = 10      // road distance asked for the nearest N by straight line
-private const val RECALC_METERS = 300f      // re-ask road distances after moving this far
+private const val ROAD_CANDIDATES = 5       // road distance asked (on tap only) for the nearest N by straight line
 private const val FAR_METERS = 300_000f     // a pin this far from the employee is probably wrong (swapped lat/lng, bad file)
 private const val MAX_STOPS = 10            // Google Maps navigation: 9 waypoints + destination
 private const val ARRIVE_METERS = 100f      // "Check in" appears this close to the pin (server allows +50 m GPS drift)
@@ -179,7 +179,6 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
     var radiusKm by remember { mutableIntStateOf(0) }
     var locState by remember { mutableStateOf(if (fix != null) "ok" else "loading") }   // loading | ok | denied | unavailable
     var road by remember { mutableStateOf<Map<Long, Road?>>(emptyMap()) }
-    var roadFrom by remember { mutableStateOf<Location?>(null) }
     var roadNote by remember { mutableStateOf<String?>(null) }
     var roadBusy by remember { mutableStateOf(false) }
     var tick by remember { mutableIntStateOf(0) }
@@ -232,33 +231,25 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
     val sel = selected?.let { byId[it] ?: pinned.firstOrNull { r -> r.c.id == it }?.let { r -> Near(r, fix?.let { f -> straight(f, r) }, road[r.c.id]) } }
     val candidates = remember(inRadius) { inRadius.sortedBy { it.second ?: Float.MAX_VALUE }.take(ROAD_CANDIDATES).map { it.first.c.id } }
 
-    // ── road distances: only for the nearest few; again only after moving or on Refresh ──
+    // ── road distances: only for the nearest few, and only when the employee taps Find nearest / Refresh ──
     suspend fun loadRoad(f: Location, ids: List<Long>, reset: Boolean) {
         if (ids.isEmpty()) return
         roadBusy = true
         try {
             val res = vm.roadDistances(f.latitude, f.longitude, ids).mapValues { (_, v) -> v?.let { Road(it.first, it.second) } }
             road = (if (reset) emptyMap() else road) + res
-            roadFrom = f
             roadNote = null
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             roadNote = friendly(e)
         } finally { roadBusy = false }
     }
-    // Keyed on an anchor that moves only after RECALC_METERS, not on every GPS update: keyed on the raw fix (2–4 s while
-    // the map is open) each update cancelled the request in flight and, until one finished, sent it again — on a slow
-    // link the distances never arrived. The candidate SET, not its order (which jitters with GPS), decides a re-ask.
-    var anchor by remember { mutableStateOf<Location?>(null) }
-    LaunchedEffect(fix) { fix?.let { f -> if (anchor.let { it == null || it.distanceTo(f) > RECALC_METERS }) anchor = f } }
-    var lastTick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(anchor, candidates.toSet(), tick) {
-        val f = anchor ?: return@LaunchedEffect
-        val forced = tick != lastTick
-        lastTick = tick
-        val from = if (forced) fix ?: f else f            // Refresh: from where the employee is now
-        val reset = forced || roadFrom.let { it == null || it.distanceTo(f) > RECALC_METERS }
-        loadRoad(from, if (reset) candidates else candidates.filter { it !in road }, reset)
+    // Refresh (tick) is the only trigger: no request on open, on moving, or on a filter change (straight-line distance
+    // is shown until then, free). Keyed on tick alone, so GPS updates can't cancel or repeat a request in flight.
+    LaunchedEffect(tick) {
+        if (tick == 0) return@LaunchedEffect
+        val f = fix ?: return@LaunchedEffect
+        loadRoad(f, candidates, reset = true)
     }
 
     // ── camera ──
@@ -508,7 +499,7 @@ private fun MapProblem(err: String?, origin: String, modifier: Modifier, stage: 
             "google-loaded" -> "Google Maps downloaded, checking the key"; "map-creating" -> "drawing the map"; else -> it } }
         err.startsWith("timeout:") -> "Map could not load" to "Stopped at step “${err.removePrefix("timeout:")}”. Check the internet connection and the Google key, then try again."
         err.startsWith("js:") -> "Map could not load" to "Page error: ${err.removePrefix("js:")}"
-        err == "nokey" -> "Map not set up" to "Your admin adds the Google Maps key in the admin console: Integrations → Google Maps."
+        err == "nokey" -> "Map not set up" to "Your admin adds the map display key in the admin console: Integrations → Google Maps."
         err == "offline" || err == "timeout" -> "Map could not load" to "Check the internet connection and try again."
         err == "g:ApiNotActivatedMapError" || err == "g:ApiTargetBlockedMapError" -> "Map blocked by Google" to "The key is not allowed to use “Maps JavaScript API”. Admin: enable it in Google Cloud and add it to the key's API restrictions."
         err == "g:RefererNotAllowedMapError" -> "Map blocked by Google" to "The key's website restriction doesn't include this server. Admin: add ${origin.trimEnd('/')}/* to the key's websites (or remove that restriction)."

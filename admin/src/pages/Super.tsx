@@ -869,13 +869,15 @@ function Settings() {
   const [f, setF] = useState<any | null>(null);
   const [saved, setSaved] = useState(false);
   const a = useAction();
-  useEffect(() => { if (s.data) setF({ ...s.data, razorpay_key_secret: '', razorpay_webhook_secret: '', mail_password: '' }); }, [s.data]);
+  useEffect(() => { if (s.data) setF({ ...s.data, razorpay_key_secret: '', razorpay_webhook_secret: '', mail_password: '', fcm_service_account_json: '' }); }, [s.data]);
+  const [pushTest, setPushTest] = useState<any>(null);
+  const pt = useAction();
   const [testTo, setTestTo] = useState('');
   const [tested, setTested] = useState('');
   const t = useAction();
   const set = (k: string, v: string) => { setSaved(false); setF((x: any) => ({ ...x, [k]: v })); };
   const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days',
-    'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
+    'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
     'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'setup_on_cloud', 'amc_pct', 'quote_validity_days'];
   const [clear, setClear] = useState<string[]>([]);
   const submit = (e: FormEvent) => { e.preventDefault(); void a.run(async () => { s.setData(await put('/settings', { ...Object.fromEntries(keys.map((k) => [k, f[k]])), clear_secrets: clear })); setClear([]); setSaved(true); toast('Settings saved'); }); };
@@ -934,6 +936,21 @@ function Settings() {
           <p className="muted small">Save the settings first — the test uses what is saved.</p>
           <ErrorBox error={t.error} />
           {tested && <Notice tone="ok">Test e-mail sent to {tested}. Check the inbox (and spam folder).</Notice>}
+        </Card>
+        <Card title="Push notifications (Firebase)">
+          <p className="muted small">Instant "please sync" pings to phones (no customer data). Every install uses Ametecs's Firebase project, because the Play Store app is built with it. On-premises installs receive this key automatically with their licence check-in — nothing goes in their .env. In Google Cloud give this service account only the <b>Firebase Cloud Messaging API Admin</b> role.</p>
+          {s.data.push?.set
+            ? <p className="small">Saved: project <b>{s.data.push.project_id}</b> · {s.data.push.client_email} <span className="muted">({s.data.push.source === 'env' ? 'from the old backend/.env setup — paste it here to move it' : 'stored encrypted'})</span></p>
+            : <Notice tone="warn">No Firebase key yet. Phones still sync by checking every few minutes, just not instantly.</Notice>}
+          <Field label="Service-account key (.json)" hint="Firebase → Project settings → Service accounts → Generate new private key. Paste the whole file; it is never shown again. Leave blank to keep the saved one.">
+            <textarea rows={4} value={f.fcm_service_account_json ?? ''} onChange={(e) => set('fcm_service_account_json', e.target.value)} placeholder='{ "type": "service_account", "project_id": "…", … }' spellCheck={false} />
+          </Field>
+          {removeBox('fcm_service_account_json')}
+          <div className="row" style={{ gap: 10 }}>
+            <button type="button" className="secondary" disabled={pt.busy || !s.data.push?.set} onClick={() => void pt.run(async () => setPushTest(await post('/settings/test-push')))}>{pt.busy ? 'Testing…' : 'Test key'}</button>
+          </div>
+          <ErrorBox error={pt.error} />
+          {pushTest && <Notice tone={pushTest.ok ? 'ok' : 'bad'}>{pushTest.detail}</Notice>}
         </Card>
         <Card title="Website text">
           <p className="muted small">Leave blank to use the built-in wording.</p>

@@ -1226,7 +1226,6 @@ final class AcceptanceTest extends TestCase
     public function test_field_map_distances_route_geocode_and_pin_update(): void
     {
         $this->appOnlyMandatory();
-        config(['ammp.maps.traffic_aware' => false]);
         $ids = app(CurrentCompany::class)->run($this->a, function () {
             $emp = $this->users['alpha']['emp'];
             Customer::query()->where('customer_ref', 'C1')->update(['lat' => 17.4612, 'lng' => 78.3549]);
@@ -1253,7 +1252,8 @@ final class AcceptanceTest extends TestCase
         $this->assertNotSame('test-key', \Illuminate\Support\Facades\DB::table('integration_connections')->where('system', 'gmaps')->value('api_key'));   // encrypted at rest
         $m->work('GET', '/api/mobile/v1/field/config')->assertOk()->assertJsonPath('map_key', 'web-key')->assertJsonPath('routing', true);
         $this->admin('alpha')->putJson('/api/admin/integrations/maps', ['remove_display_key' => true])->assertOk();
-        $m->work('GET', '/api/mobile/v1/field/config')->assertJsonPath('map_key', 'test-key');
+        // G13: no display key → the phone gets NO key (never the server key, which can call Routes/Geocoding).
+        $m->work('GET', '/api/mobile/v1/field/config')->assertJsonPath('map_key', null)->assertJsonPath('routing', true);
         \Illuminate\Support\Facades\Http::swap(new \Illuminate\Http\Client\Factory());
 
         // Case list carries the pin only when it is usable, plus why it is missing.
@@ -1282,7 +1282,7 @@ final class AcceptanceTest extends TestCase
         // Second ask from ~the same spot is served from the cache (no new Google call).
         $m->work('POST', '/api/mobile/v1/field/distances', ['lat' => 17.4401, 'lng' => 78.3501, 'customer_ids' => [$ids['c1']]])->assertOk()->assertJsonPath('items.0.distance_m', 2300);
         \Illuminate\Support\Facades\Http::assertSentCount(1);   // (the admin key tests above used a separate fake)
-        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => $req->hasHeader('X-Goog-Api-Key', 'test-key') && $req['routingPreference'] === 'TRAFFIC_UNAWARE');
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => $req->hasHeader('X-Goog-Api-Key', 'test-key') && $req['routingPreference'] === 'TRAFFIC_UNAWARE' && $req['travelMode'] === 'DRIVE');
 
         // Multi-stop route: farthest stop (C1) is the end, the polyline is decoded server-side, skipped cases reported.
         $rt = $m->work('POST', '/api/mobile/v1/field/route', ['lat' => 17.44, 'lng' => 78.35, 'customer_ids' => [$ids['c1'], $ids['near'], $ids['zero']], 'optimize' => true])->assertOk();
@@ -1290,6 +1290,9 @@ final class AcceptanceTest extends TestCase
         $this->assertSame([[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]], $rt->json('points'));
         $this->assertSame(1020, $rt->json('duration_s'));
         $this->assertSame([$ids['zero']], $rt->json('skipped'));
+        // G4: field-map routes are basic (Routes Essentials): DRIVE, no live traffic — never two-wheeler.
+        \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'directions') && $req['travelMode'] === 'DRIVE' && $req['routingPreference'] === 'TRAFFIC_UNAWARE');
+        \Illuminate\Support\Facades\Http::assertNotSent(fn ($req) => str_contains($req->url(), 'routes.googleapis.com') && ($req['travelMode'] ?? null) === 'TWO_WHEELER');
 
         // Address → suggested pin (not saved), then the employee saves it; someone else's case is refused.
         $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/geocode")->assertOk()->assertJsonPath('lat', 17.44)->assertJsonPath('precise', true);

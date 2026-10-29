@@ -115,6 +115,7 @@ final class LicenceClient
             $p = LicenceSigner::verify($j['licence'] ?? null);
             if ($p && ($p['key'] ?? null) === $row->licence_key && ($p['fingerprint'] ?? null) === self::fingerprint()) {
                 $row->fill(['token' => $j['licence'], 'source' => 'online', 'status' => 'active', 'last_checked_at' => now(), 'unreachable_since' => null, 'last_error' => null])->save();
+                \App\Services\PushCredential::receiveFromLicence($j['push'] ?? null);   // G3: Firebase credential, stored encrypted
                 return $row;
             }
             return $this->outage($row, 'The licence server reply could not be verified (wrong public key or tampered reply).');

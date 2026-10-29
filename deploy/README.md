@@ -54,7 +54,7 @@ SESSION_SECURE_COOKIE=true
 DB_CONNECTION=mysql / DB_DATABASE=rovexy / DB_USERNAME=rovexy / DB_PASSWORD=…
 CACHE_STORE=redis / QUEUE_CONNECTION=redis / SESSION_DRIVER=redis
 BROADCAST_CONNECTION=reverb / REVERB_HOST=rovexy.app / REVERB_PORT=443 / REVERB_SCHEME=https (+ app id/key/secret)
-PUSH_DRIVER=fcm / FCM_PROJECT_ID=… / FCM_SERVICE_ACCOUNT_JSON_PATH=/etc/rovexy/fcm-sa.json
+PUSH_DRIVER=fcm   (Firebase key: Super Admin → Settings → Push notifications; on-prem installs receive it with the licence. Old FCM_* lines still work but are no longer needed)
 TELEPHONY_DRIVER=freeswitch   (never "simulator" — production refuses to start with it)
 CALLING_ROUTE=sim
 LICENCE_MODE=central

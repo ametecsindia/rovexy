@@ -536,6 +536,14 @@ final class ConsoleController extends Controller
         return response()->json(PlatformSettings::forConsole() + ['webhook_url' => url('/api/webhooks/razorpay')]);
     }
 
+    /** Push notifications "Test": asks Google for a Firebase access token with the stored credential (G3). */
+    public function testPush()
+    {
+        $res = \App\Services\PushCredential::test();
+        PlatformAudit::record($res['ok'] ? 'settings.test_push' : 'settings.test_push_failed', null, ['detail' => $res['detail']]);
+        return response()->json($res);
+    }
+
     /** Sends one e-mail right now with the saved SMTP settings and reports the server's exact error if it fails. */
     public function testMail(Request $r)
     {
@@ -566,10 +574,15 @@ final class ConsoleController extends Controller
             'quote_validity_days' => 'integer|min:1|max:90',
             'clear_secrets' => 'array', 'clear_secrets.*' => Rule::in(PlatformSettings::SECRETS),
             'mail_host' => ['nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9.-]+$/'], 'mail_port' => 'nullable|integer|min:1|max:65535', 'mail_encryption' => 'in:tls,ssl,none',
-            'mail_username' => 'nullable|string|max:190', 'mail_password' => 'nullable|string|max:300', 'mail_from_address' => 'nullable|email|max:190', 'mail_from_name' => 'nullable|string|max:100'],
+            'mail_username' => 'nullable|string|max:190', 'mail_password' => 'nullable|string|max:300', 'mail_from_address' => 'nullable|email|max:190', 'mail_from_name' => 'nullable|string|max:100',
+            'fcm_service_account_json' => 'nullable|string|max:12000'],
             ['mail_host.regex' => 'SMTP server: a host name like smtp.gmail.com (no http:// or spaces).']);
+        if (filled($d['fcm_service_account_json'] ?? null)) {
+            \App\Services\PushCredential::store($d['fcm_service_account_json'], 'settings');   // checked first: a bad file is refused (422)
+        }
+        unset($d['fcm_service_account_json']);
         foreach ($d['clear_secrets'] ?? [] as $k) {
-            PlatformSettings::set($k, '');   // "Remove" ticked in the console
+            $k === \App\Services\PushCredential::SETTING ? \App\Services\PushCredential::store(null, 'settings') : PlatformSettings::set($k, '');   // "Remove" ticked in the console
         }
         unset($d['clear_secrets']);
         foreach ($d as $k => $v) {

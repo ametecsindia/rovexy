@@ -55,6 +55,29 @@ final class WindowsInstallerHelperTest extends TestCase
             'cert' => $this->tmp($selfPem, '.crt'), 'key' => $this->tmp($keyPem, '.key')])));
     }
 
+    public function test_cloudflare_tunnel_mode_listens_on_this_computer_only_and_trusts_only_local_proxies(): void
+    {
+        $app = sys_get_temp_dir() . '/rx-tunnel-' . uniqid();
+        @mkdir($app, 0755, true);
+        $e = $w = [];
+        \checkServer(['tls' => 'tunnel', 'domain' => 'rovexy.client.test'], $e, $w);
+        $this->assertSame([[], []], [$e, $w]);   // no DNS or port 80/443 checks in tunnel mode
+        \checkServer(['tls' => 'tunnel', 'domain' => 'https://bad'], $e, $w);
+        $this->assertNotEmpty($e);
+
+        \writeCaddyfile($app, 'rovexy.client.test', 'tunnel', '');
+        $c = (string) file_get_contents("{$app}/caddy/Caddyfile");
+        $this->assertTrue(\isTunnel($app));
+        $this->assertStringContainsString("http://:" . \TUNNEL_PORT . " {\n\tbind 127.0.0.1", $c);
+        $this->assertStringContainsString('auto_https off', $c);
+        $this->assertStringContainsString('trusted_proxies static 127.0.0.1/32 ::1/128', $c);
+        $this->assertStringContainsString('client_ip_headers Cf-Connecting-Ip X-Forwarded-For', $c);
+        $this->assertStringNotContainsString('tls ', $c);   // no certificate on this server
+
+        \writeCaddyfile($app, 'rovexy.client.test', 'le', 'it@client.test');
+        $this->assertFalse(\isTunnel($app));
+    }
+
     private function tmp(string $contents, string $ext = ''): string
     {
         $f = tempnam(sys_get_temp_dir(), 'rx') . $ext;

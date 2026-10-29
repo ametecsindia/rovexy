@@ -136,11 +136,9 @@ return [
         'missing_after_minutes' => 30,                          // reconciliation alert threshold
     ],
 
-    // Field map (Google Maps Platform). The API keys are set in the admin console (Integrations → Google Maps), not here.
-    'maps' => [
-        // true = ETAs include live traffic (Routes "Advanced" billing); false = cheaper "Essentials" ETAs without traffic.
-        'traffic_aware' => (bool) env('GOOGLE_MAPS_TRAFFIC_AWARE', true),
-    ],
+    // Field map (Google Maps Platform): keys are set in the admin console (Integrations → Google Maps). Routing is
+    // always basic (no live traffic, Routes "Essentials") to keep each client's Google bill at its free allowance —
+    // see App\Services\GoogleMaps. There is no .env switch for it.
 
     'push' => [
         // 'fcm' | 'log' (development only; refuses in production)

@@ -97,6 +97,7 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::get('settings', [$c, 'settings'])->middleware('platform:settings');
     Route::put('settings', [$c, 'saveSettings'])->middleware('platform:settings');
     Route::post('settings/test-mail', [$c, 'testMail'])->middleware(['platform:settings', 'throttle:6,1']);
+    Route::post('settings/test-push', [$c, 'testPush'])->middleware(['platform:settings', 'throttle:6,1']);
     Route::get('audit', [$c, 'audit'])->middleware('platform:audit');
 
     // Accounts (Accountant panel at /accounts; super admins too). Ametecs' own books.

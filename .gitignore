@@ -2,3 +2,15 @@
 /build/
 /dist/
 play-upload/*.aab
+
+# G17: not kept in the code repository (stale copies, big archives, patch files, stray files)
+/_src/
+/copy-src.bat
+*.zip
+!/brand/**/*.zip
+*.patch
+/main)
+/origin)
+/backend/origin)
+/backend/save()
+/backend/test-output.txt

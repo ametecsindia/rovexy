@@ -4,10 +4,12 @@ This package is the same for every company. Your company's licence is a separate
 
 ## Windows server: ROVEXY-Setup.exe (recommended)
 Everything below (PHP, web server, background tasks) is done by **`ROVEXY-Setup-x.y.exe`**. Before you start you need:
-- **Windows Server 2016 or newer** (or Windows 10/11), 64-bit, signed in as an administrator. Ports **80 and 443** free (no IIS / Apache on them).
-- An **internet name** for the server, e.g. `rovexy.yourcompany.com`, whose DNS points to the server. The ROVEXY phone app only
-  connects over https with a publicly trusted certificate, so one of:
-  - **Let's Encrypt** (free, automatic): ports 80 and 443 must be reachable from the internet; or
+- **Windows Server 2016 or newer** (or Windows 10/11), 64-bit, signed in as an administrator.
+- An **internet name** for the server, e.g. `rovexy.yourcompany.com`. The ROVEXY phone app only connects over https with a
+  publicly trusted certificate, so one of:
+  - **Cloudflare Tunnel (recommended)**: the domain is in the company's own Cloudflare account; Cloudflare provides https,
+    **no ports are opened** and no certificate is needed on the server. See **`CLOUDFLARE-TUNNEL.md`** (next to setup).
+  - **Let's Encrypt** (free, automatic): the name's DNS points to the server, ports 80 and 443 free and reachable from the internet; or
   - **your own certificate** for that name: a `.pfx` (with its password) or a `.crt`/`.pem` + `.key`, from a public certificate authority.
 - **MySQL 5.7+ / MariaDB 10.3+** and a user with all rights on the ROVEXY database (setup creates the database if the user may).
   For automatic backups before updates, the MySQL client tools (`mysqldump`) should be on the server.
@@ -21,6 +23,9 @@ status — with **Choose licence file…** if the licence is not active yet. Des
 
 - No licence file yet? ROVEXY runs in evaluation mode (14 days, 10 users). Send the Server ID to Ametecs, then add the file in
   the console (Plan & licence → Import & activate) or with *Choose licence file…* by running setup again.
+- **Backups:** every night at 00:30 the database is backed up to `C:\ROVEXY\backups` (the newest 7 are kept). The console's
+  *System health* page shows when the last backup ran. Copy that folder to another disk or computer regularly — a backup on
+  the same disk does not survive the disk failing.
 - **Upgrade:** run the newer `ROVEXY-Setup-x.y.exe`. It backs up the database to `C:\ROVEXY\backups`, keeps all settings and
   data, and updates the program. **Uninstall** (Windows Settings → Apps) removes the program and services but keeps
   `rovexy\.env`, `rovexy\storage`, `data`, `backups`, `logs` and the database.

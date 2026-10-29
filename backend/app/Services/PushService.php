@@ -4,10 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
-use App\Domain\Amapi\ServiceAccountJwt;
 use App\Models\ManagedDevice;
 use App\Models\PushRegistration;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -28,7 +26,7 @@ final class PushService
         if ($reg === null) {
             return false;
         }
-        $driver = config('ammp.push.driver');
+        $driver = self::driver();
         if ($driver === 'log') {
             if (app()->isProduction()) {
                 throw new \RuntimeException('PUSH_DRIVER=log is not allowed in production.');
@@ -36,9 +34,12 @@ final class PushService
             Log::info('[DEV PUSH — NOT SENT] sync ping', ['device_id' => $device->id, 'reason' => $reason]);
             return true;
         }
+        if (!PushCredential::ready()) {
+            return false;   // no Firebase credential yet (e.g. licence not checked in): the app syncs by polling
+        }
         try {
-            $resp = Http::withToken($this->fcmToken())->timeout(5)->post(
-                'https://fcm.googleapis.com/v1/projects/' . config('ammp.push.fcm_project_id') . '/messages:send',
+            $resp = Http::withToken(PushCredential::accessToken())->timeout(5)->post(
+                'https://fcm.googleapis.com/v1/projects/' . PushCredential::projectId() . '/messages:send',
                 ['message' => [
                     'token' => $reg->token,
                     'data' => ['type' => 'sync', 'reason' => $reason],   // internal destination chosen by the app, never a URL
@@ -58,14 +59,12 @@ final class PushService
         return false;
     }
 
-    private function fcmToken(): string
+    /**
+     * 'fcm' as soon as a Firebase credential is stored (Super Admin / licence, G3) — no .env change needed; otherwise the
+     * old PUSH_DRIVER from .env ('log' in development).
+     */
+    public static function driver(): string
     {
-        return Cache::remember('fcm:access_token', 3000, function () {
-            $sa = json_decode((string) file_get_contents((string) config('ammp.push.fcm_service_account_json')), true, flags: JSON_THROW_ON_ERROR);
-            $jwt = ServiceAccountJwt::assertion($sa['client_email'], $sa['private_key'], time(), 'https://www.googleapis.com/auth/firebase.messaging');
-            return Http::asForm()->post('https://oauth2.googleapis.com/token', [
-                'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer', 'assertion' => $jwt,
-            ])->throw()->json('access_token');
-        });
+        return PushCredential::ready() ? 'fcm' : (string) config('ammp.push.driver');
     }
 }

@@ -56,6 +56,15 @@ Schedule::call(function () {
 
 Schedule::command('ammp:reminders')->hourly()->name('platform:reminders')->withoutOverlapping();
 
+// G20: nightly database backup on every install (7 copies kept; result shown in System health).
+Artisan::command('rovexy:backup', function () {
+    $r = \App\Services\NightlyBackup::run();
+    $r['ok'] ? $this->info("Backup saved: {$r['file']} (" . number_format($r['bytes'] / 1048576, 1) . ' MB) in ' . \App\Services\NightlyBackup::dir())
+        : $this->error('Backup failed: ' . $r['error']);
+    return $r['ok'] ? 0 : 1;
+})->purpose('Back up the database now (also runs every night at 00:30)');
+Schedule::command('rovexy:backup')->dailyAt('00:30')->name('backup:nightly')->withoutOverlapping();
+
 // On-prem install: check the licence with the licence server every night (keeps the last verdict when it can't be reached).
 Schedule::call(fn () => app(\App\Services\Licensing\LicenceClient::class)->check())
     ->dailyAt('01:00')->name('licence:check')->withoutOverlapping()->when(fn () => \App\Services\Licensing\LicenceClient::isClient());

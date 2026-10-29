@@ -47,7 +47,11 @@ return Application::configure(basePath: dirname(__DIR__))
         foreach ([VerifyDeviceSignature::class, AuthenticateDeviceSession::class, AuthenticateWorkSession::class, \App\Http\Middleware\CentralOnly::class, \App\Http\Middleware\PlatformAccess::class] as $mw) {
             $middleware->prependToPriorityList(before: \Illuminate\Routing\Middleware\ThrottleRequests::class, prepend: $mw);
         }
-        $middleware->trustProxies(at: env('TRUSTED_PROXIES') ? explode(',', env('TRUSTED_PROXIES')) : []);
+        // This computer (127.0.0.1 / ::1) is always a trusted proxy (G23): on-prem installs published through Cloudflare
+        // Tunnel get https and the visitor's real IP (for audit and rate limits) from the forwarded headers that cloudflared
+        // and the local web server pass on. Only a program on this same server can connect from loopback, so this is safe;
+        // servers where PHP sees the real client address (nginx + php-fpm, Caddy with its own certificate) are unaffected.
+        $middleware->trustProxies(at: array_values(array_unique(array_filter(['127.0.0.1', '::1', ...explode(',', (string) env('TRUSTED_PROXIES'))]))));
     })
     ->withExceptions(function (Exceptions $exceptions) {
         $exceptions->render(function (DomainException $e, Request $request) {

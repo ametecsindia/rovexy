@@ -51,6 +51,7 @@ Source: "{#Stage}\winsw\WinSW.exe"; DestDir: "{app}\winsw"; Flags: ignoreversion
 Source: "{#Stage}\installer\*"; DestDir: "{app}\installer"; Flags: ignoreversion
 Source: "{#Stage}\activate-licence.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\INSTALL.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#Stage}\CLOUDFLARE-TUNNEL.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#Stage}\rovexy.ico"; DestDir: "{app}"; Flags: ignoreversion
 ; used by the wizard before anything is installed (PHP for the checks, Visual C++ runtime that PHP needs)
 Source: "{#Stage}\probe\*"; DestDir: "{tmp}\probe"; Flags: dontcopy
@@ -246,6 +247,7 @@ begin
   case TlsPage.SelectedValueIndex of
     0: Add(Result, 'tls=le');
     1: Add(Result, 'tls=file');
+    3: Add(Result, 'tls=tunnel');
   else
     Add(Result, 'tls=local');
   end;
@@ -296,11 +298,12 @@ begin
   TlsPage.Add('Let''s Encrypt - free and automatic (the name must point to this server, ports 80 and 443 open from the internet)');
   TlsPage.Add('Our own certificate file (.pfx, or .crt / .pem with its .key)');
   TlsPage.Add('No domain name - only on this computer (https://localhost:8443). The phone app cannot connect in this mode.');
-  TlsPage.SelectedValueIndex := 0;
+  TlsPage.Add('Cloudflare Tunnel (recommended) - our domain in our own Cloudflare account; no open ports and no certificate on this server');
+  TlsPage.SelectedValueIndex := 3;
 
   ServerPage := CreateInputQueryPage(TlsPage.ID, 'Server name',
     'The https address staff and phones use for this server.',
-    'Internet name of this server - its DNS record must point to this server. Example: rovexy.yourcompany.com');
+    'Internet name of this server. Example: rovexy.yourcompany.com. With Cloudflare Tunnel: the name in your Cloudflare account (no DNS record to this server needed).');
   ServerPage.Add('Server name (no https://):', False);
   ServerPage.Add('E-mail for certificate notices (Let''s Encrypt, optional):', False);
 

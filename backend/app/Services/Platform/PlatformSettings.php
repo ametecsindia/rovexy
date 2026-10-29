@@ -52,9 +52,11 @@ final class PlatformSettings
         'trial_verify_email' => '1',     // no longer read: trials and website purchases always confirm the e-mail with a code
         // security
         'staff_mfa_required' => '0',     // 1 = every staff / accountant sign-in needs a 2-step code (first sign-in enrols)
+        // push notifications (G3): where the Firebase credential came from — 'settings' (pasted here) | 'licence'
+        'fcm_source' => '',
     ];
 
-    public const SECRETS = ['razorpay_key_secret', 'razorpay_webhook_secret', 'mail_password'];
+    public const SECRETS = ['razorpay_key_secret', 'razorpay_webhook_secret', 'mail_password', 'fcm_service_account_json'];
 
     public static function get(string $key, ?string $default = null): ?string
     {
@@ -82,6 +84,7 @@ final class PlatformSettings
             $out[$k . '_set'] = DB::table('platform_settings')->where('key', $k)->whereNotNull('value')->where('value', '!=', '')->exists();
         }
         $out['mail_configured'] = self::mailReady();
+        $out['push'] = \App\Services\PushCredential::summary();
         return $out;
     }
 

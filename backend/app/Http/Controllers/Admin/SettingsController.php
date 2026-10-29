@@ -130,11 +130,13 @@ final class SettingsController extends Controller
             'telephony' => ['route' => \App\Services\CallService::routes()[0] ?? 'none', 'routes' => \App\Services\CallService::routes(),
                 'driver' => rescue(fn () => $tm->adapter()->name(), config('ammp.telephony.driver'), false), 'simulated' => config('ammp.telephony.driver') === 'simulator'] + ($tel['ok'] ? $tel['detail'] : $tel),
             'management' => ['driver' => config('ammp.management.driver'), 'configured' => config('ammp.management.driver') === 'amapi' && (bool) config('ammp.management.amapi.service_account_json')],
-            'push' => ['driver' => config('ammp.push.driver'), 'simulated' => config('ammp.push.driver') === 'log'],
+            'push' => ['driver' => \App\Services\PushService::driver(), 'simulated' => \App\Services\PushService::driver() === 'log',
+                'configured' => \App\Services\PushCredential::ready(), 'source' => \App\Services\PushCredential::source()],
             'websocket' => ['driver' => config('broadcasting.default'), 'host' => config('broadcasting.connections.reverb.options.host')],
             'turn' => ['configured' => (bool) config('ammp.media.turn_secret') && config('ammp.media.turn_urls') !== []],
             'ffmpeg' => $check(fn () => Process::run(['ffmpeg', '-version'])->successful() ? 'available' : throw new \RuntimeException('not found')),
             'recordings_storage' => $check(fn () => Storage::disk(config('ammp.recordings.disk'))->put('.health', (string) time()) ? 'writable' : 'not writable'),
+            'nightly_backup' => \App\Services\NightlyBackup::status(),
         ]);
     }
 

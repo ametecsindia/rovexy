@@ -27,6 +27,9 @@ const FIREWALL_RULE = 'ROVEXY Web';
 // "No domain name" choice: ROVEXY only on this computer, own local certificate, a port that Laragon / IIS do not use
 const LOCAL_PORT = 8443;
 const LOCAL_URL = 'https://localhost:8443';
+// G23 "Cloudflare Tunnel" choice: no open ports, no certificate here. cloudflared (the client's own Cloudflare account)
+// carries https://<client domain> to this plain-http site, which only listens on this computer.
+const TUNNEL_PORT = 8088;
 
 $secrets = [];
 $logFile = null;
@@ -184,6 +187,16 @@ function portFree(int $port): bool
 
 function checkServer(array $job, array &$e, array &$w): void
 {
+    if (($job['tls'] ?? '') === 'tunnel') {
+        $d = strtolower(trim($job['domain'] ?? ''));
+        if (!preg_match('/^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$/', $d)) {
+            $e[] = 'Enter the name the phones will use, for example rovexy.yourcompany.com (your domain in Cloudflare; no https://).';
+        }
+        if (!portFree(TUNNEL_PORT)) {
+            $e[] = 'Port ' . TUNNEL_PORT . ' is already used by another program on this computer. Close that program, then click Next again.';
+        }
+        return;   // no DNS / port 80-443 checks: Cloudflare answers for the name, nothing comes in from the internet
+    }
     if (($job['tls'] ?? '') === 'local') {
         if (!portFree(LOCAL_PORT)) {
             $e[] = 'Port ' . LOCAL_PORT . ' is already used by another program on this computer. Close that program, then click Next again.';
@@ -404,6 +417,21 @@ function writeCaddyfile(string $app, string $domain, string $tls, string $email)
     $fw = fn (string $p) => str_replace('\\', '/', $p);
     $root = $fw("{$app}/rovexy/public");
     $up = implode(' ', array_map(fn ($p) => "127.0.0.1:{$p}", FASTCGI_PORTS));
+    if ($tls === 'tunnel') {
+        // Plain http on this computer only; cloudflared connects here. Cloudflare's forwarded headers are kept (trusted
+        // from this computer only) so the app sees https and the visitor's real IP (Cf-Connecting-Ip) for audit and limits.
+        $c = "# Written by the ROVEXY installer. mode: tunnel ({$domain} via Cloudflare Tunnel -> http://127.0.0.1:" . TUNNEL_PORT . ")\n"
+            . "{\n\tadmin off\n\tauto_https off\n\tservers {\n\t\tprotocols h1 h2c\n\t\ttrusted_proxies static 127.0.0.1/32 ::1/128\n"
+            . "\t\tclient_ip_headers Cf-Connecting-Ip X-Forwarded-For\n\t}\n}\n\n"
+            . "(rovexy) {\n\troot * \"{$root}\"\n\trequest_body {\n\t\tmax_size 100MB\n\t}\n\tencode zstd gzip\n"
+            . "\tphp_fastcgi {$up} {\n\t\tlb_try_duration 10s\n\t}\n\tfile_server\n}\n\n"
+            . "http://:" . TUNNEL_PORT . " {\n\tbind 127.0.0.1\n\timport rovexy\n\tlog {\n\t\toutput file \"" . $fw("{$app}/logs/web-access.log")
+            . "\" {\n\t\t\troll_size 10MiB\n\t\t\troll_keep 5\n\t\t}\n\t}\n}\n\n"
+            . "# for the installer's health check only (this computer)\nhttp://127.0.0.1:" . HEALTH_PORT . " {\n\tbind 127.0.0.1\n\timport rovexy\n}\n";
+        @mkdir("{$app}/caddy", 0755, true);
+        file_put_contents("{$app}/caddy/Caddyfile", $c);
+        return;
+    }
     $tlsLine = $tls === 'file'
         ? "\ttls \"" . $fw("{$app}/data/certs/server.crt") . '" "' . $fw("{$app}/data/certs/server.key") . "\"\n"
         : ($tls === 'local' ? "\tbind 127.0.0.1\n\ttls internal\n" : '');   // IPv4 only: [::1] fails where IPv6 is off
@@ -515,6 +543,7 @@ function health(string $app, int $certWait = 90): bool
     $host = (string) parse_url($url, PHP_URL_HOST);
     $port = (int) (parse_url($url, PHP_URL_PORT) ?: 443);
     $local = $host === 'localhost';
+    $tunnel = isTunnel($app);
     $root = "{$app}/data/caddy/pki/authorities/local/root.crt";   // Caddy's own certificate authority (local mode)
     $code = 0;
     $err = '';
@@ -527,6 +556,20 @@ function health(string $app, int $certWait = 90): bool
         return false;
     }
     result('OK', 'ROVEXY is running (web server, PHP and database answer).');
+    if ($tunnel) {
+        [$code, $err] = httpGet('http://127.0.0.1:' . TUNNEL_PORT . '/up', null, false);
+        if ($code !== 200) {
+            result('ERROR', 'The local site for Cloudflare Tunnel (http://127.0.0.1:' . TUNNEL_PORT . ') did not answer (' . ($err ?: "HTTP {$code}") . "). See {$app}\\logs.");
+            return false;
+        }
+        result('OK', 'Local site for Cloudflare Tunnel answers at http://127.0.0.1:' . TUNNEL_PORT . ' (this computer only; no ports are open).');
+        [$code, $err] = httpGet($url . '/up', null, true);   // over the internet, through Cloudflare
+        $code === 200
+            ? result('OK', "{$url} works through Cloudflare Tunnel.")
+            : result('WARN', "{$url} does not answer yet (" . ($err ?: "HTTP {$code}") . '). Finish the Cloudflare Tunnel set-up: in Cloudflare Zero Trust create a tunnel, '
+                . "route {$host} to http://localhost:" . TUNNEL_PORT . ', and run "cloudflared.exe service install <token>" on this server (see CLOUDFLARE-TUNNEL.md in the ROVEXY folder). No reinstall needed.');
+        return true;
+    }
     $deadline = time() + $certWait;
     $trusted = false;
     do {
@@ -547,6 +590,12 @@ function health(string $app, int $certWait = 90): bool
             . 'automatically - no reinstall needed.');
     }
     return true;
+}
+
+/** True when this install publishes through Cloudflare Tunnel (the installer marks the Caddyfile it writes). */
+function isTunnel(string $app): bool
+{
+    return str_contains((string) @file_get_contents("{$app}/caddy/Caddyfile"), 'mode: tunnel');
 }
 
 function writeResults(string $app): void
@@ -650,7 +699,8 @@ function cmdInstall(string $app, array $job): int
             }
             writeCaddyfile($app, $domain, $tls, $job['email'] ?? '');
             say('Web server configured for ' . ($tls === 'local' ? LOCAL_URL . ' (this computer only, own local certificate)'
-                : "https://{$domain} (" . ($tls === 'file' ? 'own certificate' : "Let's Encrypt") . ')'));
+                : ($tls === 'tunnel' ? "https://{$domain} through Cloudflare Tunnel (local site http://127.0.0.1:" . TUNNEL_PORT . ', no open ports)'
+                : "https://{$domain} (" . ($tls === 'file' ? 'own certificate' : "Let's Encrypt") . ')')));
         }
 
         say('Running rovexy:setup (app key, database tables, company, administrator)');
@@ -674,7 +724,9 @@ function cmdInstall(string $app, array $job): int
             }
             result('OK', 'Services ROVEXY-Web, ROVEXY-PHP, ROVEXY-Scheduler and ROVEXY-Queue run and start with Windows.');
             run(['netsh', 'advfirewall', 'firewall', 'delete', 'rule', 'name=' . FIREWALL_RULE]);
-            if (parse_url($settings['APP_URL'] ?? '', PHP_URL_HOST) !== 'localhost') {   // local mode: nothing to open
+            if (isTunnel($app)) {
+                say('Windows Firewall: no ports opened (Cloudflare Tunnel connects out from this server)');
+            } elseif (parse_url($settings['APP_URL'] ?? '', PHP_URL_HOST) !== 'localhost') {   // local mode: nothing to open
                 [$code] = run(['netsh', 'advfirewall', 'firewall', 'add', 'rule', 'name=' . FIREWALL_RULE, 'dir=in', 'action=allow',
                     'protocol=TCP', 'localport=80,443']);
                 $code === 0 ? say('Windows Firewall: ports 80 and 443 open') : result('WARN', 'Could not open ports 80 and 443 in Windows Firewall - open them by hand.');

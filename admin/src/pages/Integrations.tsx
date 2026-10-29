@@ -57,14 +57,14 @@ function GoogleMapsCard({ canEdit }: { canEdit: boolean }) {
   const d = st.data;
   return (
     <Card title="Google Maps (field map)" actions={d && <Badge value={d.key_hint ? (d.last_status?.startsWith('OK') ? 'ok' : 'warn') : 'info'} label={d.key_hint ? (d.last_status?.startsWith('OK') ? 'working' : 'check key') : 'not set'} />}>
-      <p className="muted" style={{ marginTop: 0 }}>Phone app field map: nearest customers by road, driving time, routes and navigation. In Google Cloud enable <b>Maps JavaScript API</b>, <b>Routes API</b> and <b>Geocoding API</b> (billing on).</p>
+      <p className="muted" style={{ marginTop: 0 }}>Phone app field map: nearest customers by road, driving time, routes and navigation. In Google Cloud enable <b>Maps JavaScript API</b>, <b>Routes API</b> and <b>Geocoding API</b> (billing on). Use <b>two keys</b>: the server key stays on this server; only the map display key goes to phones.</p>
       <ErrorBox error={st.error ?? a.error} />
       <Field label={d?.key_hint ? `API key (stored: ${d.key_hint}) — leave blank to keep` : 'API key'}
-        hint="Used by this server for distances, routes and address lookup. Restrict it in Google Cloud to the 3 APIs above.">
+        hint="Server key: used only by this server for distances, routes and address lookup — never sent to phones. In Google Cloud restrict it to Routes API and Geocoding API.">
         <input type="password" autoComplete="new-password" name="gmaps-key" value={f.api_key} disabled={!canEdit} onChange={(e) => setF({ ...f, api_key: e.target.value })} />
       </Field>
-      <Field label={d?.display_key_hint ? `Map display key — optional (stored: ${d.display_key_hint})` : 'Map display key — optional'}
-        hint="Only if you want a second key for showing the map on phones, restricted to “Websites” = this server’s address (e.g. http://192.168.1.10:8000/*). Blank = phones use the key above.">
+      <Field label={d?.display_key_hint ? `Map display key — needed for the phone map (stored: ${d.display_key_hint})` : 'Map display key — needed for the phone map'}
+        hint="A second key, for showing the map on phones. In Google Cloud restrict it to Maps JavaScript API only, and “Websites” = this server’s address (e.g. https://rovexy.yourcompany.com/*). Without it phones show “Map not set up” (distances and the list still work).">
         <input type="password" autoComplete="new-password" name="gmaps-web-key" value={f.display_key} disabled={!canEdit || f.remove_display_key} onChange={(e) => setF({ ...f, display_key: e.target.value })} />
       </Field>
       {d?.display_key_hint && <label className="row"><input type="checkbox" checked={f.remove_display_key} disabled={!canEdit} onChange={(e) => setF({ ...f, remove_display_key: e.target.checked, display_key: '' })} /> Remove the map display key</label>}
@@ -72,6 +72,7 @@ function GoogleMapsCard({ canEdit }: { canEdit: boolean }) {
         <button disabled={a.busy || (!d?.key_hint && !f.api_key)} onClick={() => a.run(async () => { setResult(await api('PUT', '/integrations/maps', f)); setF({ api_key: '', display_key: '', remove_display_key: false }); st.reload(); })}>Save & test</button>
       </div>}
       {result && <Notice tone={result.ok ? 'ok' : 'bad'}>{result.detail}</Notice>}
+      {d?.key_hint && !d?.display_key_hint && <Notice tone="warn">No map display key yet: phones can't show the map until you add one. (For safety, phones never receive the server key.)</Notice>}
       {d?.last_status && <p className="muted">Last test: {d.last_status}</p>}
     </Card>
   );

@@ -12,7 +12,7 @@ use App\Services\PushService;
 use App\Support\CurrentCompany;
 use Illuminate\Console\Command;
 
-/** Checks the Firebase setup and sends one test push to an employee's phone: php artisan ammp:push-test EMP001 */
+/** Checks the Firebase credential (Super Admin / licence, G3) and sends one test push to an employee's phone: php artisan ammp:push-test EMP001 */
 final class PushTest extends Command
 {
     protected $signature = 'ammp:push-test {employee_code} {--reason=chat : chat (shows newest message) or media (rings for a pending call)}';
@@ -20,15 +20,17 @@ final class PushTest extends Command
 
     public function handle(CurrentCompany $current, PushService $push): int
     {
-        $driver = config('ammp.push.driver');
-        $file = (string) config('ammp.push.fcm_service_account_json');
-        $this->line("PUSH_DRIVER = {$driver}");
-        $this->line('FCM_PROJECT_ID = ' . (config('ammp.push.fcm_project_id') ?: '(empty!)'));
-        $this->line("FCM_SERVICE_ACCOUNT_JSON_PATH = {$file} " . (is_file($file) ? '(found)' : '(FILE NOT FOUND!)'));
-        if ($driver !== 'fcm' || !config('ammp.push.fcm_project_id') || !is_file($file)) {
-            $this->error('Fix the settings above in backend\\.env, then run: php artisan config:clear');
+        $driver = PushService::driver();
+        $sum = \App\Services\PushCredential::summary();
+        $this->line("Push driver = {$driver}");
+        $this->line('Firebase credential = ' . ($sum['set'] ? "{$sum['project_id']} / {$sum['client_email']} (from {$sum['source']})" : '(not set!)'));
+        if ($driver !== 'fcm' || !$sum['set']) {
+            $this->error('No Firebase credential. Licence server: Super Admin → Settings → Push notifications. On-prem: Plan & licence → Check now (it arrives with the licence).');
             return self::FAILURE;
         }
+        $test = \App\Services\PushCredential::test();
+        $test['ok'] ? $this->info($test['detail']) : $this->error($test['detail']);
+        if (!$test['ok']) return self::FAILURE;
         $sent = 0;
         foreach (Company::query()->get() as $company) {
             $current->run($company, function () use ($push, &$sent) {

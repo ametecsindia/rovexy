@@ -58,7 +58,9 @@ final class LicenceAuthority
         if (self::once('licence_verified', "licence:{$l->id}:" . now()->toDateString())) {
             PlatformAudit::record('licence.verified', $l, ['users' => $users], 'licence-server');
         }
-        return [200, ['ok' => true, 'licence' => LicenceSigner::sign(self::payload($l, 'online', $fingerprint))]];
+        // G3: Ametecs's Firebase credential travels beside (not inside) the signed licence, to active bound licences only.
+        return [200, ['ok' => true, 'licence' => LicenceSigner::sign(self::payload($l, 'online', $fingerprint))]
+            + array_filter(['push' => \App\Services\PushCredential::forLicence()])];
     }
 
     /** Signed licence file for an offline server. */
