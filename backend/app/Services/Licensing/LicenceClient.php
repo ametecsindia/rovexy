@@ -105,7 +105,10 @@ final class LicenceClient
         try {
             $res = Http::timeout(10)->acceptJson()->post($url . '/api/v1/license/validate', ['key' => $row->licence_key, 'fingerprint' => self::fingerprint(),
                 // unscoped: the nightly check runs with no workspace bound (an install has one workspace anyway)
-                'users' => app(\App\Support\CurrentCompany::class)->withoutScope(fn () => User::query()->where('status', 'active')->count())]);
+                'users' => app(\App\Support\CurrentCompany::class)->withoutScope(fn () => User::query()->where('status', 'active')->count()),
+                // G15: Click2Call / Smart31 users this month and last (for the monthly add-on bill)
+                'usage' => rescue(fn () => app(\App\Support\CurrentCompany::class)->bound() ? \App\Services\Platform\CallingUsage::report()
+                    : app(\App\Support\CurrentCompany::class)->run(\App\Models\Company::query()->orderBy('id')->firstOrFail(), fn () => \App\Services\Platform\CallingUsage::report()), [], false)]);
             $j = $res->json();
         } catch (\Throwable $e) {
             return $this->outage($row, 'Licence server unreachable: ' . $e->getMessage());

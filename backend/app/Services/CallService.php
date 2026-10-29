@@ -45,9 +45,17 @@ final class CallService
      * Validates everything server-side, then asks the telephony system to connect. The client may only pick a route the
      * server offers (CALLING_ROUTES: 'sim' = the phone's SIM, 'server' = Click2Call / telephony driver); null = default.
      */
-    public function start(User $user, ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber, ?string $route = null, ?string $vmn = null): Call
+    public function start(User $user, ?ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber, ?string $route = null, ?string $vmn = null): Call
     {
         $routes = self::routes($user);
+        if ($device === null) {
+            // G14: from the console (no phone): Click2Call only — the telecaller's work phone rings, then the customer.
+            $routes = array_values(array_intersect($routes, ['server']));
+            if ($routes === []) {
+                throw new DomainException('no_calling_option', 'Click2Call is not enabled for you, so calls can\'t be placed from the console. Ask your administrator (Calling configuration → People & access).');
+            }
+            $route = 'server';
+        }
         if ($routes === []) {
             throw new DomainException('no_calling_option', 'No calling option is enabled for you. Ask your administrator (Calling configuration → Access & permissions).');
         }
@@ -60,7 +68,7 @@ final class CallService
             throw new DomainException('call_in_progress', 'A call is already being started.');
         }
         try {
-            $policy = $this->policies->currentSnapshot($device)->values;
+            $policy = $device ? $this->policies->currentSnapshot($device)->values : $this->policies->companyValues();
             $customer = $customerId === null ? null : Customer::query()->whereKey($customerId)->whereNull('withdrawn_at')->first();
             if ($customerId !== null && $customer === null) {
                 throw new DomainException('customer_not_assigned', 'Customer is not available.');
@@ -90,7 +98,7 @@ final class CallService
                 'assigned_user_id' => $customer->assigned_user_id, 'assigned_team_id' => $customer->assigned_team_id,
             ] : null, $requestedNumber, $which, [
                 'user_id' => $user->id, 'team_ids' => $user->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all(),
-                'compliant' => (bool) $device->compliant, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
+                'compliant' => $device ? (bool) $device->compliant : true, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
             ], new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
 
             if ($route === 'sim') {
@@ -98,7 +106,7 @@ final class CallService
             }
             $adapter = $this->telephony->adapter();
             // Click-to-call providers always ring the employee's work number first.
-            $agentLeg = $adapter instanceof \App\Telephony\PolledTelephony ? 'pstn_callback' : $policy['calling.agent_leg'];
+            $agentLeg = $adapter instanceof \App\Telephony\PolledTelephony || $device === null ? 'pstn_callback' : $policy['calling.agent_leg'];
             $c2c = $adapter instanceof \App\Telephony\Click2CallAdapter;
             $agentNumber = $c2c ? \App\Telephony\Click2CallSettings::agentNumber($user) : $user->phone;
             if ($agentLeg === 'pstn_callback' && !$agentNumber) {
@@ -113,7 +121,7 @@ final class CallService
             $keep = $decision['record'] || $c2c;   // Click2Call: the provider records every call, keep it even when not required
             $call = DB::transaction(function () use ($user, $device, $customer, $which, $decision, $agentLeg, $adapter, $keep) {
                 $call = Call::query()->create([
-                    'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => $device->id,
+                    'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => $device?->id,
                     'customer_id' => $customer?->id, 'destination' => $decision['destination'], 'which_number' => $which,
                     'agent_leg' => $agentLeg, 'state' => 'initiated', 'initiated_at' => now(),
                     'recording_required' => $decision['record'],
@@ -132,7 +140,7 @@ final class CallService
             try {
                 $adapter->originate($call, [
                     'call_id' => $call->uuid, 'company_id' => $call->company_id, 'agent_leg' => $agentLeg,
-                    'agent_target' => $agentLeg === 'pstn_callback' ? (string) $agentNumber : 'dev_' . $device->id,
+                    'agent_target' => $agentLeg === 'pstn_callback' ? (string) $agentNumber : 'dev_' . $device?->id,
                     'customer_e164' => $decision['destination'], 'record_path' => $recordPath,
                     'caller_number' => $callerNumber,   // Click2Call only: Smart31 / picked / default company number
                 ]);
@@ -146,8 +154,8 @@ final class CallService
                 Recording::query()->where('call_id', $call->id)->update(['status' => RecordingState::Failed->value, 'last_error' => 'call not placed']);
                 throw new DomainException('telephony_unavailable', 'Calling service is unavailable. Try again shortly.');
             }
-            $device->forceFill(['work_state' => 'on_call'])->saveQuietly();
-            Audit::record('call.started', $call, ['customer_id' => $customer?->id, 'which' => $which]);
+            $device?->forceFill(['work_state' => 'on_call'])->saveQuietly();
+            Audit::record('call.started', $call, ['customer_id' => $customer?->id, 'which' => $which, 'from' => $device ? 'phone' : 'console']);
             $customer?->touch();
             return $call;
         } finally {
@@ -341,6 +349,11 @@ final class CallService
             'duration_seconds' => $duration, 'last_error' => null, 'retention_expires_at' => now()->addDays($days),
         ])->save();
         \App\Jobs\FetchRecording::markAvailable($rec, $call);
+        // G22: this phone's call recorder is proved to work (shown on Devices); the first time only.
+        if ($device && $device->recording_verified_at === null) {
+            $device->forceFill(['recording_verified_at' => now()])->saveQuietly();
+            Audit::record('device.recording_verified', $device, ['call_id' => $call->id]);
+        }
         Audit::record('recording.uploaded_from_phone', $rec, ['call_id' => $call->id, 'sha256' => $sha, 'bytes' => strlen($bytes)]);
         return $call->refresh();
     }
@@ -398,7 +411,9 @@ final class CallService
                 if (!$wasTerminal && $call->isTerminal()) {
                     $this->onCallEnded($call);
                 }
-                DeviceChannelEvent::dispatchFor(ManagedDevice::query()->findOrFail($call->device_id), 'call.updated', ['call_id' => $call->uuid, 'state' => $call->state]);
+                if ($call->device_id) {   // console calls (G14) have no phone to tell
+                    DeviceChannelEvent::dispatchFor(ManagedDevice::query()->findOrFail($call->device_id), 'call.updated', ['call_id' => $call->uuid, 'state' => $call->state]);
+                }
                 AdminFeed::dispatchFor($call->company_id, 'call.updated', ['call_id' => $call->id, 'state' => $call->state]);
                 return 'applied';
             });
@@ -448,14 +463,14 @@ final class CallService
         if ($rec === null || $rec->status !== RecordingState::Pending->value || $call->isTerminal()) {
             return;
         }
-        $device = ManagedDevice::query()->findOrFail($call->device_id);
-        $policy = $this->policies->currentSnapshot($device)->values;
+        $device = $call->device_id ? ManagedDevice::query()->findOrFail($call->device_id) : null;
+        $policy = $device ? $this->policies->currentSnapshot($device)->values : $this->policies->companyValues();
         $action = RecordingState::failureAction($policy['recording.mode'], $policy['recording.on_failure']);
         $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'recording did not start'])->save();
         $call->forceFill(['recording_status' => RecordingState::Failed->value])->save();
         Audit::record('recording.start_failed', $call, ['action' => $action]);
         AdminFeed::dispatchFor($call->company_id, 'recording.failed', ['call_id' => $call->id, 'action' => $action]);
-        DeviceChannelEvent::dispatchFor($device, 'recording.failed', ['call_id' => $call->uuid, 'action' => $action]);
+        if ($device) DeviceChannelEvent::dispatchFor($device, 'recording.failed', ['call_id' => $call->uuid, 'action' => $action]);
         if ($action === 'terminate') {
             try {
                 $this->telephony->adapter()->hangup($call, 'MANAGER_REQUEST');

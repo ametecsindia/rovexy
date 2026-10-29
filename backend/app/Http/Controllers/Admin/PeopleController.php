@@ -295,7 +295,7 @@ final class PeopleController extends Controller
     public function saveRole(Request $r, CurrentCompany $current, ?int $id = null)
     {
         $data = $r->validate(['name' => 'required|string|max:100', 'permissions' => 'required|array|min:1', 'permissions.*' => ['string', Rule::in(array_keys(\App\Support\Permissions::ALL))]]);
-        $missing = array_diff($data['permissions'], $r->user()->permissionKeys(), ['mobile.work', 'calls.make']);
+        $missing = array_diff($data['permissions'], $r->user()->permissionKeys(), ['mobile.work', 'calls.make', 'calls.console']);
         if ($missing) {
             throw new DomainException('forbidden', 'You cannot grant permissions you do not hold: ' . implode(', ', $missing));
         }
@@ -337,7 +337,7 @@ final class PeopleController extends Controller
         $perms = DB::table('roles')->join('permission_role', 'permission_role.role_id', '=', 'roles.id')
             ->join('permissions', 'permissions.id', '=', 'permission_role.permission_id')
             ->where('roles.company_id', $actor->company_id)->whereIn('roles.key', $roleKeys)->pluck('permissions.key')->unique();
-        $missing = $perms->diff($actor->permissionKeys())->diff(['mobile.work', 'calls.make']);
+        $missing = $perms->diff($actor->permissionKeys())->diff(['mobile.work', 'calls.make', 'calls.console']);   // employee-only rights: admins hand them out without holding them
         if ($missing->isNotEmpty()) {
             throw new DomainException('forbidden', 'You cannot grant permissions you do not hold.');
         }

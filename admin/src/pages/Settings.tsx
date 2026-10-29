@@ -166,6 +166,17 @@ export function ReportsPage() {
         <p className="muted">One row per call: employee, customer, portfolio, result, talk time, outcome and payment.</p>
         <a className="button" href={fileUrl(`/api/admin/reports/calls.csv${qs({ from, to: `${to}T23:59:59`, ...f })}`)}>Download call-by-call CSV</a>
       </Card>
+      <Card title="More exports">
+        <p className="muted">Same filters as above. Every export is written in the audit log.</p>
+        <div className="row">
+          {[['customers', 'Customers'], ['visits', 'Field visits (check-ins)'], ['payments', 'Payments & slips'], ['follow-ups', 'Follow-ups'], ['audit', 'Audit log']].map(([k, l]) =>
+            <a key={k} className="button secondary" href={fileUrl(`/api/admin/reports/export/${k}.csv${qs({ from, to, ...f })}`)}>{l} CSV</a>)}
+        </div>
+      </Card>
+      <Card title="Audit pack (for lender / RBI audits)">
+        <p className="muted">One ZIP with every CSV above, the call recordings and payment slips for this portfolio and period, and MANIFEST.csv with a SHA-256 checksum of each file (proves nothing was changed). Recordings and slips are included only if you may download recordings. Large portfolios: choose a shorter period.</p>
+        <a className="button" href={fileUrl(`/api/admin/reports/audit-pack.zip${qs({ from, to, ...f })}`)}>Download audit pack (ZIP)</a>
+      </Card>
     </Page>
   );
 }

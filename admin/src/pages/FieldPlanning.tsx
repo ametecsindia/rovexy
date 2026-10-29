@@ -17,13 +17,16 @@ export function FieldPlanningPage() {
   const [date, setDate] = useState(today);
   const list = useAsync(() => get(`/field/employees${qs({ date })}`), [date]);
   const [sel, setSel] = useState<number | null>(null);
+  const [tab, setTab] = useState<'plan' | 'board'>('plan');
   return (
     <Page title="Field planning" subtitle="Each field employee's circle, and the customers they visit each day. Optimising a plan uses one Google two-wheeler request; the phone shows the published plan without any Google cost.">
       <ErrorBox error={list.error} />
-      <div className="row" style={{ marginBottom: 12 }}>
+      <div className="row" style={{ marginBottom: 12, alignItems: 'flex-end' }}>
         <Field label="Day"><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <button className={tab === 'plan' ? undefined : 'secondary'} onClick={() => setTab('plan')}>Plan routes</button>
+        <button className={tab === 'board' ? undefined : 'secondary'} onClick={() => setTab('board')}>Plan vs actual</button>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 340px) 1fr', gap: 16, alignItems: 'start' }}>
+      {tab === 'board' ? <PlanBoard date={date} /> : <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 340px) 1fr', gap: 16, alignItems: 'start' }}>
         <Card title="Field employees">
           <Table rows={list.data?.employees} onRow={(r: any) => setSel(r.id)} empty="No field employees (role Employee) in your groups."
             columns={[
@@ -33,7 +36,7 @@ export function FieldPlanningPage() {
             ]} />
         </Card>
         {sel ? <Planner key={`${sel}-${date}`} userId={sel} date={date} onChanged={list.reload} /> : <Card><p className="muted">Choose an employee on the left.</p></Card>}
-      </div>
+      </div>}
     </Page>
   );
 }
@@ -154,4 +157,46 @@ function PlanMap({ circle, candidates, picked, plan, onCentre, onToggle }: { cir
     if (!fitted.current && pts.length) { m.fitBounds(L.latLngBounds(pts).pad(0.15)); fitted.current = true; }
   }, [circle, candidates, picked, plan]);
   return <div ref={el} style={{ height: 420, borderRadius: 12, overflow: 'hidden', marginBottom: 8 }} />;
+}
+
+/** G10: every published plan of the day — done / left, next stop, off-plan visits, last location, alerts. Refreshes every minute. */
+function PlanBoard({ date }: { date: string }) {
+  const b = useAsync(() => get(`/field/board${qs({ date })}`), [date]);
+  useEffect(() => { const t = setInterval(() => { if (!document.hidden) void b.reload(); }, 60_000); return () => clearInterval(t); }, [b.reload]);
+  const [open, setOpen] = useState<number | null>(null);
+  const d = b.data;
+  return (
+    <div style={{ display: 'grid', gap: 16 }}>
+      <ErrorBox error={b.error} />
+      {d && <div className="row">
+        <Badge value="info" label={`${d.plans.length} plans`} /><Badge value="ok" label={`${d.totals.done}/${d.totals.planned} stops done`} />
+        {d.totals.off_plan > 0 && <Badge value="warn" label={`${d.totals.off_plan} visits off plan`} />}
+        {d.totals.alerts > 0 && <Badge value="bad" label={`${d.totals.alerts} alerts`} />}
+        {d.without_plan.length > 0 && <small className="muted">No published plan: {d.without_plan.map((u: any) => u.name).join(', ')}</small>}
+      </div>}
+      <Card>
+        <Table rows={d?.plans?.map((p: any) => ({ ...p, id: p.user_id }))} onRow={(p: any) => setOpen(open === p.user_id ? null : p.user_id)} empty="No published plans for this day."
+          columns={[
+            { key: 'name', label: 'Employee', render: (p: any) => <span>{p.name}<br /><small className="muted">{p.employee_code}</small></span> },
+            { key: 'prog', label: 'Done', render: (p: any) => {
+              const pct = p.planned ? Math.round((p.done / p.planned) * 100) : 0;
+              return <span>{p.done}/{p.planned}<div style={{ background: '#e7ebf0', borderRadius: 6, height: 6, width: 90 }}><div style={{ width: `${pct}%`, height: 6, borderRadius: 6, background: '#2f855a' }} /></div></span>;
+            } },
+            { key: 'next', label: 'Next stop', render: (p: any) => p.next?.name ?? <Badge value="ok" label="all done" /> },
+            { key: 'off', label: 'Off plan', align: 'right', render: (p: any) => p.off_plan || '' },
+            { key: 'seen', label: 'Last location', render: (p: any) => (p.last_location_at ? new Date(p.last_location_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '—') },
+            { key: 'alerts', label: 'Alerts', render: (p: any) => <span className="row">{p.alerts.map((a: string) => <Badge key={a} value="bad" label={a} />)}</span> },
+          ]} />
+      </Card>
+      {open && d?.plans?.find((p: any) => p.user_id === open) && (() => {
+        const p = d.plans.find((x: any) => x.user_id === open);
+        return (
+          <Card title={`${p.name} · stops`}>
+            <ol style={{ margin: 0 }}>{p.stops.map((s: any) => <li key={s.id}>{s.done ? '✓ ' : ''}{s.name ?? `#${s.id}`} {s.at && <small className="muted">checked in {s.at}</small>}</li>)}</ol>
+            {p.off_plan_visits.length > 0 && <p className="muted small">Visited off the plan: {p.off_plan_visits.map((v: any) => v.name).join(', ')}</p>}
+          </Card>
+        );
+      })()}
+    </div>
+  );
 }

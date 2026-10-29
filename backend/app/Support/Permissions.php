@@ -39,6 +39,7 @@ final class Permissions
         'scope.all_teams' => 'See all teams (otherwise only supervised teams)',
         'mobile.work' => 'Use the employee mobile app',
         'calls.make' => 'Place customer calls from the mobile app',
+        'calls.console' => 'Place Click2Call calls from the admin console',
     ];
 
     public const ROLES = [
@@ -52,6 +53,8 @@ final class Permissions
             'media.screen', 'media.screenshot', 'media.camera', 'chat.use', 'reports.export',
         ]],
         'employee' => ['name' => 'Employee', 'permissions' => ['mobile.work', 'calls.make', 'chat.use']],
+        // G14: desk telecallers — sign in to the console (e-mail needed) and call their own customers with Click2Call
+        'telecaller' => ['name' => 'Telecaller (console)', 'permissions' => ['calls.make', 'calls.console', 'chat.use']],
         'auditor' => ['name' => 'Read-only Auditor', 'permissions' => [
             'devices.view', 'policies.view', 'employees.view', 'customers.view', 'calls.view', 'audit.view', 'system.health', 'scope.all_teams',
         ]],
@@ -61,6 +64,6 @@ final class Permissions
     public static function forRole(string $role): array
     {
         $p = self::ROLES[$role]['permissions'];
-        return $p === '*' ? array_values(array_diff(array_keys(self::ALL), ['mobile.work', 'calls.make'])) : $p;
+        return $p === '*' ? array_values(array_diff(array_keys(self::ALL), ['mobile.work', 'calls.make', 'calls.console'])) : $p;
     }
 }

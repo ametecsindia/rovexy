@@ -1,6 +1,41 @@
 # Implementation status, verification and known limitations
 
-Last updated: 2026-10-01. This file says plainly what works, what was verified, and how.
+Last updated: 2026-10-29. This file says plainly what works, what was verified, and how.
+
+## Status on 29 Oct 2026 (gap analysis phases 1–4)
+
+Backend: 179 PHPUnit tests; one known failure (`test_exotel_click_to_call_result_and_recording`, Exotel sandbox, older than
+this work). Admin console: TypeScript clean, 5 tests, production build OK. Android: changes reviewed by hand; the app is
+built and tested on the developer PC (the cloud sandbox cannot reach Google Maven / Gradle).
+
+| Gap | What | Verified by |
+|---|---|---|
+| G17 | Repo private; reviewer password out of the code; stale copies / zips untracked | GitHub (owner) |
+| G13 | Phones never get the server Maps key | `Phase1HardeningTest`, `AcceptanceTest` |
+| G4 | Basic routing (Routes Essentials), road distances on tap only, 5 per request | `Phase1HardeningTest` · phone: manual (test sheet) |
+| G3 | Firebase key in Super Admin, sent to on-prem installs with the licence | `Phase1HardeningTest` |
+| G20 | Nightly database backup, 7 kept, shown in System health | `Phase1HardeningTest` |
+| G23 | Installer Cloudflare Tunnel mode; loopback trusted proxy | `WindowsInstallerHelperTest`, `Phase1HardeningTest` · real server: manual |
+| G2 | Code-signing step in the build | manual (needs certificate + Windows Server) |
+| G5 | Address → pin after every upload, answers reused | `Phase2FieldTest` |
+| G12 | Google usage meter and monthly limits | `Phase2FieldTest` |
+| G7 / G8 / G9 | Circles, route plans (one two-wheeler call), Today's route | `Phase2FieldTest` · phone: manual |
+| G19 | Fake-GPS check-ins refused, flagged | `Phase2FieldTest` · phone: manual |
+| G1 | Direct app at `/get-app` | `Phase2FieldTest` · all-day tracking: manual on real phones |
+| G6 | Check-in GPS (±30 m or better) becomes the verified pin | `Phase34Test` |
+| G10 | Plan vs actual board with alerts | `Phase34Test` |
+| G11 | GPS every 2 minutes by default; notice shows the interval | `Phase34Test` |
+| G21 | Exports + audit pack ZIP with SHA-256 manifest | `Phase34Test` |
+| G14 | My calls: Click2Call from the console (Telecaller role) | `Phase34Test` |
+| G15 / G16 | Calling add-on users per month, deposits, AMC amount | `Phase34Test` |
+| G22 | Phone's recorder marked verified by its first uploaded recording | `Phase34Test` |
+| G18 | README, this file, guides | — |
+
+Open decisions (Ametecs): AMC amount per year; whether call minutes are in the ₹350 / ₹550 add-on; Reverb live channel
+on rovexy.app (currently off: console and phones refresh by themselves).
+
+The rest of this file is the original 1 Oct 2026 record, kept for history.
+
 
 ## Legend
 

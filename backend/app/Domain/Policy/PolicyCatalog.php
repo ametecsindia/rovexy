@@ -51,7 +51,7 @@ final class PolicyCatalog
             new Control('recording.on_failure', 'enum', 'continue_flagged', 'app', 'If mandatory recording fails', ['continue_flagged', 'terminate']),
             new Control('recording.notice', 'string', 'This call may be recorded for quality and training purposes.', 'app', 'Recording notice text'),
             new Control('location.enabled', 'bool', true, 'app', 'Work-session location'),
-            new Control('location.interval_seconds', 'int', 300, 'app', 'Location interval (s)', min: 60, max: 3600),
+            new Control('location.interval_seconds', 'int', 120, 'app', 'Location interval (s)', min: 60, max: 3600),
             new Control('location.background', 'bool', false, 'app', 'Collect while app in background (work session only)', minSdk: 29,
                 setupNote: 'Needs ACCESS_BACKGROUND_LOCATION granted via policy and a foreground service while the work session is active.'),
             new Control('live_view.enabled', 'bool', false, 'app', 'Live screen viewing'),
@@ -92,7 +92,7 @@ final class PolicyCatalog
             'recording.mode' => 'optional',          // the phone's own recorder; phones without one are not blocked
             'recording.on_failure' => 'continue_flagged',
             'location.enabled' => true,
-            'location.interval_seconds' => 300,
+            'location.interval_seconds' => 120,     // G11: every 2 minutes (was 5); companies' saved policies keep their own value
             'live_view.enabled' => true,
             'live_view.screenshots' => true,
             'live_view.fps' => 10,                   // what the app actually sends

@@ -9,6 +9,7 @@ const ROLE_INFO: Record<string, { label: string; hint: string }> = {
   company_admin: { label: 'Admin', hint: 'Full access to everything in all groups.' },
   supervisor: { label: 'Manager / Supervisor', hint: 'Runs one or more groups; sees only those groups’ people, customers, calls and reports.' },
   employee: { label: 'Telecaller / Employee', hint: 'Uses the phone app only: calls assigned customers.' },
+  telecaller: { label: 'Telecaller (console)', hint: 'Sits at a desk: signs in to the console (needs an e-mail) and calls own customers from My calls (Click2Call). Add it next to Employee for someone who also uses the app.' },
   it_admin: { label: 'IT / Device admin', hint: 'Phones, policies, branding and system health; no customer data.' },
   auditor: { label: 'Auditor (read-only)', hint: 'Sees everything, changes nothing.' },
 };

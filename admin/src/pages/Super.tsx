@@ -20,6 +20,7 @@ const MENU: { to: string; module: string; label: string; icon: string }[] = [
   { to: '/companies', module: 'companies', label: 'Companies', icon: 'people' },
   { to: '/licences', module: 'licences', label: 'Licences', icon: 'shield' },
   { to: '/orders', module: 'orders', label: 'Orders & payments', icon: 'chart' },
+  { to: '/billing', module: 'licences', label: 'Calling add-ons, deposits & AMC', icon: 'chart' },
   { to: '/leads', module: 'leads', label: 'Leads', icon: 'contacts' },
   { to: '/plans', module: 'plans', label: 'Plans & pricing', icon: 'settings' },
   { to: '/coupons', module: 'plans', label: 'Discount codes', icon: 'chart' },
@@ -65,6 +66,7 @@ export function SuperApp() {
           {can('companies') && <Route path="/companies" element={<Companies can={can('companies', 'manage')} isSuper={me.role === 'super'} />} />}
           {can('licences') && <Route path="/licences" element={<Licences can={can('licences', 'manage')} isSuper={me.role === 'super'} />} />}
           {can('orders') && <Route path="/orders" element={<Orders can={can('orders', 'manage')} />} />}
+          {can('licences') && <Route path="/billing" element={<BillingOverview />} />}
           {can('leads') && <Route path="/leads" element={<Leads can={can('leads', 'manage')} isSuper={me.role === 'super'} canCompanies={can('companies', 'manage')} />} />}
           {can('plans') && <Route path="/plans" element={<Plans can={can('plans', 'manage')} />} />}
           {can('plans') && <Route path="/coupons" element={<Coupons can={can('plans', 'manage')} />} />}
@@ -435,6 +437,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
           <div className="row"><button disabled={a.busy} type="submit">Save changes</button><button type="button" className="secondary" onClick={() => setEdit(null)}>Cancel</button></div>
         </form>}
         {renew && <OrderBuilder licence={x} isSuper={isSuper} onClose={() => setRenew(false)} onDone={() => { setRenew(false); void l.reload(); }} />}
+        <DepositsAmc x={x} can={can} onChange={(d: any) => l.setData(d)} />
         <h3>Orders</h3>
         <Table rows={x.orders} empty="No orders on this licence." columns={[{ key: 'number', label: 'Order', render: (o: any) => <>{o.number}<div className="muted small">{o.kind}{o.users ? ` · ${o.users} users` : ''}</div></> },
           { key: 'total', label: 'Total', align: 'right', render: (o: any) => inr(o.total) }, { key: 'status', label: 'Status', render: (o: any) => <PayBadge order={o} /> }, { key: 'invoice_number', label: 'Invoice' }]} />
@@ -878,7 +881,8 @@ function Settings() {
   const set = (k: string, v: string) => { setSaved(false); setF((x: any) => ({ ...x, [k]: v })); };
   const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days',
     'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
-    'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'setup_on_cloud', 'amc_pct', 'quote_validity_days'];
+    'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'setup_on_cloud', 'amc_pct', 'quote_validity_days',
+    'price_c2c_user', 'price_smart31_user', 'deposit_per_fos'];
   const [clear, setClear] = useState<string[]>([]);
   const submit = (e: FormEvent) => { e.preventDefault(); void a.run(async () => { s.setData(await put('/settings', { ...Object.fromEntries(keys.map((k) => [k, f[k]])), clear_secrets: clear })); setClear([]); setSaved(true); toast('Settings saved'); }); };
   const removeBox = (k: string) => s.data?.[`${k}_set`] ? <label className="row small" style={{ gap: 6 }}><input type="checkbox" style={{ width: 'auto' }} checked={clear.includes(k)} onChange={(e) => setClear(e.target.checked ? [...clear, k] : clear.filter((x) => x !== k))} />Remove the saved value</label> : null;
@@ -911,6 +915,9 @@ function Settings() {
             {box('setup_base', 'Setup & onboarding fee (₹)', 'On the first order', 'number')}{box('setup_included_users', 'Users covered by that fee', undefined, 'number')}
             {box('setup_per_extra', 'Setup per extra user (₹)', undefined, 'number')}{box('amc_pct', 'AMC % per year', 'On-premises perpetual: % of the current licence price', 'number')}
             {box('quote_validity_days', 'Order / quote valid for (days)', 'After this the pay link stops; raise a fresh order', 'number')}
+            {box('price_c2c_user', 'Click2Call per user per month (₹)', 'Plus GST; users who placed a Click2Call call that month', 'number')}
+            {box('price_smart31_user', 'Click2Call + Smart31 per user per month (₹)', 'Instead of the Click2Call price, for users whose calls used a Smart31 number', 'number')}
+            {box('deposit_per_fos', 'Refundable deposit per field user (₹)', 'On-premises; refunded when the client stops, less dues', 'number')}
           </div>
           {toggle('setup_on_cloud', 'Charge the setup fee on cloud first orders too', 'On-premises first orders always carry it (staff can waive it per order).')}
         </Card>
@@ -1280,3 +1287,74 @@ function TrialDays({ value, onChange }: { value: string; onChange: (v: string) =
     </Field>
   );
 }
+
+/** G16 (licence detail): refundable deposit ledger and the AMC amount; G15: calling users the install reported. */
+function DepositsAmc({ x, can, onChange }: { x: any; can: boolean; onChange: (d: any) => void }) {
+  const [f, setF] = useState<any | null>(null);
+  const [amc, setAmc] = useState<string>(x.amc_amount ?? '');
+  const a = useAction();
+  return (
+    <>
+      <h3>Deposit &amp; AMC</h3>
+      <ErrorBox error={a.error} />
+      <p>Deposit held: <b>{inr(x.deposit?.balance ?? 0)}</b>{x.deposit?.fos ? ` for ${x.deposit.fos} field users` : ''}
+        {x.amc_expires_at && <> · AMC until <b>{day(x.amc_expires_at)}</b></>}
+        {' '}· AMC per year: {can ? <><input type="number" min={0} value={amc} onChange={(e) => setAmc(e.target.value)} style={{ width: 120 }} placeholder="not set" />
+          <button className="ghost" disabled={a.busy || String(amc) === String(x.amc_amount ?? '')} onClick={() => void a.run(async () => { onChange(await patch(`/licences/${x.id}`, { amc_amount: amc === '' ? null : Number(amc), reason: 'AMC amount' })); toast('AMC amount saved'); })}>Save</button></>
+          : (x.amc_amount ? inr(x.amc_amount) : 'not set')}</p>
+      {can && !f && <div className="row"><button className="secondary" onClick={() => setF({ kind: 'received', fos_count: '', amount: '', on_date: new Date().toISOString().slice(0, 10), reference: '', note: '' })}>Deposit received…</button>
+        <button className="secondary" onClick={() => setF({ kind: 'refund', fos_count: '', amount: '', on_date: new Date().toISOString().slice(0, 10), reference: '', note: '' })}>Refund deposit…</button></div>}
+      {f && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => {
+        onChange(await post(`/licences/${x.id}/deposits`, { ...f, fos_count: f.fos_count === '' ? null : Number(f.fos_count), amount: f.amount === '' ? null : Number(f.amount) }));
+        setF(null); toast(f.kind === 'refund' ? 'Refund recorded' : 'Deposit recorded'); }); }}>
+        <div className="form-grid">
+          <Field label="Field users" hint="Amount = users × deposit per field user, unless you enter the amount"><input type="number" min={0} value={f.fos_count} onChange={(e) => setF({ ...f, fos_count: e.target.value })} /></Field>
+          <Field label="Amount (₹)" hint={f.kind === 'refund' ? 'Deposit less any dues' : 'Leave blank to calculate'}><input type="number" min={0} step="0.01" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} /></Field>
+          <Field label="Date"><input type="date" value={f.on_date} onChange={(e) => setF({ ...f, on_date: e.target.value })} required /></Field>
+          <Field label="Reference" hint="UTR / cheque / receipt no."><input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} /></Field>
+          <Field label="Note"><input value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} /></Field>
+        </div>
+        <div className="row"><button disabled={a.busy}>{f.kind === 'refund' ? 'Record refund' : 'Record deposit'}</button><button type="button" className="secondary" onClick={() => setF(null)}>Cancel</button></div>
+      </form>}
+      <Table rows={x.deposits} empty="No deposit recorded." columns={[
+        { key: 'on_date', label: 'Date' }, { key: 'kind', label: '', render: (d: any) => <Badge value={d.kind === 'refund' ? 'warn' : 'ok'} label={d.kind} /> },
+        { key: 'fos_count', label: 'Field users', align: 'right' }, { key: 'amount', label: 'Amount', align: 'right', render: (d: any) => inr(d.amount) },
+        { key: 'reference', label: 'Reference' }, { key: 'note', label: 'Note' }]} />
+      {x.calling_usage?.length > 0 && <><h3>Calling add-on users (reported)</h3>
+        <Table rows={x.calling_usage} columns={[{ key: 'month', label: 'Month' }, { key: 'c2c_users', label: 'Click2Call users', align: 'right' }, { key: 'smart31_users', label: 'of them Smart31', align: 'right' }]} /></>}
+    </>
+  );
+}
+
+/** G15 + G16: one month across all licences — Click2Call / Smart31 users and amount, deposits held, AMC due. */
+function BillingOverview() {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const b = useAsync(() => get(`/billing-overview${qs({ month })}`), [month]);
+  const d = b.data;
+  return (
+    <Page title="Calling add-ons, deposits & AMC" subtitle="Click2Call users = people who placed at least one Click2Call call in the month (test calls not counted). Cloud workspaces are counted live; on-premises installs report with their licence check-in.">
+      <ErrorBox error={b.error} />
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <Field label="Month"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field>
+        {d && <small className="muted">Prices: Click2Call {inr(d.prices.c2c)}, with Smart31 {inr(d.prices.smart31)} per user per month + GST (Settings). Call minutes are not included here.</small>}
+      </div>
+      {d && <div className="kpi-grid small" style={{ margin: '12px 0' }}>
+        <Kpi icon="call" tone="info" label="Click2Call users" value={d.totals.c2c_users} />
+        <Kpi icon="call" tone="info" label="of them Smart31" value={d.totals.smart31_users} />
+        <Kpi icon="chart" tone="ok" label="Add-ons this month" value={inr(d.totals.amount)} sub="before GST" />
+        <Kpi icon="shield" tone="warn" label="Deposits held" value={inr(d.totals.deposits)} />
+      </div>}
+      <Card>
+        <Table rows={d?.rows?.map((r: any) => ({ ...r, id: r.licence_id }))} empty="No active licences." columns={[
+          { key: 'holder', label: 'Client', render: (r: any) => <span>{r.holder}<br /><small className="muted">{r.deployment === 'onprem' ? 'On-premises' : `Cloud · ${r.workspace ?? '—'}`} · {r.key}</small></span> },
+          { key: 'c2c', label: 'Click2Call users', align: 'right', render: (r: any) => <span>{r.c2c_users}<br /><small className="muted">{r.usage_source}</small></span> },
+          { key: 'smart31_users', label: 'Smart31', align: 'right' },
+          { key: 'amount', label: 'Amount', align: 'right', render: (r: any) => inr(r.amount) },
+          { key: 'dep', label: 'Deposit held', align: 'right', render: (r: any) => (r.deposit_balance ? <span>{inr(r.deposit_balance)}<br /><small className="muted">{r.deposit_fos} users</small></span> : '—') },
+          { key: 'amc', label: 'AMC', render: (r: any) => (r.amc_expires_at ? <span>until {r.amc_expires_at}{r.amc_due_soon && <> <Badge value="warn" label="due soon" /></>}<br /><small className="muted">{r.amc_amount ? `${inr(r.amc_amount)} / year` : 'amount not set'}</small></span> : '—') },
+        ]} />
+      </Card>
+    </Page>
+  );
+}
+

@@ -163,9 +163,69 @@ final class ConsoleController extends Controller
     {
         $l = Licence::query()->with('plan:id,name,code', 'company:id,slug,name')->findOrFail($id);
         $used = $l->company_id ? DB::table('users')->where('company_id', $l->company_id)->where('status', 'active')->count() : null;
+        $deposits = DB::table('licence_deposits')->where('licence_id', $l->id)->orderByDesc('on_date')->orderByDesc('id')->get();
         return response()->json($l->toArray() + ['events' => $l->events()->limit(100)->get(), 'used_users' => $used,
-            'orders' => SalesOrder::query()->where('licence_id', $l->id)->latest('id')->get()]);
+            'orders' => SalesOrder::query()->where('licence_id', $l->id)->latest('id')->get(),
+            // G16: refundable deposit (received − refunded) and how many field users it covers; G15: monthly calling users
+            'deposits' => $deposits, 'deposit' => self::depositOf($deposits),
+            'calling_usage' => DB::table('licence_usage')->where('licence_id', $l->id)->orderByDesc('month')->limit(12)->get()]);
     }
+
+    private static function depositOf($rows): array
+    {
+        $in = $rows->where('kind', 'received');
+        $out = $rows->where('kind', 'refund');
+        return ['balance' => round((float) $in->sum('amount') - (float) $out->sum('amount'), 2),
+            'fos' => (int) $in->sum('fos_count') - (int) $out->sum('fos_count')];
+    }
+
+    /** G16: record a deposit received or refunded (refund: when the client stops or reduces field users, less any dues). */
+    public function addDeposit(Request $r, int $id)
+    {
+        $l = Licence::query()->findOrFail($id);
+        $d = $r->validate(['kind' => 'required|in:received,refund', 'fos_count' => 'nullable|integer|min:0|max:100000', 'amount' => 'nullable|numeric|min:0|max:100000000',
+            'on_date' => 'required|date_format:Y-m-d', 'reference' => 'nullable|string|max:100', 'note' => 'nullable|string|max:255']);
+        $amount = $d['amount'] ?? (isset($d['fos_count']) ? $d['fos_count'] * (float) PlatformSettings::get('deposit_per_fos') : null);
+        abort_if($amount === null || $amount <= 0, 422, 'Enter the amount, or the number of field users (× the deposit per field user).');
+        $bal = self::depositOf(DB::table('licence_deposits')->where('licence_id', $l->id)->get())['balance'];
+        abort_if($d['kind'] === 'refund' && $amount > $bal + 0.001, 422, "The refund is more than the deposit held (₹{$bal}).");
+        DB::table('licence_deposits')->insert(['licence_id' => $l->id, 'kind' => $d['kind'], 'fos_count' => $d['fos_count'] ?? null, 'amount' => $amount,
+            'on_date' => $d['on_date'], 'reference' => $d['reference'] ?? null, 'note' => $d['note'] ?? null, 'created_by' => auth('platform')->id(),
+            'created_at' => now(), 'updated_at' => now()]);
+        $l->log('deposit_' . $d['kind'], ['amount' => $amount, 'fos' => $d['fos_count'] ?? null, 'reference' => $d['reference'] ?? null], $this->actor());
+        PlatformAudit::record('licence.deposit_' . $d['kind'], $l, ['amount' => $amount]);
+        return $this->licence($l->id);
+    }
+
+    /**
+     * G15 + G16 for one month: Click2Call / Smart31 users and their amount per licence (cloud: counted live from the
+     * workspace; on-prem: as the install reported at check-in), plus deposits held and AMC falling due.
+     */
+    public function billingOverview(Request $r)
+    {
+        $month = $r->validate(['month' => 'nullable|date_format:Y-m'])['month'] ?? now()->format('Y-m');
+        $licences = Licence::query()->with('company:id,slug,name')->whereIn('status', ['active', 'suspended'])->orderBy('holder_name')->get();
+        $reported = DB::table('licence_usage')->where('month', $month)->get()->keyBy('licence_id');
+        $deposits = DB::table('licence_deposits')->get()->groupBy('licence_id');
+        $ctx = app(\App\Support\CurrentCompany::class);
+        $rows = $licences->map(function (Licence $l) use ($month, $reported, $deposits, $ctx) {
+            $company = $l->deployment === 'onprem' || !$l->company_id ? null : \App\Models\Company::query()->find($l->company_id);
+            $u = $l->deployment === 'onprem'
+                ? ['c2c_users' => (int) ($reported[$l->id]->c2c_users ?? 0), 'smart31_users' => (int) ($reported[$l->id]->smart31_users ?? 0), 'source' => isset($reported[$l->id]) ? 'reported' : 'not reported']
+                : ($company ? $ctx->run($company, fn () => \App\Services\Platform\CallingUsage::forMonth($month)) + ['source' => 'counted'] : ['c2c_users' => 0, 'smart31_users' => 0, 'source' => '—']);
+            $dep = self::depositOf($deposits->get($l->id, collect()));
+            return ['licence_id' => $l->id, 'key' => $l->key, 'holder' => $l->holder_name, 'deployment' => $l->deployment, 'workspace' => $l->company?->slug,
+                'c2c_users' => $u['c2c_users'], 'smart31_users' => $u['smart31_users'], 'usage_source' => $u['source'],
+                'amount' => \App\Services\Platform\CallingUsage::amount($u['c2c_users'], $u['smart31_users']),
+                'deposit_balance' => $dep['balance'], 'deposit_fos' => $dep['fos'],
+                'amc_expires_at' => $l->amc_expires_at?->toDateString(), 'amc_amount' => $l->amc_amount,
+                'amc_due_soon' => $l->amc_expires_at !== null && $l->amc_expires_at->lt(now()->addDays(60))];
+        });
+        return response()->json(['month' => $month, 'prices' => ['c2c' => (float) PlatformSettings::get('price_c2c_user'), 'smart31' => (float) PlatformSettings::get('price_smart31_user'),
+            'deposit_per_fos' => (float) PlatformSettings::get('deposit_per_fos')], 'rows' => $rows->values(),
+            'totals' => ['amount' => round($rows->sum('amount'), 2), 'deposits' => round($rows->sum('deposit_balance'), 2), 'c2c_users' => $rows->sum('c2c_users'), 'smart31_users' => $rows->sum('smart31_users')]]);
+    }
+
 
     /** Change a licence: users, expiry, grace, plan/features, status (suspend / resume / revoke). */
     public function updateLicence(Request $r, int $id)
@@ -174,7 +234,7 @@ final class ConsoleController extends Controller
         $d = $r->validate(['max_users' => 'integer|min:0|max:100000', 'expires_at' => 'nullable|date', 'grace_days' => 'integer|min:0|max:90',
             'plan_id' => 'nullable|integer', 'features' => 'array', 'features.*' => Rule::in(array_keys(Licensing::FEATURES)),
             'status' => 'in:active,suspended,revoked', 'notes' => 'nullable|string|max:2000', 'reason' => 'nullable|string|max:255',
-            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'amc_expires_at' => 'nullable|date']);
+            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'amc_expires_at' => 'nullable|date', 'amc_amount' => 'nullable|numeric|min:0|max:100000000']);
         if ($l->status === 'revoked' && ($d['status'] ?? 'revoked') !== 'revoked') {
             throw new DomainException('licence_revoked', 'A revoked licence stays revoked. Issue a new one instead.');
         }
@@ -188,13 +248,13 @@ final class ConsoleController extends Controller
         if (!empty($d['expires_at']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $d['expires_at'])) {
             $d['expires_at'] = Carbon::parse($d['expires_at'], Ledger::TZ)->endOfDay()->utc();   // a date means "to the end of that Indian day"
         }
-        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at']);
+        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at', 'amc_amount']);
         if (isset($d['plan_id'])) {
             $plan = Plan::query()->findOrFail($d['plan_id']);
             $l->plan_id = $plan->id;
             $l->features = $d['features'] ?? $plan->features;
         }
-        $l->fill(array_intersect_key($d, array_flip(['max_users', 'expires_at', 'grace_days', 'features', 'status', 'notes', 'billing', 'amc_expires_at'])));
+        $l->fill(array_intersect_key($d, array_flip(['max_users', 'expires_at', 'grace_days', 'features', 'status', 'notes', 'billing', 'amc_expires_at', 'amc_amount'])));
         $l->save();
         $l->log('edited', ['before' => $before, 'after' => $l->only(array_keys($before)), 'reason' => $d['reason'] ?? null], $this->actor());
         PlatformAudit::record('licence.updated', $l, ['reason' => $d['reason'] ?? null]);
@@ -571,7 +631,7 @@ final class ConsoleController extends Controller
             'site_meta_description' => 'nullable|string|max:300', 'reminders_enabled' => 'in:0,1', 'trial_verify_email' => 'in:0,1', 'staff_mfa_required' => 'in:0,1',
             'price_annual_discount_pct' => 'numeric|min:0|max:60', 'price_half_yearly_discount_pct' => 'numeric|min:0|max:60', 'setup_base' => 'numeric|min:0|max:10000000',
             'setup_included_users' => 'integer|min:0|max:100000', 'setup_per_extra' => 'numeric|min:0|max:100000', 'setup_on_cloud' => 'in:0,1', 'amc_pct' => 'numeric|min:0|max:100',
-            'quote_validity_days' => 'integer|min:1|max:90',
+            'quote_validity_days' => 'integer|min:1|max:90', 'price_c2c_user' => 'numeric|min:0|max:100000', 'price_smart31_user' => 'numeric|min:0|max:100000', 'deposit_per_fos' => 'numeric|min:0|max:1000000',
             'clear_secrets' => 'array', 'clear_secrets.*' => Rule::in(PlatformSettings::SECRETS),
             'mail_host' => ['nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9.-]+$/'], 'mail_port' => 'nullable|integer|min:1|max:65535', 'mail_encryption' => 'in:tls,ssl,none',
             'mail_username' => 'nullable|string|max:190', 'mail_password' => 'nullable|string|max:300', 'mail_from_address' => 'nullable|email|max:190', 'mail_from_name' => 'nullable|string|max:100',

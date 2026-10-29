@@ -23,6 +23,7 @@ import { PortfolioReportsPage } from './pages/PortfolioReports';
 import { AddressReportPage } from './pages/AddressReport';
 import { LicencePage } from './pages/Licence';
 import { FieldPlanningPage } from './pages/FieldPlanning';
+import { MyCallsPage } from './pages/MyCalls';
 
 type NavItem = { to: string; icon: string; label: string; perm?: string; group: string };
 /** Sidebar: Dashboard on top, then collapsible sections. Order here = order on screen. */
@@ -30,6 +31,7 @@ export const NAV: NavItem[] = [
   { to: '/', icon: 'home', label: 'Dashboard', group: '' },
   { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: '' },
   { to: '/employees', icon: 'people', label: 'Groups & people', perm: 'employees.view', group: 'Team' },
+  { to: '/my-calls', icon: 'call', label: 'My calls (Click2Call)', perm: 'calls.console', group: 'Calling' },
   { to: '/calls', icon: 'call', label: 'Calls & recordings', perm: 'calls.view', group: 'Calling' },
   { to: '/follow-ups', icon: 'event', label: 'Follow-ups', perm: 'calls.view', group: 'Calling' },
   { to: '/payments', icon: 'chart', label: 'Payments & slips', perm: 'calls.view', group: 'Calling' },
@@ -260,6 +262,7 @@ export function App() {
           <Route path="/calling/smart31" element={<Navigate to="/calling/numbers" replace />} />
           {['users', 'access'].map((p) => <Route key={p} path={`/calling/${p}`} element={<Navigate to="/calling/people" replace />} />)}
           <Route path="/calling/outcomes" element={<CallingConfigPage />} />
+          <Route path="/my-calls" element={<MyCallsPage />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/follow-ups" element={<FollowUpsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />

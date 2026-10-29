@@ -59,9 +59,12 @@ class LocationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // G11: the notice says how often, from the company's policy (the same number the tracker uses below).
+        val secs = (application as AmmpApp).graph.work.policy.int("location.interval_seconds", 120)
+        val every = if (secs % 60 == 0) "${secs / 60} min" else "$secs s"
         val n: Notification = Notification.Builder(this, AmmpApp.CHANNEL_WORK)
             .setSmallIcon(R.drawable.ic_app).setContentTitle("Work session active")
-            .setContentText("Location is shared with your company while you are signed in.").setOngoing(true).build()
+            .setContentText("Location is shared with your company every $every while you are signed in.").setOngoing(true).build()
         // Android 14+ refuses a location foreground service it considers started from the background (e.g. the system
         // re-creating this sticky service while the dialer is in front during a call) or without location permission.
         // That refusal is an exception — uncaught, it killed and restarted the whole app. Now the service just stops;
@@ -75,7 +78,7 @@ class LocationService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val interval = (application as AmmpApp).graph.work.policy.int("location.interval_seconds", 300) * 1000L
+        val interval = (application as AmmpApp).graph.work.policy.int("location.interval_seconds", 120) * 1000L
         LocationServices.getFusedLocationProviderClient(this).requestLocationUpdates(
             LocationRequest.Builder(Priority.PRIORITY_BALANCED_POWER_ACCURACY, interval).setMinUpdateIntervalMillis(interval / 2).build(),
             callback, Looper.getMainLooper())

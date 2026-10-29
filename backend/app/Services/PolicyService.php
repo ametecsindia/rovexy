@@ -88,6 +88,14 @@ final class PolicyService
         return $snap;
     }
 
+    /** The company-wide policy values (no group / phone layers): used for calls placed from the console (G14). */
+    public function companyValues(): array
+    {
+        $a = PolicyAssignment::query()->where('target_type', 'company')->where('target_id', 0)->first();
+        $v = $a ? PolicyVersion::query()->where('profile_id', $a->profile_id)->where('status', 'published')->orderByDesc('version')->first() : null;
+        return PolicyResolver::effective($v?->settings ?? [], [], [])['values'];
+    }
+
     public function currentSnapshot(ManagedDevice $device): DevicePolicySnapshot
     {
         return DevicePolicySnapshot::query()->where('device_id', $device->id)->where('fingerprint', $device->desired_policy_fingerprint)->first()

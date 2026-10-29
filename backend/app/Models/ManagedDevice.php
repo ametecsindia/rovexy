@@ -31,6 +31,7 @@ class ManagedDevice extends Model
             'compliance_detail' => 'array',
             'compliant' => 'bool',
             'last_contact_at' => 'datetime',
+            'recording_verified_at' => 'datetime',
         ];
     }
 

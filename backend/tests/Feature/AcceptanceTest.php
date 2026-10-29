@@ -1302,9 +1302,10 @@ final class AcceptanceTest extends TestCase
         $m->work('GET', "/api/mobile/v1/customers/{$ids['zero']}")->assertOk()->assertJsonPath('location.lat', 17.4405)->assertJsonPath('timeline.0.type', 'location');
         // Check-in at the customer: only within 100 m (+ GPS drift, max 50 m) of the pin; logged on the timeline.
         $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4505, 'lng' => 78.3507])->assertStatus(422);
-        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4413, 'lng' => 78.3507, 'accuracy_m' => 30])->assertOk();   // ~89 m
-        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4406, 'lng' => 78.3507, 'accuracy_m' => 5])->assertOk()->assertJsonPath('distance_m', 11);
-        $m->work('GET', "/api/mobile/v1/customers/{$ids['zero']}")->assertJsonPath('timeline.0.type', 'visit');
+        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4413, 'lng' => 78.3507, 'accuracy_m' => 35])->assertOk();   // ~89 m (±35: not accurate enough to move the pin, G6)
+        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4406, 'lng' => 78.3507, 'accuracy_m' => 5])->assertOk()->assertJsonPath('distance_m', 11)->assertJsonPath('pin_verified', true);
+        // newest first: the pin verified at the door (G6), then the visit itself
+        $m->work('GET', "/api/mobile/v1/customers/{$ids['zero']}")->assertJsonPath('timeline.0.type', 'location')->assertJsonPath('timeline.1.type', 'visit');
 
         // Key problems never reach the employee as raw Google errors.
         \Illuminate\Support\Facades\Cache::flush();
@@ -1353,7 +1354,7 @@ final class AcceptanceTest extends TestCase
         $this->login($m);
         $this->ackAll($m);
         $m->work('POST', "/api/mobile/v1/customers/{$id}/location", ['lat' => 17.4101, 'lng' => 78.4, 'source' => 'gps', 'accuracy_m' => 6])->assertOk();
-        $m->work('POST', "/api/mobile/v1/customers/{$id}/visit", ['lat' => 17.4102, 'lng' => 78.4, 'accuracy_m' => 5])->assertOk();
+        $m->work('POST', "/api/mobile/v1/customers/{$id}/visit", ['lat' => 17.4102, 'lng' => 78.4, 'accuracy_m' => 40])->assertOk();   // ±40: a visit, pin not moved (G6 needs ±30)
 
         // Case profile (phone + console): newest first, before / after, who and how.
         $h = $m->work('GET', "/api/mobile/v1/customers/{$id}")->assertOk()->json('address_history');

@@ -184,6 +184,50 @@ final class FieldPlanController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    /**
+     * G10: plan board — for every published plan of the day: stops done / left, the next stop, visits made off the plan,
+     * when the phone last sent a location, and alerts (no location for 30+ min, fake GPS, behind the planned time).
+     */
+    public function board(Request $r)
+    {
+        $date = $this->date($r);
+        $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: 'Asia/Kolkata';
+        $from = \Illuminate\Support\Carbon::parse($date, $tz)->startOfDay()->utc();
+        $to = $from->copy()->addDay();
+        $isToday = $date === now($tz)->toDateString();
+        $staff = $this->fieldStaff($r)->keyBy('id');
+        $plans = RoutePlan::query()->where('plan_date', $date)->where('status', 'published')->whereIn('user_id', $staff->keys())->get();
+        $ids = $plans->pluck('user_id')->all();
+        $visits = CustomerEvent::query()->where('type', 'visit')->whereIn('user_id', $ids)->where('created_at', '>=', $from)->where('created_at', '<', $to)
+            ->orderBy('created_at')->get(['user_id', 'customer_id', 'created_at'])->groupBy('user_id');
+        $last = \App\Models\LocationEvent::query()->whereIn('user_id', $ids)->where('captured_at', '>=', $from)->where('captured_at', '<', $to)
+            ->selectRaw('user_id, MAX(captured_at) as at, MAX(CASE WHEN mock THEN 1 ELSE 0 END) as mock')->groupBy('user_id')->get()->keyBy('user_id');
+        $names = Customer::query()->whereIn('id', $plans->pluck('stops')->flatten()->merge($visits->flatten()->pluck('customer_id'))->unique())->pluck('name', 'id');
+        $rows = $plans->map(function (RoutePlan $p) use ($visits, $last, $names, $staff, $isToday, $tz) {
+            $v = $visits->get($p->user_id, collect());
+            $done = $v->pluck('customer_id')->map(fn ($id) => (int) $id)->unique()->values();
+            $left = array_values(array_filter($p->stops, fn ($id) => !$done->contains($id)));
+            $off = $done->reject(fn ($id) => in_array($id, $p->stops, true))->values();
+            $seen = isset($last[$p->user_id]) ? \Illuminate\Support\Carbon::parse($last[$p->user_id]->at) : null;
+            $alerts = [];
+            if ($isToday && $left && (!$seen || $seen->lt(now()->subMinutes(30)))) $alerts[] = $seen ? 'No location for ' . $seen->diffForHumans(null, true) : 'No location today';
+            if (($last[$p->user_id]->mock ?? 0) == 1) $alerts[] = 'Fake GPS used';
+            // behind: past the time the planned route should have taken from the first check-in (plus 50%), stops still left
+            $first = $v->first()?->created_at;
+            if ($isToday && $left && $first && $p->duration_s && now()->gt($first->copy()->addSeconds((int) ($p->duration_s * 1.5) + 20 * 60 * count($p->stops)))) $alerts[] = 'Behind plan';
+            return ['user_id' => $p->user_id, 'name' => $staff[$p->user_id]->name, 'employee_code' => $staff[$p->user_id]->employee_code,
+                'planned' => count($p->stops), 'done' => count($p->stops) - count($left), 'off_plan' => $off->count(),
+                'next' => $left ? ['id' => $left[0], 'name' => $names[$left[0]] ?? null] : null,
+                'stops' => array_map(fn ($id) => ['id' => $id, 'name' => $names[$id] ?? null, 'done' => $done->contains($id),
+                    'at' => optional($v->firstWhere('customer_id', $id))->created_at?->setTimezone($tz)->format('H:i')], $p->stops),
+                'off_plan_visits' => $off->map(fn ($id) => ['id' => $id, 'name' => $names[$id] ?? null])->all(),
+                'last_location_at' => $seen?->toIso8601String(), 'alerts' => $alerts, 'optimised' => $p->optimised, 'distance_m' => $p->distance_m];
+        })->sortByDesc(fn ($x) => count($x['alerts']))->values();
+        $unplanned = $staff->except($ids)->values()->map(fn ($u) => $u->only(['id', 'name', 'employee_code']));
+        return response()->json(['date' => $date, 'today' => $isToday, 'plans' => $rows, 'without_plan' => $unplanned,
+            'totals' => ['planned' => $rows->sum('planned'), 'done' => $rows->sum('done'), 'off_plan' => $rows->sum('off_plan'), 'alerts' => $rows->sum(fn ($x) => count($x['alerts']))]]);
+    }
+
     public static function planJson(RoutePlan $p): array
     {
         return ['date' => $p->plan_date->toDateString(), 'status' => $p->status, 'stops' => $p->stops, 'start' => ['lat' => $p->start_lat, 'lng' => $p->start_lng],

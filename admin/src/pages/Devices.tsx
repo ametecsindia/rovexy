@@ -40,6 +40,9 @@ export function DevicesPage() {
           { key: 'approval_code', label: 'Code', render: (d: any) => d.approval_state === 'pending' ? <span className="approval-code">{d.approval_code}</span> : '—' },
           { key: 'model', label: 'Device', render: (d: any) => `${d.manufacturer ?? ''} ${d.model ?? ''} · Android ${d.os_version ?? '?'}` },
           { key: 'asset_tag', label: 'Asset tag' },
+          { key: 'rec', label: 'Recording verified', render: (d: any) => d.approval_state !== 'approved' ? '—'
+            : d.recording_verified_at ? <span title="A call recording from this phone reached the server">{'✓ '}{fmtDate(d.recording_verified_at)}</span>
+            : <span title="Make one test call (to your own number) from this phone; the first recording that arrives verifies it."><Badge value="warn" label="not yet" /></span> },
           { key: 'user', label: 'Employee', render: (d: any) => d.assigned_user?.name ?? '—' },
           { key: 'management_mode', label: 'Management', render: (d: any) => <Badge value={d.management_mode === 'amapi' ? 'supported' : 'requires_setup'} label={d.management_mode === 'amapi' ? 'Android Mgmt' : 'App only'} /> },
           { key: 'policy_state', label: 'Policy', render: (d: any) => <><Badge value={d.policy_state} /> {d.approval_state === 'approved' && <Badge value={d.compliant} label={d.compliant ? 'compliant' : 'not compliant'} />}</> },

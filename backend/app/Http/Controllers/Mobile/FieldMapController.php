@@ -22,6 +22,7 @@ final class FieldMapController extends Controller
     private const MAX_DISTANCES = 25;   // one Routes API matrix call
     private const MAX_STOPS = 10;       // Google Maps app navigation takes up to 9 waypoints + the destination
     public const ARRIVE_METERS = 100;   // "Check in" shows on the phone within this distance of the pin
+    public const VERIFY_ACCURACY_M = 30;  // G6: a check-in this accurate (or better) becomes the case's verified pin
 
     /** GET field/config → the key the phone's map view loads Google Maps with (null = admin has not set one). */
     public function config(GoogleMaps $maps)
@@ -120,7 +121,16 @@ final class FieldMapController extends Controller
             'body' => "Reached the customer ({$m} m from the pin" . ($acc !== null ? ", ±{$acc} m GPS" : '') . ').',
             'meta' => ['lat' => round((float) $d['lat'], 7), 'lng' => round((float) $d['lng'], 7), 'distance_m' => $m, 'accuracy_m' => $acc]]);
         Audit::record('customer.visited', $c, ['distance_m' => $m]);
-        return response()->json(['id' => $c->id, 'distance_m' => $m, 'visited_at' => $e->created_at?->toIso8601String()]);
+        // G6: an accurate fix at the door is better than any address lookup → it becomes the verified pin, kept on later
+        // uploads of the same address and reused for other cases at that address (no Google call).
+        $verified = $acc !== null && $acc <= self::VERIFY_ACCURACY_M && $c->geo_status !== 'verified';
+        if ($verified) {
+            $pin = [round((float) $d['lat'], 7), round((float) $d['lng'], 7)];
+            Customer::changedBy('phone_gps', $r->user()->id, fn () => $c->forceFill(['lat' => $pin[0], 'lng' => $pin[1], 'geo_status' => 'verified', 'geo_precision' => "GPS ±{$acc} m"])->save(),
+                "Verified at check-in, GPS ±{$acc} m.");
+            \App\Services\AutoGeocode::remember($c, $pin[0], $pin[1], "GPS ±{$acc} m");
+        }
+        return response()->json(['id' => $c->id, 'distance_m' => $m, 'visited_at' => $e->created_at?->toIso8601String(), 'pin_verified' => $verified]);
     }
 
     private function origin(Request $r, array $more): array

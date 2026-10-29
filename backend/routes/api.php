@@ -51,6 +51,8 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::get('licences', [$c, 'licences'])->middleware('platform:licences');
     Route::get('licences/{id}', [$c, 'licence'])->whereNumber('id')->middleware('platform:licences');
     Route::patch('licences/{id}', [$c, 'updateLicence'])->whereNumber('id')->middleware('platform:licences');
+    Route::post('licences/{id}/deposits', [$c, 'addDeposit'])->whereNumber('id')->middleware('platform:licences');   // G16
+    Route::get('billing-overview', [$c, 'billingOverview'])->middleware('platform:licences');                        // G15 + G16
     Route::get('plans', [$c, 'plans'])->middleware('platform:plans');
     Route::post('plans', [$c, 'savePlan'])->middleware('platform:plans');
     Route::put('plans/{id}', [$c, 'savePlan'])->whereNumber('id')->middleware('platform:plans');
@@ -277,6 +279,13 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('follow-ups', [Admin\CallController::class, 'followUps'])->middleware('perm:calls.view');
         Route::get('disposition-codes', [Admin\CallController::class, 'codes'])->middleware('perm:calls.view');
         // Payments reported from call feedback (9 Oct 2026): slip view, verify / reject, e-mail.
+        // G14: My calls — a telecaller calls their own customers from the console (Click2Call)
+        Route::prefix('my')->middleware('perm:calls.console')->group(function () {
+            Route::get('customers', [Admin\ConsoleCallController::class, 'customers']);
+            Route::post('customers/{id}/call', [Admin\ConsoleCallController::class, 'call'])->whereNumber('id')->middleware('throttle:calls');
+            Route::get('calls/{uuid}', [Admin\ConsoleCallController::class, 'show']);
+            Route::post('calls/{uuid}/hangup', [Admin\ConsoleCallController::class, 'hangup']);
+        });
         Route::get('payments', [Admin\PaymentController::class, 'index'])->middleware('perm:calls.view');
         Route::get('payments/{id}/slip', [Admin\PaymentController::class, 'slip'])->middleware('perm:calls.view');
         Route::post('payments/{id}/review', [Admin\PaymentController::class, 'review'])->middleware('perm:payments.verify');
@@ -355,6 +364,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::prefix('field')->middleware(['perm:customers.assign', 'feature:field_map'])->group(function () {
             $fp = Admin\FieldPlanController::class;
             Route::get('employees', [$fp, 'employees']);
+            Route::get('board', [$fp, 'board']);
             Route::put('circles/{userId}', [$fp, 'saveCircle'])->whereNumber('userId');
             Route::delete('circles/{userId}', [$fp, 'deleteCircle'])->whereNumber('userId');
             Route::post('circles/{userId}/assign', [$fp, 'assignInCircle'])->whereNumber('userId');
@@ -371,6 +381,9 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::post('integrations/{system}/test', [Admin\IntegrationController::class, 'test'])->whereIn('system', ['smartprs', 'smartept'])->middleware('perm:system.health');
         Route::post('integrations/flush', [Admin\IntegrationController::class, 'flush'])->middleware('perm:telephony.configure');
         Route::get('reports/calls.csv', [Admin\SettingsController::class, 'exportCalls'])->middleware('perm:reports.export');
+        // G21: more exports + the audit pack (ZIP with recordings, slips and SHA-256 manifest)
+        Route::get('reports/export/{kind}.csv', [Admin\ExportController::class, 'csv'])->whereIn('kind', \App\Services\ExportService::KINDS)->middleware(['perm:reports.export', 'throttle:30,1']);
+        Route::get('reports/audit-pack.zip', [Admin\ExportController::class, 'pack'])->middleware(['perm:reports.export', 'throttle:6,1']);
     });
 });
 

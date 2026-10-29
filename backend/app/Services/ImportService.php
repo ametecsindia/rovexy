@@ -207,7 +207,10 @@ final class ImportService
                     $filePin = array_key_exists('lat', $attrs) && Customer::validCoords($attrs['lat'] ?? null, $attrs['lng'] ?? null);
                     if ($c) {
                         $c->fill($attrs + ['assigned_user_id' => $userId, 'assigned_team_id' => $teamId, 'withdrawn_at' => null]);
-                        if ($filePin) {
+                        $sameAddress = !$c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS);
+                        if ($c->geo_status === 'verified' && $sameAddress) {
+                            $c->fill(['lat' => $c->getOriginal('lat'), 'lng' => $c->getOriginal('lng')]);   // G6: the pin verified at the door wins over the file
+                        } elseif ($filePin) {
                             $c->fill(['geo_status' => 'file', 'geo_precision' => null]);
                         } elseif ($c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS)) {
                             $c->fill(['lat' => null, 'lng' => null, 'geo_status' => null, 'geo_precision' => null]);   // old pin belongs to the old address

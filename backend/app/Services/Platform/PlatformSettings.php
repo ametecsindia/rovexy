@@ -54,6 +54,10 @@ final class PlatformSettings
         'staff_mfa_required' => '0',     // 1 = every staff / accountant sign-in needs a 2-step code (first sign-in enrols)
         // push notifications (G3): where the Firebase credential came from — 'settings' (pasted here) | 'licence'
         'fcm_source' => '',
+        // calling add-ons per user per month (G15, plus GST) and the refundable deposit per field user (G16)
+        'price_c2c_user' => '350',
+        'price_smart31_user' => '550',
+        'deposit_per_fos' => '1000',
     ];
 
     public const SECRETS = ['razorpay_key_secret', 'razorpay_webhook_secret', 'mail_password', 'fcm_service_account_json'];

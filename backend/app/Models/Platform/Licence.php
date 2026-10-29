@@ -13,7 +13,7 @@ class Licence extends Model
 {
     protected $fillable = ['key', 'company_id', 'plan_id', 'holder_name', 'holder_email', 'kind', 'max_users', 'features', 'status',
         'starts_at', 'expires_at', 'grace_days', 'notes',
-        'deployment', 'billing', 'amc_expires_at', 'server_fingerprint', 'activated_at', 'last_validated_at', 'reported_users'];
+        'deployment', 'billing', 'amc_expires_at', 'server_fingerprint', 'activated_at', 'last_validated_at', 'reported_users', 'amc_amount'];
 
     protected function casts(): array
     {

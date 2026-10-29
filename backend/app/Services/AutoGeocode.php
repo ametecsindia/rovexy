@@ -92,6 +92,16 @@ final class AutoGeocode
         return $stats;
     }
 
+    /** G6: a verified pin (GPS at the door) is kept for the case's address, so another case at that address gets it free. */
+    public static function remember(Customer $c, float $lat, float $lng, string $precision): void
+    {
+        $address = self::addressOf($c);
+        if ($address === '') return;
+        $country = (string) (app(CurrentCompany::class)->get()->default_country ?: 'IN');
+        GeocodeResult::query()->updateOrCreate(['address_key' => self::key($address, $country)],
+            ['status' => 'google', 'lat' => $lat, 'lng' => $lng, 'precision' => mb_substr($precision, 0, 24), 'formatted_address' => mb_substr('Verified at the door: ' . $address, 0, 300)]);
+    }
+
     /** Progress for one upload (Portfolios page). */
     public static function progress(int $importId): array
     {
