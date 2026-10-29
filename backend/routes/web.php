@@ -16,6 +16,22 @@ Route::get('/w/{slug}/admin/{path?}', function () {
     return response()->file(public_path('admin/index.html'), ['Cache-Control' => 'no-store']);
 })->where(['slug' => '[a-z0-9][a-z0-9-]{1,38}[a-z0-9]', 'path' => '.*']);
 
+// G1: the full Android app (all-day location while signed in), downloaded from this company's own server.
+// The file is public/downloads/rovexy.apk + rovexy-apk.json, put there by the build (build-client.bat) — not in git.
+Route::get('/get-app', function () {
+    $apk = public_path('downloads/rovexy.apk');
+    $meta = json_decode((string) @file_get_contents(public_path('downloads/rovexy-apk.json')), true) ?: [];
+    $company = rescue(fn () => \App\Models\Company::query()->orderBy('id')->value('name'), null, false);
+    return response()->view('site.app-download', ['apk' => is_file($apk), 'version' => $meta['version'] ?? '—', 'server' => rtrim(config('app.url'), '/'),
+        'size' => is_file($apk) ? number_format(filesize($apk) / 1048576, 1) : 0, 'company' => \App\Services\Licensing\LicenceClient::isClient() && $company ? $company : 'your company'],
+        200, ['Cache-Control' => 'no-cache']);
+});
+Route::get('/get-app/download', function () {
+    $apk = public_path('downloads/rovexy.apk');
+    abort_unless(is_file($apk), 404);
+    return response()->download($apk, 'ROVEXY.apk', ['Content-Type' => 'application/vnd.android.package-archive', 'Cache-Control' => 'no-cache']);
+})->middleware('throttle:30,1');
+
 // Company users: set a password from the welcome e-mail, or reset a forgotten one.
 Route::get('/password-forgot', [\App\Http\Controllers\Site\PasswordController::class, 'forgot']);
 Route::post('/password-forgot', [\App\Http\Controllers\Site\PasswordController::class, 'sendReset'])->middleware('throttle:6,1');

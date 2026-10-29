@@ -32,6 +32,8 @@ final class GoogleMaps
     public const MAX_MATRIX = 5;
     /** Basic (Essentials) routing allows up to 10 intermediate stops. */
     public const MAX_INTERMEDIATES = 10;
+    /** A day plan: up to 25 stops (Google's limit for an optimised route), destination included. */
+    public const MAX_PLAN_STOPS = 25;
 
     /** Integrations rows: 'gmaps' = server key (Routes + Geocoding), 'gmaps_web' = optional separate map-display key. */
     public const SERVER = 'gmaps';
@@ -102,6 +104,8 @@ final class GoogleMaps
             $hit === null ? $miss[] = $i : $out[$i] = $hit === 'none' ? null : $hit;
         }
         if ($miss) {
+            $this->key();   // not set up → nothing counted
+            MapsUsage::take('matrix', count($miss));   // G12: billed per element
             $rows = $this->post('/distanceMatrix/v2:computeRouteMatrix', [
                 'origins' => [['waypoint' => self::waypoint($origin)]],
                 'destinations' => array_map(fn ($i) => ['waypoint' => self::waypoint($dests[$i])], $miss),
@@ -131,9 +135,24 @@ final class GoogleMaps
      */
     public function route(array $origin, array $stops, bool $optimize): array
     {
-        $stops = array_slice(array_values($stops), 0, self::MAX_INTERMEDIATES + 1);
-        $key = 'maps:rt3:' . self::MODE . ':' . sha1(json_encode([self::round($origin), $stops, $optimize]));
+        return $this->routeVia($origin, array_slice(array_values($stops), 0, self::MAX_INTERMEDIATES + 1), $optimize, self::MODE, 'routes');
+    }
+
+    /**
+     * G8 admin day plan: ONE optimised two-wheeler route (Routes Enterprise, the only place it is used) through up to
+     * MAX_PLAN_STOPS stops. Same answer shape as route().
+     */
+    public function planRoute(array $origin, array $stops): array
+    {
+        return $this->routeVia($origin, array_slice(array_values($stops), 0, self::MAX_PLAN_STOPS), true, self::PLAN_MODE, 'routes_2w');
+    }
+
+    private function routeVia(array $origin, array $stops, bool $optimize, string $mode, string $sku): array
+    {
+        $key = 'maps:rt3:' . $mode . ':' . sha1(json_encode([self::round($origin), $stops, $optimize]));
         if (($hit = Cache::get($key)) !== null) return $hit;
+        $this->key();   // not set up → nothing counted
+        MapsUsage::take($sku);
 
         $idx = array_keys($stops);
         $last = count($stops) - 1;
@@ -142,7 +161,8 @@ final class GoogleMaps
             $last = array_search(max($far), $far, true);
         }
         $between = array_values(array_filter($idx, fn ($i) => $i !== $last));
-        $body = ['origin' => self::waypoint($origin), 'destination' => self::waypoint($stops[$last]), 'travelMode' => self::MODE, 'routingPreference' => self::PREF];
+        $body = ['origin' => self::waypoint($origin), 'destination' => self::waypoint($stops[$last]), 'travelMode' => $mode]
+            + ($mode === self::PLAN_MODE ? [] : ['routingPreference' => self::PREF]);   // two-wheeler takes no routing preference
         if ($between) {
             $body['intermediates'] = array_map(fn ($i) => self::waypoint($stops[$i]), $between);
             if ($optimize) $body['optimizeWaypointOrder'] = true;
@@ -167,12 +187,14 @@ final class GoogleMaps
      * Address → pin, or null when Google finds nothing. 'precise' is false for area-level matches (APPROXIMATE),
      * which are too coarse to sort customers by distance.
      *
-     * @return array{lat: float, lng: float, formatted_address: string, precise: bool}|null
+     * @return array{lat: float, lng: float, formatted_address: string, precise: bool, precision: string}|null
      */
     public function geocode(string $address, string $region): ?array
     {
         $key = 'maps:gc:' . sha1(mb_strtolower($address) . '|' . $region);
         if (($hit = Cache::get($key)) !== null) return $hit === 'none' ? null : $hit;
+        $this->key();   // not set up → no count
+        MapsUsage::take('geocode');
         $res = $this->send(fn ($http) => $http->get('https://maps.googleapis.com/maps/api/geocode/json',
             ['address' => $address, 'region' => strtolower($region), 'key' => $this->key()]));
         $status = $res['status'] ?? 'UNKNOWN_ERROR';
@@ -183,7 +205,8 @@ final class GoogleMaps
         if ($status !== 'OK') $this->fail('geocode', $status, (string) ($res['error_message'] ?? ''));
         $g = $res['results'][0];
         $out = ['lat' => (float) $g['geometry']['location']['lat'], 'lng' => (float) $g['geometry']['location']['lng'],
-            'formatted_address' => (string) ($g['formatted_address'] ?? ''), 'precise' => ($g['geometry']['location_type'] ?? '') !== 'APPROXIMATE'];
+            'formatted_address' => (string) ($g['formatted_address'] ?? ''), 'precise' => ($g['geometry']['location_type'] ?? '') !== 'APPROXIMATE',
+            'precision' => (string) ($g['geometry']['location_type'] ?? '')];
         Cache::put($key, $out, 86400);   // addresses don't move
         return $out;
     }

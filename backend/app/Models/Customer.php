@@ -14,7 +14,7 @@ class Customer extends Model
     protected $table = 'customers';
 
     protected $fillable = ['customer_ref','name','phone','alt_phone','campaign','status','notes','follow_up_on','assigned_user_id','assigned_team_id','withdrawn_at','last_import_id','city','area','pincode',
-        'email','address','state','lat','lng','preferred_time','loan_amount','outstanding','principal_os','interest_os','charges','overdue_amount','emi_amount',
+        'email','address','state','lat','lng','geo_status','geo_precision','preferred_time','loan_amount','outstanding','principal_os','interest_os','charges','overdue_amount','emi_amount',
         'due_date','oldest_due_date','overdue_installments','last_paid_on','last_paid_amount','balance_as_of'];
 
     /** Loan / dues columns that come from the lead file (only the ones present in a file are updated). */

@@ -109,7 +109,12 @@ final class SyncController extends Controller
                 ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180) || throw new DomainException('invalid_location');
                 $loc = LocationEvent::query()->create(['device_id' => $device->id, 'user_id' => $user->id, 'work_session_id' => $wsId, 'lat' => $lat, 'lng' => $lng,
                     'accuracy_m' => isset($p['accuracy_m']) ? (float) $p['accuracy_m'] : null, 'provider' => mb_substr((string) ($p['provider'] ?? ''), 0, 16) ?: null,
-                    'battery_pct' => isset($p['battery_pct']) ? (int) $p['battery_pct'] : null, 'captured_at' => $e['occurred_at']]);
+                    'battery_pct' => isset($p['battery_pct']) ? (int) $p['battery_pct'] : null, 'captured_at' => $e['occurred_at'], 'mock' => !empty($p['mock'])]);
+                if ($loc->mock && \Illuminate\Support\Facades\Cache::add("mock-alert:{$device->id}:" . now()->toDateString(), 1, 86400)) {
+                    // G19: fake-GPS app on this phone — once a day per phone in the audit log and the console feed
+                    \App\Support\Audit::record('location.mock_detected', $user, ['device_id' => $device->id]);
+                    \App\Events\AdminFeed::dispatchFor($device->company_id, 'alert.mock_location', ['user_id' => $user->id, 'device_id' => $device->id]);
+                }
                 app(\App\Services\FieldForceIntegration::class)->recordLocation($user, $loc);   // → SmartEPT trail (outbox)
                 return;
             case 'chat_read':

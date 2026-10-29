@@ -1327,7 +1327,7 @@ final class AcceptanceTest extends TestCase
         });
         \Illuminate\Support\Facades\Http::fake(['maps.googleapis.com/*' => fn ($req) => \Illuminate\Support\Facades\Http::response(['status' => 'OK', 'results' => [[
             'formatted_address' => 'x', 'geometry' => ['location' => ['lat' => 17.4, 'lng' => 78.3], 'location_type' => str_contains($req['address'], 'MG Road') ? 'ROOFTOP' : 'APPROXIMATE']]]])]);
-        $this->artisan('ammp:geocode-customers')->expectsOutputToContain('Saved 1 · area-only match, skipped 1')->assertSuccessful();
+        $this->artisan('ammp:geocode-customers')->expectsOutputToContain('saved 1 (reused 0) · area-only 1')->assertSuccessful();
         app(CurrentCompany::class)->run($this->a, function () {
             $this->assertEquals(17.4, Customer::query()->where('customer_ref', 'C1')->value('lat'));
             $this->assertNull(Customer::query()->where('customer_ref', 'C2')->value('lat'));

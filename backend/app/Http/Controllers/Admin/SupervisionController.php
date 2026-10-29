@@ -64,7 +64,10 @@ final class SupervisionController extends Controller
         // Today: latest fix in the last 24 h. Past day: last fix of that day.
         $fixes = LocationEvent::query()->whereIn('id', LocationEvent::query()->selectRaw('MAX(id)')->whereIn('user_id', $ids)
                 ->where('captured_at', '>=', $isToday ? now()->subDay() : $dayStart)->where('captured_at', '<', $dayEnd)->groupBy('user_id'))
-            ->get(['user_id', 'lat', 'lng', 'accuracy_m', 'captured_at', 'battery_pct'])->keyBy('user_id');
+            ->get(['user_id', 'lat', 'lng', 'accuracy_m', 'captured_at', 'battery_pct', 'mock'])->keyBy('user_id');
+        // G19: anyone whose phone sent a fake-GPS fix that day
+        $mocked = LocationEvent::query()->whereIn('user_id', $ids)->where('mock', true)->where('captured_at', '>=', $dayStart)->where('captured_at', '<', $dayEnd)
+            ->distinct()->pluck('user_id')->flip();
         $calls = \App\Models\Call::query()->where('is_test', false)->whereIn('user_id', $ids)->where('initiated_at', '>=', $dayStart)->where('initiated_at', '<', $dayEnd)->where('provider', '!=', 'manual')
             ->when($pfCustomers, fn ($q) => $q->whereIn('customer_id', clone $pfCustomers))
             ->selectRaw('user_id, COUNT(*) AS n, SUM(CASE WHEN answered_at IS NOT NULL THEN 1 ELSE 0 END) AS connected')->groupBy('user_id')->get()->keyBy('user_id');
@@ -73,14 +76,15 @@ final class SupervisionController extends Controller
             ->selectRaw('user_id, COUNT(*) AS n')->groupBy('user_id')->pluck('n', 'user_id');
         if (!$r->boolean('refresh')) Audit::record('location.live_viewed', null, ['employees' => count($ids)] + $f);
         return response()->json(['at' => now()->toAtomString(), 'date' => $dayStart->copy()->setTimezone($tz)->toDateString(), 'today' => $isToday,
-            'employees' => $devices->map(function (ManagedDevice $d) use ($fixes, $calls, $visits, $isToday) {
+            'employees' => $devices->map(function (ManagedDevice $d) use ($fixes, $calls, $visits, $isToday, $mocked) {
             $fx = $fixes[$d->assigned_user_id] ?? null;
             $online = $d->last_contact_at?->gt(now()->subMinutes(10)) ?? false;
             return ['user_id' => $d->assigned_user_id, 'name' => $d->assignedUser?->name, 'employee_code' => $d->assignedUser?->employee_code,
                 'groups' => $d->assignedUser?->teams->pluck('name')->values() ?? [], 'device' => $d->asset_tag ?? "Phone #{$d->id}",
                 'presence' => $online ? 'online' : 'offline', 'work_state' => $d->work_state, 'battery_pct' => $fx?->battery_pct ?? $d->battery_pct, 'network_type' => $d->network_type,
                 'last_contact_at' => $d->last_contact_at?->toAtomString(),
-                'location' => $fx ? ['lat' => (float) $fx->lat, 'lng' => (float) $fx->lng, 'accuracy_m' => $fx->accuracy_m, 'captured_at' => $fx->captured_at->toAtomString()] : null,
+                'location' => $fx ? ['lat' => (float) $fx->lat, 'lng' => (float) $fx->lng, 'accuracy_m' => $fx->accuracy_m, 'captured_at' => $fx->captured_at->toAtomString(), 'mock' => (bool) $fx->mock] : null,
+                'fake_gps' => isset($mocked[$d->assigned_user_id]),
                 // live = a fix in the last 15 min (today only); stale = an older fix (or a past day's last fix); none = no fix
                 'status' => !$fx ? 'none' : ($isToday && $fx->captured_at->gt(now()->subMinutes(15)) ? 'live' : 'stale'),
                 'calls_today' => (int) ($calls[$d->assigned_user_id]->n ?? 0), 'connected_today' => (int) ($calls[$d->assigned_user_id]->connected ?? 0),

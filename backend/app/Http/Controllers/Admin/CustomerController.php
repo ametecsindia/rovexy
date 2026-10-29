@@ -125,7 +125,8 @@ final class CustomerController extends Controller
     public function importStatus(Request $r, int $id)
     {
         $job = $this->job($r, $id);
-        return response()->json($job->toArray() + ['sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get()]);
+        return response()->json($job->toArray() + ['sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get(),
+            'geo' => $job->status === 'completed' ? \App\Services\AutoGeocode::progress($job->id) : null]);
     }
 
     public function errorReport(Request $r, int $id)

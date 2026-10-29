@@ -65,6 +65,13 @@ Artisan::command('rovexy:backup', function () {
 })->purpose('Back up the database now (also runs every night at 00:30)');
 Schedule::command('rovexy:backup')->dailyAt('00:30')->name('backup:nightly')->withoutOverlapping();
 
+// G5: every night, map pins for any address still waiting (e.g. after the monthly limit was reached or Google was down).
+Schedule::call(function () {
+    foreach (Company::query()->where('status', 'active')->pluck('id') as $id) {
+        \App\Jobs\GeocodePending::dispatch($id);
+    }
+})->dailyAt('01:30')->name('geocode:nightly')->withoutOverlapping();
+
 // On-prem install: check the licence with the licence server every night (keeps the last verdict when it can't be reached).
 Schedule::call(fn () => app(\App\Services\Licensing\LicenceClient::class)->check())
     ->dailyAt('01:00')->name('licence:check')->withoutOverlapping()->when(fn () => \App\Services\Licensing\LicenceClient::isClient());

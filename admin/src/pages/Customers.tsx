@@ -41,12 +41,13 @@ export function ImportsPage() {
   const a = useAction();
 
   useEffect(() => {
-    if (!job || !['validating', 'committing'].includes(job.status)) return;
+    const pinning = job?.status === 'completed' && (job.geo?.waiting ?? 0) > 0;   // G5: map pins are added in the background
+    if (!job || (!['validating', 'committing'].includes(job.status) && !pinning)) return;
     const t = setInterval(async () => {
       const j = await get(`/imports/${job.id}`);
       setJob(j);
-      if (j.status === 'completed') { void imports.reload(); void portfolios.reload(); }
-    }, 1500);
+      if (j.status === 'completed' && !pinning) { void imports.reload(); void portfolios.reload(); }
+    }, pinning ? 5000 : 1500);
     return () => clearInterval(t);
   }, [job]);
 
@@ -121,6 +122,13 @@ export function ImportsPage() {
               {job.status === 'uploaded' && !a.busy && <p className="muted">Next: press <b>Check file</b>. Nothing is imported until you press Import.</p>}
               {job.status === 'ready' && <Notice tone={job.error_rows ? 'warn' : 'ok'}>{job.total_rows} rows: {job.valid_rows} ready to import, {job.error_rows} with problems (they will be skipped). {job.error_rows > 0 && <a href={fileUrl(`/api/admin/imports/${job.id}/errors.csv`)}>Download the problem rows</a>}</Notice>}
               {job.status === 'completed' && <Notice tone="ok">Done: {job.created_count} new, {job.updated_count} updated, {job.skipped_count} skipped. {can('customers.assign') && <Link to={`/allocation?portfolio=${job.id}`}>Assign this portfolio →</Link>}</Notice>}
+              {job.status === 'completed' && job.geo && (
+                <p className="muted small">Map pins: <b>{job.geo.pinned}</b> of {job.geo.total} placed
+                  {job.geo.waiting > 0 && <> · {job.geo.waiting} being looked up…</>}
+                  {job.geo.area_only > 0 && <> · {job.geo.area_only} address too vague (area only — pinned at the door)</>}
+                  {job.geo.not_found > 0 && <> · {job.geo.not_found} not found</>}
+                  {job.geo.no_address > 0 && <> · {job.geo.no_address} without an address</>}</p>
+              )}
               {job.status === 'failed' && <Notice tone="bad">Import failed: {job.failure}</Notice>}
               {preview && preview.errors.length > 0 && <Table rows={preview.errors.slice(0, 20).map((e: any, i: number) => ({ id: i, ...e }))} columns={[{ key: 'row', label: 'Row' }, { key: 'field', label: 'Column' }, { key: 'message', label: 'Problem' }]} />}
             </>

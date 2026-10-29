@@ -800,6 +800,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             put("customer_ids", kotlinx.serialization.json.buildJsonArray { ids.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) } })
         }).obj()
 
+    /** G9: today's route the admin published for me (null = none). Served from the saved plan — no Google call. */
+    suspend fun todayPlan(): JsonObject? =
+        g.session.work("GET", "/api/mobile/v1/field/plan").obj()["plan"] as? JsonObject
+
     /** Map key set by the admin (Integrations → Google Maps); null when not set. */
     suspend fun fieldConfig(): JsonObject = g.session.work("GET", "/api/mobile/v1/field/config").obj()
 
@@ -832,9 +836,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** "Reached the customer": the server checks the GPS is within 100 m (+ drift) of the pin and logs a visit on the timeline. */
-    suspend fun checkIn(id: Long, lat: Double, lng: Double, accuracy: Float?) {
+    suspend fun checkIn(id: Long, lat: Double, lng: Double, accuracy: Float?, mock: Boolean = false) {
         g.session.work("POST", "/api/mobile/v1/customers/$id/visit", buildJsonObject {
             put("lat", lat); put("lng", lng); accuracy?.let { put("accuracy_m", it.toDouble()) }
+            if (mock) put("mock", true)   // G19: the server refuses a check-in from a fake-GPS app
         })
         if (profileId.value == id) loadProfile(id)
     }

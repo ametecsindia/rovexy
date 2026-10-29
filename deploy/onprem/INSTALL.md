@@ -26,6 +26,10 @@ status — with **Choose licence file…** if the licence is not active yet. Des
 - **Backups:** every night at 00:30 the database is backed up to `C:\ROVEXY\backups` (the newest 7 are kept). The console's
   *System health* page shows when the last backup ran. Copy that folder to another disk or computer regularly — a backup on
   the same disk does not survive the disk failing.
+- **Phone app with all-day location:** field employees open **https://<your server>/get-app** on the phone (the link and a QR
+  code are in the console under *Devices & approvals*). That version keeps sharing location while the employee is signed in, also
+  with the screen off; the Play Store version only does it while the app is open. Uninstall the Play Store app first. The app file
+  comes with the ROVEXY package and its updates.
 - **Upgrade:** run the newer `ROVEXY-Setup-x.y.exe`. It backs up the database to `C:\ROVEXY\backups`, keeps all settings and
   data, and updates the program. **Uninstall** (Windows Settings → Apps) removes the program and services but keeps
   `rovexy\.env`, `rovexy\storage`, `data`, `backups`, `logs` and the database.

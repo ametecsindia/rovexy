@@ -57,7 +57,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->render(function (DomainException $e, Request $request) {
             $status = match (true) {
                 str_starts_with($e->reason, 'company_') => 404,
-                in_array($e->reason, ['maps_unavailable', 'maps_not_configured'], true) => 503,
+                in_array($e->reason, ['maps_unavailable', 'maps_not_configured', 'maps_limit'], true) => 503,
                 str_starts_with($e->reason, 'signature_'), $e->reason === 'unauthenticated' => 401,
                 in_array($e->reason, ['device_not_approved', 'device_revoked', 'not_assigned', 'forbidden', 'device_not_compliant', 'lease_expired', 'licence_inactive'], true) => 403,
                 default => 422,

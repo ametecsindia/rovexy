@@ -282,7 +282,21 @@ final class IntegrationController extends Controller
         return response()->json([
             'key_hint' => $hint($rows->get(GoogleMaps::SERVER)), 'display_key_hint' => $hint($rows->get(GoogleMaps::DISPLAY)),
             'enabled' => (bool) ($rows->get(GoogleMaps::SERVER)?->enabled ?? false), 'last_status' => $rows->get(GoogleMaps::SERVER)?->last_status,
+            'usage' => \App\Services\MapsUsage::report(), 'month' => \App\Services\MapsUsage::month(),
         ]);
+    }
+
+    /** G12: monthly limit per Google service (blank = Google's free allowance, so the client is never billed by default). */
+    public function saveMapsLimits(Request $r, \App\Support\CurrentCompany $ctx)
+    {
+        $rules = [];
+        foreach (array_keys(\App\Services\MapsUsage::SKUS) as $sku) $rules["limits.{$sku}"] = 'nullable|integer|min:0|max:10000000';
+        $d = $r->validate(['limits' => 'required|array'] + $rules);
+        $c = $ctx->get();
+        $limits = array_filter(array_intersect_key($d['limits'], \App\Services\MapsUsage::SKUS), fn ($v) => $v !== null && $v !== '');
+        $c->forceFill(['settings' => array_merge($c->settings ?? [], ['maps_limits' => array_map('intval', $limits)])])->save();
+        Audit::record('integration.maps_limits', null, ['limits' => $limits]);
+        return $this->maps();
     }
 
     /** Save the Google Maps keys (blank = keep; remove_display_key clears the optional display key), then test the server key. */

@@ -88,6 +88,18 @@ call npm run build || ( popd & echo [ERROR] The console build failed - see above
 popd
 if not exist "%ROOT%\backend\public\admin\index.html" ( echo [ERROR] backend\public\admin\index.html was not produced. & goto :fail )
 
+rem ---- G1: the full Android app (all-day location), served by each client server at /get-app -------------
+rem Build it first in Android Studio: Build - Generate Signed App Bundle / APK - APK - flavour "direct", release.
+set "APK=%ROOT%\android\app\build\outputs\apk\direct\release\app-direct-release.apk"
+if not exist "%APK%" goto :no_apk
+if not exist "%ROOT%\backend\public\downloads" mkdir "%ROOT%\backend\public\downloads"
+copy /y "%APK%" "%ROOT%\backend\public\downloads\rovexy.apk" >nul || ( echo [ERROR] Could not copy the app file. & goto :fail )
+php -r "preg_match('/versionName = .([0-9.]+)/', file_get_contents($argv[1]), $m); file_put_contents($argv[2], json_encode(['version' => $m[1] ?? '?', 'built' => date('Y-m-d')]));" -- "%ROOT%\android\app\build.gradle.kts" "%ROOT%\backend\public\downloads\rovexy-apk.json"
+echo       App file included: %APK%
+goto :have_apk
+:no_apk
+echo [WARN] No direct app file ^(%APK%^). Client servers will show "app file not on this server" at /get-app.
+:have_apk
 rem ---- 3. clean copy of the backend ------------------------------------------------------
 echo [3/8] Copying the backend to build\client-stage
 if exist "%STAGE%" rmdir /s /q "%STAGE%"

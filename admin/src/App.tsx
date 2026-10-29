@@ -22,6 +22,7 @@ import { AllocationPage } from './pages/Allocation';
 import { PortfolioReportsPage } from './pages/PortfolioReports';
 import { AddressReportPage } from './pages/AddressReport';
 import { LicencePage } from './pages/Licence';
+import { FieldPlanningPage } from './pages/FieldPlanning';
 
 type NavItem = { to: string; icon: string; label: string; perm?: string; group: string };
 /** Sidebar: Dashboard on top, then collapsible sections. Order here = order on screen. */
@@ -40,6 +41,7 @@ export const NAV: NavItem[] = [
   { to: '/calling/test-calls', icon: 'call', label: 'Test calls', perm: 'telephony.configure', group: 'Calling configuration' },
   { to: '/imports', icon: 'upload', label: 'Portfolios', perm: 'customers.view', group: 'Customers' },
   { to: '/allocation', icon: 'people', label: 'Assignment', perm: 'customers.assign', group: 'Customers' },
+  { to: '/field-planning', icon: 'pin', label: 'Field planning (circles & routes)', perm: 'customers.assign', group: 'Customers' },
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
   { to: '/address-report', icon: 'pin', label: 'Address & reachability', perm: 'customers.view', group: 'Customers' },
   { to: '/devices', icon: 'phone', label: 'Devices & approvals', perm: 'devices.view', group: 'Devices' },
@@ -245,6 +247,7 @@ export function App() {
           <Route path="/imports" element={<ImportsPage />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/allocation" element={<AllocationPage />} />
+          <Route path="/field-planning" element={<FieldPlanningPage />} />
           <Route path="/customers/:id" element={<CustomerDetailPage />} />
           <Route path="/address-report" element={<AddressReportPage />} />
           <Route path="/calling" element={<Navigate to="/calling/setup" replace />} />

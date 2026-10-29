@@ -15,10 +15,10 @@ class LocationEvent extends Model
 
     public $timestamps = false;
 
-    protected $fillable = ['device_id','user_id','work_session_id','lat','lng','accuracy_m','provider','battery_pct','network_type','captured_at'];
+    protected $fillable = ['device_id','user_id','work_session_id','lat','lng','accuracy_m','provider','battery_pct','network_type','captured_at','mock'];
 
     protected function casts(): array
     {
-        return ['captured_at' => 'datetime','received_at' => 'datetime'];
+        return ['captured_at' => 'datetime','received_at' => 'datetime','mock' => 'boolean'];
     }
 }

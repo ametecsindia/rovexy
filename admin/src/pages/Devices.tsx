@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import QRCode from 'qrcode';
 import { get, post, fmtDate, qs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { realtime } from '../lib/realtime';
@@ -31,6 +32,7 @@ export function DevicesPage() {
       actions={<><select value={state} onChange={(e) => setState(e.target.value)} aria-label="Filter by state"><option value="">All states</option>{['pending', 'approved', 'rejected', 'revoked'].map((s) => <option key={s}>{s}</option>)}</select>
         <button className="secondary" onClick={devices.reload}>Refresh</button></>}>
       <ErrorBox error={devices.error} />
+      <InstallLinkCard />
       <Card>
         <Table rows={devices.data?.data} onRow={setDetail} columns={[
           { key: 'id', label: '#' },
@@ -154,4 +156,26 @@ function signOutReason(ws: any, dev: any): string {
     employee_suspended: 'the employee account was suspended',
   };
   return `signed out${when} — ${why[ws.end_reason] ?? String(ws.end_reason).replace(/_/g, ' ')}.`;
+}
+
+/**
+ * G1: link (and QR code) to the full ROVEXY app on this server — the version that shares location all day while the
+ * employee is signed in. The Play Store version only does that while the app is on screen.
+ */
+function InstallLinkCard() {
+  const url = `${window.location.origin}/get-app`;
+  const [qr, setQr] = useState<string | null>(null);
+  useEffect(() => { void QRCode.toDataURL(url, { margin: 1, width: 150, color: { dark: '#0f2238', light: '#ffffff' } }).then(setQr).catch(() => setQr(null)); }, [url]);
+  return (
+    <Card title="Install the app on a field phone (all-day location)">
+      <div className="row" style={{ alignItems: 'flex-start', gap: 16 }}>
+        {qr && <img src={qr} alt="QR code for the app download page" width={150} height={150} style={{ borderRadius: 8 }} />}
+        <div style={{ flex: 1, minWidth: 240 }}>
+          <p style={{ marginTop: 0 }}>Send this link to field employees (WhatsApp / SMS), or let them scan the code with the phone camera:</p>
+          <p><span className="code">{url}</span> <button className="ghost" onClick={() => void navigator.clipboard?.writeText(url)}>Copy</button></p>
+          <p className="muted small">This version keeps sharing location while the employee is signed in, also with the screen off. If the Play Store app is on the phone, uninstall it first. The page says if the app file is not on this server yet.</p>
+        </div>
+      </div>
+    </Card>
+  );
 }

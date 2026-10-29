@@ -29,6 +29,21 @@ final class FieldMapController extends Controller
         return response()->json(['map_key' => $maps->displayKey(), 'routing' => $maps->configured()]);
     }
 
+    /**
+     * GET field/plan → today's route the admin published for me (G9), in visiting order, with the road line to draw and
+     * which stops I have already checked in at today. Served from the saved plan: no Google call from the phone.
+     */
+    public function plan(Request $r)
+    {
+        $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: 'Asia/Kolkata';
+        $today = now($tz)->toDateString();
+        $p = \App\Models\RoutePlan::query()->where('user_id', $r->user()->id)->where('plan_date', $today)->where('status', 'published')->first();
+        if ($p === null) return response()->json(['plan' => null]);
+        $visited = CustomerEvent::query()->where('type', 'visit')->where('user_id', $r->user()->id)->whereIn('customer_id', $p->stops)
+            ->where('created_at', '>=', now($tz)->startOfDay()->utc())->distinct()->pluck('customer_id')->map(fn ($id) => (int) $id)->values();
+        return response()->json(['plan' => \App\Http\Controllers\Admin\FieldPlanController::planJson($p) + ['visited' => $visited]]);
+    }
+
     /** POST field/distances {lat, lng, customer_ids[]} → road distance / time per case (null = no road route). */
     public function distances(Request $r, GoogleMaps $maps)
     {
@@ -77,7 +92,7 @@ final class FieldMapController extends Controller
         $note = $d['source'] === 'gps' && isset($d['accuracy_m']) ? 'GPS ±' . (int) $d['accuracy_m'] . ' m.' : null;
         // History row + timeline line are written by the Customer model (CustomerAddressChange::capture).
         Customer::changedBy($d['source'] === 'gps' ? 'phone_gps' : 'phone_address', $r->user()->id,
-            fn () => $c->forceFill(['lat' => round((float) $d['lat'], 7), 'lng' => round((float) $d['lng'], 7)])->save(), $note);
+            fn () => $c->forceFill(['lat' => round((float) $d['lat'], 7), 'lng' => round((float) $d['lng'], 7), 'geo_status' => 'phone', 'geo_precision' => $d['source']])->save(), $note);
         Audit::record('customer.location_updated', $c, ['source' => $d['source'], 'had_location' => $old]);
         return response()->json(['id' => $c->id, 'lat' => $c->lat, 'lng' => $c->lng]);
     }
@@ -90,7 +105,13 @@ final class FieldMapController extends Controller
     public function visit(Request $r, int $id)
     {
         $c = Customer::query()->visibleTo($r->user())->findOrFail($id);
-        $d = $this->origin($r, ['accuracy_m' => 'nullable|numeric|min:0|max:100000']);
+        $d = $this->origin($r, ['accuracy_m' => 'nullable|numeric|min:0|max:100000', 'mock' => 'boolean']);
+        if (!empty($d['mock'])) {
+            // G19: the phone says this position comes from a fake-GPS app → refused, logged and shown to the admin.
+            Audit::record('customer.visit_mock_refused', $c, ['lat' => (float) $d['lat'], 'lng' => (float) $d['lng']]);
+            \App\Events\AdminFeed::dispatchFor($c->company_id, 'alert.mock_location', ['user_id' => $r->user()->id, 'customer_id' => $c->id]);
+            abort(422, 'Check-in refused: your phone is using a fake location app. Turn it off (Settings → Developer options → Mock location app) and try again.');
+        }
         abort_unless(Customer::validCoords($c->lat, $c->lng), 422, 'This customer has no map location. Set the pin first.');
         $m = (int) round(GoogleMaps::straightMeters([(float) $d['lat'], (float) $d['lng']], [(float) $c->lat, (float) $c->lng]));
         $acc = isset($d['accuracy_m']) ? (int) $d['accuracy_m'] : null;

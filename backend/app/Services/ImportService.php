@@ -203,11 +203,20 @@ final class ImportService
                         'status' => $row['status'], 'notes' => $row['notes'], 'follow_up_on' => $row['follow_up_date'], 'last_import_id' => $job->id,
                         'city' => $row['city'], 'area' => $row['area'], 'pincode' => $row['pincode']] + self::accountAttrs($row['account'] ?? []);
                     $changedAssignment = !$c || $c->assigned_user_id !== $userId || $c->assigned_team_id !== $teamId || $c->withdrawn_at !== null;
+                    // G5: a pin in the file is used as it is; otherwise a new or changed address is looked up after the upload.
+                    $filePin = array_key_exists('lat', $attrs) && Customer::validCoords($attrs['lat'] ?? null, $attrs['lng'] ?? null);
                     if ($c) {
-                        $c->fill($attrs + ['assigned_user_id' => $userId, 'assigned_team_id' => $teamId, 'withdrawn_at' => null])->save();
+                        $c->fill($attrs + ['assigned_user_id' => $userId, 'assigned_team_id' => $teamId, 'withdrawn_at' => null]);
+                        if ($filePin) {
+                            $c->fill(['geo_status' => 'file', 'geo_precision' => null]);
+                        } elseif ($c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS)) {
+                            $c->fill(['lat' => null, 'lng' => null, 'geo_status' => null, 'geo_precision' => null]);   // old pin belongs to the old address
+                        }
+                        $c->save();
                         $updated++;
                     } else {
-                        $c = Customer::query()->create($attrs + ['customer_ref' => $row['customer_ref'], 'assigned_user_id' => $userId, 'assigned_team_id' => $teamId]);
+                        $c = Customer::query()->create($attrs + ['customer_ref' => $row['customer_ref'], 'assigned_user_id' => $userId, 'assigned_team_id' => $teamId,
+                            'geo_status' => $filePin ? 'file' : null]);
                         $created++;
                     }
                     if ($changedAssignment) {
@@ -222,6 +231,9 @@ final class ImportService
             ->each(fn ($d) => app(PushService::class)->ping($d, 'customers'));   // phones fetch their new leads now
         $job->forceFill(['status' => 'completed', 'created_count' => $created, 'updated_count' => $updated, 'skipped_count' => $skipped, 'finished_at' => now()])->save();
         Audit::record('import.committed', $job, compact('created', 'updated', 'skipped'));
+        if (app(\App\Services\GoogleMaps::class)->configured()) {
+            \App\Jobs\GeocodePending::dispatch($job->company_id);   // G5: pins for the new addresses, in the background
+        }
     }
 
     /**

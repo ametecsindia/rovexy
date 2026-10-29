@@ -84,6 +84,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ametecs.managedmobile.data.ApiException
 import ametecs.managedmobile.work.LocationService
+import ametecs.managedmobile.work.mocked
 import android.annotation.SuppressLint
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
@@ -193,6 +194,14 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
     var mapError by remember { mutableStateOf<String?>(null) }   // null = loading / fine
     var mapStage by remember { mutableStateOf("start") }          // page → google-loading → google-loaded → map-creating → tiles
     var fitReq by remember { mutableStateOf(0 to emptyList<LatLng>()) }   // (token, points) → camera move in the WebView
+    // G9: today's route published by the admin (from the saved plan — no Google call), and which stops are done.
+    var plan by remember { mutableStateOf<RouteLine?>(null) }
+    var planDone by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    LaunchedEffect(Unit) {
+        try {
+            vm.todayPlan()?.let { p -> plan = parseRoute(p, "stops"); planDone = p["visited"]?.jsonArray?.map { it.jsonPrimitive.long }?.toSet() ?: emptySet() }
+        } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e }   // no plan shown; the map works as before
+    }
     LaunchedEffect(Unit) {
         try { mapKey = vm.mapKey(); if (mapKey == null) mapError = "nokey" }
         catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; mapError = "offline" }
@@ -266,11 +275,7 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
         val f = fix ?: run { roadNote = "Your location is needed for a route. Tap Refresh location."; return }
         routeBusy = true
         try {
-            val o = vm.drivingRoute(f.latitude, f.longitude, ids, optimize)
-            route = RouteLine(
-                o["points"]!!.jsonArray.map { p -> p.jsonArray.let { LatLng(it[0].jsonPrimitive.double, it[1].jsonPrimitive.double) } },
-                o.n("distance_m"), o.n("duration_s"), o["order"]!!.jsonArray.map { it.jsonPrimitive.long },
-                o["legs"]?.jsonArray?.map { l -> (l as JsonObject).let { Road(it.n("distance_m"), it.n("duration_s")) } } ?: emptyList())
+            route = parseRoute(vm.drivingRoute(f.latitude, f.longitude, ids, optimize))
             roadNote = null
             fit(listOfNotNull(here()) + route!!.points)
         } catch (e: Exception) {
@@ -315,8 +320,9 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
         val f = refreshFix() ?: return@launch
         checkBusy = true
         try {
-            vm.checkIn(r.c.id, f.latitude, f.longitude, if (f.hasAccuracy()) f.accuracy else null)
+            vm.checkIn(r.c.id, f.latitude, f.longitude, if (f.hasAccuracy()) f.accuracy else null, f.mocked())
             visits = visits + (r.c.id to LocalTime.now().format(hm))
+            planDone = planDone + r.c.id
             roadNote = null
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -347,6 +353,10 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
                 // 2. Me + quick actions.
                 item(key = "me") { MeRow(name, fix, locState, busy = roadBusy || routeBusy, onNearest = { findNearest() }, onRefresh = { scope.launch { refreshFix(); tick++ } }) }
                 roadNote?.let { n -> item(key = "note") { NoteLine(n) } }
+                plan?.let { p -> item(key = "today") {
+                    TodayRoute(p, pinned, planDone, onShow = { selected = null; route = p; fit(listOfNotNull(here()) + p.points.ifEmpty { p.order.mapNotNull { id -> pinned.firstOrNull { it.c.id == id }?.let { r -> pinOf(r) } } }) },
+                        onNavigate = { navigate(ctx, p.order.filter { it !in planDone }.mapNotNull { id -> pinned.firstOrNull { it.c.id == id } }.take(MAX_STOPS)) })
+                } }
                 // 3. Status filter + multi-stop route.
                 item(key = "status") {
                     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -475,6 +485,12 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
 private val CASE_STATUSES = listOf("new" to "New", "in_progress" to "In progress", "follow_up" to "Follow-up", "closed" to "Closed")
 
 private fun JsonObject.n(k: String): Int = (this[k] as? JsonPrimitive)?.intOrNull ?: 0
+
+/** A route answer from the server (field/route, or today's plan with its "stops") → what the map draws. */
+private fun parseRoute(o: JsonObject, orderKey: String = "order"): RouteLine = RouteLine(
+    o["points"]?.jsonArray?.map { p -> p.jsonArray.let { LatLng(it[0].jsonPrimitive.double, it[1].jsonPrimitive.double) } } ?: emptyList(),
+    o.n("distance_m"), o.n("duration_s"), o[orderKey]?.jsonArray?.map { it.jsonPrimitive.long } ?: emptyList(),
+    o["legs"]?.jsonArray?.map { l -> (l as JsonObject).let { Road(it.n("distance_m"), it.n("duration_s")) } } ?: emptyList())
 
 @Composable
 private fun RoundIconButton(icon: ImageVector, label: String, onClick: () -> Unit) {
@@ -677,6 +693,27 @@ private fun NearRow(no: Int, n: Near, highlighted: Boolean, nearest: Boolean, pl
         Column(horizontalAlignment = Alignment.End) {
             Text(n.road?.let { km(it.meters) } ?: n.straight?.let { "≈ ${km(it)}" } ?: "—", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Text(n.road?.let { eta(it.seconds) } ?: if (n.straight != null) "straight line" else "", color = Ds.Muted, fontSize = 12.sp)
+        }
+    }
+}
+
+/** G9: the admin's plan for today — stops in order, ticked when checked in; navigation through the stops still to do. */
+@Composable
+private fun TodayRoute(r: RouteLine, pinned: List<CaseRow>, done: Set<Long>, onShow: () -> Unit, onNavigate: () -> Unit) {
+    SheetCard(border = Ds.Gold) {
+        Text("TODAY'S ROUTE · ${done.count { it in r.order }} OF ${r.order.size} DONE", style = MaterialTheme.typography.labelSmall, color = Ds.Gold, fontWeight = FontWeight.SemiBold)
+        Text(if (r.meters > 0) "${km(r.meters)} · ${eta(r.seconds)} by bike" else "Visit in this order", fontWeight = FontWeight.SemiBold, color = Ds.Ink, fontSize = 16.sp)
+        r.order.forEachIndexed { i, id ->
+            val ok = id in done
+            Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(22.dp).background(if (ok) Ds.Green else Ds.Gold, CircleShape), contentAlignment = Alignment.Center) { Text(if (ok) "✓" else "${i + 1}", color = Color.White, fontSize = 11.sp) }
+                Spacer(Modifier.width(8.dp))
+                Text(pinned.firstOrNull { it.c.id == id }?.c?.name ?: "#$id", fontSize = 14.sp, color = if (ok) Ds.Muted else Ds.Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onShow, shape = RoundedCornerShape(12.dp)) { Text("Show on map", color = Ds.Navy) }
+            if (r.order.any { it !in done }) Button(onClick = onNavigate, colors = ButtonDefaults.buttonColors(containerColor = Ds.Gold), shape = RoundedCornerShape(12.dp)) { Text("Navigate", color = Ds.NavyInk) }
         }
     }
 }

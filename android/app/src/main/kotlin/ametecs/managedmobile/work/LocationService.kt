@@ -25,6 +25,10 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
+/** G19: true when this fix comes from a fake-GPS ("mock location") app. */
+@Suppress("DEPRECATION")
+fun android.location.Location.mocked(): Boolean = if (android.os.Build.VERSION.SDK_INT >= 31) isMock else isFromMockProvider
+
 /**
  * Work-session location. Runs ONLY between sign-in and sign-out, as a foreground service with a persistent,
  * visible notification. Fixes go to the encrypted queue (idempotent upload). Handles denied permission by stopping.
@@ -44,6 +48,7 @@ class LocationService : Service() {
             scope.launch {
                 for (l in r.locations) g.work.enqueue("location", buildJsonObject {
                     put("lat", l.latitude); put("lng", l.longitude); put("accuracy_m", l.accuracy.toDouble()); put("provider", l.provider ?: "fused"); put("battery_pct", battery)
+                    if (l.mocked()) put("mock", true)   // G19: fake-GPS app — the server flags it for the admin
                 })
                 g.work.enqueue("activity", buildJsonObject { put("type", "heartbeat"); put("battery_pct", battery); put("network_type", net) })
                 g.work.flush()   // admin sees the fix within seconds, not at the next 15-minute background sync

@@ -545,6 +545,7 @@ function LiveCard({ tz, onRoute }: { tz?: string; onRoute: (userId: number) => v
               </div>
               <div className="live-side">
                 {e.work_state === 'on_call' ? <Badge value="on_call" label="on call" /> : <Badge value={e.presence} />}
+                {e.fake_gps && <span title="This phone sent locations from a fake-GPS app that day; check-ins from it are refused."><Badge value="bad" label="fake GPS" /></span>}
                 <button className="ghost" onClick={(ev) => { ev.stopPropagation(); setSel(e.user_id); }}>Route &amp; visits</button>
               </div>
             </div>

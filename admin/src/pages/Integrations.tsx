@@ -78,6 +78,41 @@ function GoogleMapsCard({ canEdit }: { canEdit: boolean }) {
   );
 }
 
+/** G12: what this server sent to Google this month, against the company's monthly limits (default = Google's free allowance). */
+function MapsUsageCard({ canEdit }: { canEdit: boolean }) {
+  const st = useAsync(() => get('/integrations/maps'));
+  const [lim, setLim] = useState<Record<string, string>>({});
+  const a = useAction();
+  const rows = st.data?.usage ?? [];
+  return (
+    <Card title={`Google Maps usage · ${st.data?.month ?? ''}`}>
+      <p className="muted" style={{ marginTop: 0 }}>Counted by this server before each request. When a limit is reached ROVEXY stops asking Google (straight-line distances, no new pins, plans keep the straight-line order) instead of costing money. Default limits = Google's free monthly allowance.</p>
+      <ErrorBox error={st.error ?? a.error} />
+      <div className="table-wrap"><table><thead><tr><th>Service</th><th style={{ textAlign: 'right' }}>Used</th><th style={{ textAlign: 'right' }}>Limit</th><th style={{ width: 120 }}></th></tr></thead>
+        <tbody>{rows.map((r: any) => {
+          const pct = r.limit ? Math.min(100, Math.round((r.used / r.limit) * 100)) : 100;
+          return (
+            <tr key={r.sku}>
+              <td>{r.label}<br /><small className="muted">{r.unit} · free {r.free.toLocaleString('en-IN')}/month</small></td>
+              <td style={{ textAlign: 'right' }}>{r.used.toLocaleString('en-IN')}</td>
+              <td style={{ textAlign: 'right' }}>{canEdit
+                ? <input type="number" min={0} style={{ width: 110, textAlign: 'right' }} value={lim[r.sku] ?? String(r.limit)} onChange={(e) => setLim({ ...lim, [r.sku]: e.target.value })} />
+                : r.limit.toLocaleString('en-IN')}</td>
+              <td><div style={{ background: '#e7ebf0', borderRadius: 6, height: 8 }}><div style={{ width: `${pct}%`, height: 8, borderRadius: 6, background: pct >= 100 ? '#c53030' : pct >= 80 ? '#b7791f' : '#2f855a' }} /></div><small className="muted">{pct}%</small></td>
+            </tr>
+          );
+        })}</tbody></table></div>
+      {canEdit && <div className="row" style={{ marginTop: 10 }}>
+        <button disabled={a.busy || Object.keys(lim).length === 0} onClick={() => a.run(async () => {
+          st.setData(await api('PUT', '/integrations/maps/limits', { limits: Object.fromEntries(Object.entries(lim).map(([k, v]) => [k, v === '' ? null : Number(v)])) }));
+          setLim({});
+        })}>Save limits</button>
+        <small className="muted">Limits above the free allowance are billed by Google to your Google Cloud account. Google's own numbers can be higher if that account is also used by other software.</small>
+      </div>}
+    </Card>
+  );
+}
+
 export function IntegrationsPage() {
   const { can } = useAuth();
   const list = useAsync(() => get('/integrations'));
@@ -93,6 +128,7 @@ export function IntegrationsPage() {
       </div>
       <div className="grid2" style={{ marginTop: 16 }}>
         <GoogleMapsCard canEdit={canEdit} />
+        <MapsUsageCard canEdit={canEdit} />
       </div>
     </Page>
   );

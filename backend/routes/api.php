@@ -173,6 +173,7 @@ Route::prefix('mobile/v1')->middleware('company')->group(function () {
             Route::get('dispositions', [Mobile\CustomerController::class, 'dispositions']);
             // Field map (Google Routes / Geocoding via the server key; 30 a minute is far above normal use).
             Route::get('field/config', [Mobile\FieldMapController::class, 'config'])->middleware('feature:field_map');
+            Route::get('field/plan', [Mobile\FieldMapController::class, 'plan'])->middleware('feature:field_map');
             Route::post('field/distances', [Mobile\FieldMapController::class, 'distances'])->middleware(['throttle:maps', 'feature:field_map']);
             Route::post('field/route', [Mobile\FieldMapController::class, 'route'])->middleware(['throttle:maps', 'feature:field_map']);
             Route::post('customers/{id}/geocode', [Mobile\FieldMapController::class, 'geocode'])->whereNumber('id')->middleware(['throttle:maps', 'feature:field_map']);
@@ -350,8 +351,22 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('calling/click2call/test-call/numbers', [Admin\IntegrationController::class, 'testCallNumbers'])->middleware('perm:telephony.configure');
         Route::post('calling/click2call/test-call/{id}/hangup', [Admin\IntegrationController::class, 'testCallHangup'])->whereNumber('id')->middleware('perm:telephony.configure');
         Route::get('calling/click2call/test-call/{id}', [Admin\IntegrationController::class, 'testCallStatus'])->whereNumber('id')->middleware('perm:telephony.configure');
+        // G7 circles + G8 route plans (Field planning). ?date=YYYY-MM-DD, default today in the company's time zone.
+        Route::prefix('field')->middleware(['perm:customers.assign', 'feature:field_map'])->group(function () {
+            $fp = Admin\FieldPlanController::class;
+            Route::get('employees', [$fp, 'employees']);
+            Route::put('circles/{userId}', [$fp, 'saveCircle'])->whereNumber('userId');
+            Route::delete('circles/{userId}', [$fp, 'deleteCircle'])->whereNumber('userId');
+            Route::post('circles/{userId}/assign', [$fp, 'assignInCircle'])->whereNumber('userId');
+            Route::get('plans/{userId}', [$fp, 'show'])->whereNumber('userId');
+            Route::put('plans/{userId}', [$fp, 'save'])->whereNumber('userId');
+            Route::post('plans/{userId}/optimise', [$fp, 'optimise'])->whereNumber('userId')->middleware('throttle:20,1');
+            Route::post('plans/{userId}/publish', [$fp, 'publish'])->whereNumber('userId');
+            Route::delete('plans/{userId}', [$fp, 'destroy'])->whereNumber('userId');
+        });
         Route::get('integrations/maps', [Admin\IntegrationController::class, 'maps'])->middleware('perm:system.health');
         Route::put('integrations/maps', [Admin\IntegrationController::class, 'saveMaps'])->middleware('perm:telephony.configure');
+        Route::put('integrations/maps/limits', [Admin\IntegrationController::class, 'saveMapsLimits'])->middleware('perm:telephony.configure');
         Route::put('integrations/{system}', [Admin\IntegrationController::class, 'save'])->whereIn('system', ['smartprs', 'smartept'])->middleware(['perm:telephony.configure', 'feature:integrations']);
         Route::post('integrations/{system}/test', [Admin\IntegrationController::class, 'test'])->whereIn('system', ['smartprs', 'smartept'])->middleware('perm:system.health');
         Route::post('integrations/flush', [Admin\IntegrationController::class, 'flush'])->middleware('perm:telephony.configure');
