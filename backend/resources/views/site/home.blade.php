@@ -339,7 +339,7 @@ $faqs = [
     <p class="kicker">Calling, field visits and payments for collection teams</p>
     <h1>{{ $site['hero_title'] ?? 'Every call, visit and rupee your team collects — on record.' }}</h1>
     <p class="lead">{{ $site['hero_text'] ?? 'ROVEXY turns company Android phones into managed work phones: recorded calls, verified field visits and payment slips, with your office watching it live from one console.' }}</p>
-    <div class="cta"><a class="btn gold" href="#trial">Start the {{ $trialDays }}-day free trial</a><a class="btn ghost" href="#contact">Book a live demo</a></div>
+    <div class="cta"><a class="btn gold" href="#trial">Start the {{ $trialDays }}-day free trial</a><a class="btn ghost" href="#contact">Book a live demo</a><a class="play-badge" href="https://play.google.com/store/apps/details?id=in.ametecs.managedmobile&amp;hl=en_IN" target="_blank" rel="noopener" aria-label="Get it on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5v17a.5.5 0 0 0 .76.43l14.5-8.5a.5.5 0 0 0 0-.86L5.76 3.07A.5.5 0 0 0 5 3.5z"/></svg><span><small>GET IT ON</small><b>Google Play</b></span></a></div>
     <div class="links"><a href="#pricing">View plans</a><a href="#how">See how it works</a></div>
     <ul class="proof"><li>Recorded from ring to hang-up</li><li>Check-in within 100 m of the customer</li><li>Approved company phones only</li></ul>
   </div>
@@ -565,7 +565,7 @@ $faqs = [
     <p class="kicker">Ready when you are</p>
     <h2>Put your next portfolio on <em>record.</em></h2>
     <p>Start a free trial today, or let us walk your team through ROVEXY on a live call.</p>
-    <div class="cta"><a class="btn gold" href="#trial">Start the {{ $trialDays }}-day free trial →</a><a class="btn ghost" href="#contact">Book a live demo</a></div>
+    <div class="cta"><a class="btn gold" href="#trial">Start the {{ $trialDays }}-day free trial →</a><a class="btn ghost" href="#contact">Book a live demo</a><a class="play-badge" href="https://play.google.com/store/apps/details?id=in.ametecs.managedmobile&amp;hl=en_IN" target="_blank" rel="noopener" aria-label="Get it on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5v17a.5.5 0 0 0 .76.43l14.5-8.5a.5.5 0 0 0 0-.86L5.76 3.07A.5.5 0 0 0 5 3.5z"/></svg><span><small>GET IT ON</small><b>Google Play</b></span></a></div>
   </div>
   <ul class="close-stats">
     <li><b>3,000+</b><span>collection and recovery agencies worked with</span></li>

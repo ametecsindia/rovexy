@@ -62,6 +62,7 @@ footer{background:#0A1422;color:#93A4B9;padding:72px 0 36px;font-size:.92rem;bor
 footer .cols{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:32px}@media (max-width:820px){footer .cols{grid-template-columns:1fr 1fr}}
 footer h4{color:#fff;font:700 .95rem var(--display);margin:0 0 12px}footer ul{list-style:none;margin:0;padding:0}footer li{padding:4px 0}
 footer a{color:#DCE4EE;text-decoration:none}footer a:hover{color:#fff;text-decoration:underline}footer .logo{color:#fff;margin-bottom:12px}
+.play-badge{display:inline-flex;align-items:center;gap:10px;padding:8px 18px 8px 14px;border-radius:12px;background:#0B1422;border:1px solid rgba(255,255,255,.22);color:#fff;text-decoration:none;line-height:1.1;white-space:nowrap}.play-badge:hover{background:#000;color:#fff;text-decoration:none}.play-badge svg{color:var(--brass-2)}.play-badge small{display:block;font-size:.66rem;letter-spacing:.06em;opacity:.85}.play-badge b{display:block;font-size:1.15rem;font-weight:600}footer .play-badge{margin-top:18px}
 footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px solid #24364F;margin-top:40px;padding-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 @yield('style')
@@ -86,7 +87,8 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
   <div class="cols">
     <div><span class="logo"><img src="/brand/rovexy-logo-dark.svg" alt="ROVEXY — Your Workforce. In Motion." width="206" height="60"></span>
       <p>Recorded calls, verified visits and payment slips for collection teams. A product of {{ $co::get('seller_name') }}.</p>
-      <address>{{ $co::get('seller_address') }}</address></div>
+      <address>{{ $co::get('seller_address') }}</address>
+      <a class="play-badge" href="https://play.google.com/store/apps/details?id=in.ametecs.managedmobile&amp;hl=en_IN" target="_blank" rel="noopener" aria-label="Get it on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M5 3.5v17a.5.5 0 0 0 .76.43l14.5-8.5a.5.5 0 0 0 0-.86L5.76 3.07A.5.5 0 0 0 5 3.5z"/></svg><span><small>GET IT ON</small><b>Google Play</b></span></a></div>
     <div><h4>Product</h4><ul><li><a href="/#how">How it works</a></li><li><a href="/demo">Live demo</a></li><li><a href="/#screens">Screens</a></li><li><a href="/#product">Product</a></li><li><a href="/#security">Security</a></li><li><a href="/#pricing">Pricing</a></li></ul></div>
     <div><h4>Get started</h4><ul><li><a href="/#trial">Free trial</a></li><li><a href="/buy">Buy a package</a></li><li><a href="/admin">Sign in</a></li><li><a href="/#faq">FAQ</a></li></ul></div>
     <div><h4>Company</h4><ul><li><a href="/contact">Contact us</a></li><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms of service</a></li><li><a href="/refund">Refund &amp; cancellation</a></li><li><a href="/delivery">Service delivery</a></li></ul></div>
