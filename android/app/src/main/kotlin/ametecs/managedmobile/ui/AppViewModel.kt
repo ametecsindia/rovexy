@@ -49,7 +49,7 @@ data class CallUi(val id: String, val state: String, val talk: Int, val ring: In
                   val error: String? = null, val route: String = "server", val note: String? = null)
 data class Today(val calls: Int, val connected: Int, val talkSeconds: Int, val followUpsDue: Int)
 data class ChatConv(val id: Long, val subject: String?, val lastAt: String?)
-data class ChatMsg(val id: Long, val mine: Boolean, val body: String, val at: String, val read: Boolean)
+data class ChatMsg(val id: Long, val mine: Boolean, val body: String, val at: String, val read: Boolean, val from: String? = null)
 /** Call feedback option. captures: none | promise (amount + date) | payment (amount, mode, reference, date, slip). */
 data class Outcome(val code: String, val label: String, val captures: String = "none", val needsFollowUp: Boolean = false)
 data class Disclosure(val recorded: Boolean, val notice: String, val location: String?, val liveView: Boolean, val camera: Boolean)
@@ -351,7 +351,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val after = chatMsgs.value.lastOrNull()?.id ?: 0
         val fresh = runCatching { g.session.work("GET", "/api/mobile/v1/conversations/$id/messages?after=$after").jsonArray.map { it.jsonObject.let { o ->
             ChatMsg(o.str("id")!!.toLong(), o.str("sender_user_id")?.toLongOrNull() == myUserId, o.str("body") ?: "📎 ${o["attachment"]?.jsonObject?.str("name") ?: "attachment"}",
-                o.str("created_at") ?: "", o.str("read") == "true") } } }.getOrNull() ?: return
+                o.str("created_at") ?: "", o.str("read") == "true", o.str("sender_label")) } } }.getOrNull() ?: return
         if (fresh.isEmpty()) return
         if (chatMsgs.value.isNotEmpty() && fresh.any { !it.mine }) messageBeep()   // chat is open: short sound instead of a notification
         chatMsgs.value = chatMsgs.value + fresh

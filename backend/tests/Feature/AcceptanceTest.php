@@ -112,10 +112,16 @@ final class AcceptanceTest extends TestCase
         $this->withHeaders(['X-Workspace' => 'alpha'])->getJson('/api/mobile/v1/me?device=1&app=1')->assertStatus(401);
     }
 
-    public function test_3_approved_device_with_unassigned_employee_cannot_work(): void
+    public function test_3_another_employee_signing_in_takes_over_the_approved_phone(): void
     {
         $m = $this->approvedPhone();
-        $m->deviceCall('POST', '/api/mobile/v1/auth/login', ['employee_code' => 'EMP2', 'password' => 'Secret-123456'])->assertStatus(403)->assertJsonPath('error', 'not_assigned');
+        $m->deviceCall('POST', '/api/mobile/v1/auth/login', ['employee_code' => 'EMP2', 'password' => 'Secret-123456'])->assertOk()->assertJsonPath('employee.employee_code', 'EMP2');
+        $d = app(CurrentCompany::class)->withoutScope(fn () => ManagedDevice::query()->where('installation_id', $m->installationId)->firstOrFail());
+        $this->assertSame($this->users['alpha']['emp2']->id, $d->assigned_user_id);
+        $this->login($m, 'EMP1');   // and back again
+        $m->deviceCall('POST', '/api/mobile/v1/auth/login', ['employee_code' => 'EMP2', 'password' => 'wrong-password'])->assertStatus(422);
+        $this->admin('alpha')->postJson("/api/admin/devices/{$d->id}/revoke", ['reason' => 'lost phone'])->assertOk();
+        $m->deviceCall('POST', '/api/mobile/v1/auth/login', ['employee_code' => 'EMP2', 'password' => 'Secret-123456'])->assertStatus(401);   // revoked stays blocked
     }
 
     public function test_4_company_isolation(): void

@@ -91,12 +91,21 @@ final class ChatService
         // Opening the thread = reading it (drives the dashboard's unread notice and the sender's "read" tick).
         MessageReceipt::query()->whereIn('message_id', $msgs->pluck('id'))->where('user_id', $reader->id)->whereNull('read_at')->update(['read_at' => now()]);
         $receipts = MessageReceipt::query()->whereIn('message_id', $msgs->pluck('id'))->get()->groupBy('message_id');
+        $senders = User::query()->with('roles:id,name')->whereIn('id', $msgs->pluck('sender_user_id')->unique())->get()->keyBy('id');
         return $msgs->map(fn (Message $m) => [
             'id' => $m->id, 'sender_user_id' => $m->sender_user_id, 'body' => $m->body, 'created_at' => $m->created_at->toAtomString(),
+            'sender_name' => $senders[$m->sender_user_id]?->name, 'sender_label' => isset($senders[$m->sender_user_id]) ? self::label($senders[$m->sender_user_id]) : null,
             'attachment' => $m->attachment_key ? ['name' => $m->attachment_name, 'mime' => $m->attachment_mime, 'size' => $m->attachment_size] : null,
             'delivered' => ($receipts[$m->id] ?? collect())->every(fn ($r) => $r->delivered_at !== null),
             'read' => ($receipts[$m->id] ?? collect())->every(fn ($r) => $r->read_at !== null),
         ])->all();
+    }
+
+    /** "Ravi Kumar · Supervisor": who sent it and in what role (company admin, supervisor, …). */
+    public static function label(User $u): string
+    {
+        $role = $u->roles->first()?->name;
+        return $role ? "{$u->name} · {$role}" : $u->name;
     }
 
     public function attachment(Message $m)

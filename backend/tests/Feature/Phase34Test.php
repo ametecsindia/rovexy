@@ -248,4 +248,19 @@ final class Phase34Test extends TestCase
             ->assertJsonPath('user.employee_code', 'EMP1')->assertJsonPath('work.customers_assigned', 1)->assertJsonPath('work.calls_30d', 0)->assertJsonStructure(['devices', 'user' => ['roles', 'teams']]);
         $this->as('emp')->getJson('/api/admin/employees/' . $this->u['admin']->id . '/profile')->assertForbidden();
     }
+    public function test_silent_phone_reads_offline(): void
+    {
+        $d = new ManagedDevice(['presence' => 'online', 'last_contact_at' => now()->subDays(10)]);
+        $this->assertSame('offline', $d->presence);
+        $d->last_contact_at = now();
+        $this->assertSame('online', $d->presence);
+    }
+    public function test_employee_sees_who_sent_the_chat_message(): void
+    {
+        $m = $this->phone();
+        $c = $this->as('admin')->postJson('/api/admin/conversations', ['user_id' => $this->u['emp']->id])->assertCreated()->json('id');
+        $this->as('admin')->postJson("/api/admin/conversations/{$c}/messages", ['body' => 'Visit C1 today'])->assertCreated();
+        $this->assertStringStartsWith('admin · ', $m->work('GET', '/api/mobile/v1/conversations')->assertOk()->json('0.subject'));
+        $m->work('GET', "/api/mobile/v1/conversations/{$c}/messages")->assertOk()->assertJsonPath('0.sender_name', 'admin')->assertJsonPath('0.body', 'Visit C1 today');
+    }
 }

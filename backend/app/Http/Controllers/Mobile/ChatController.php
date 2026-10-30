@@ -16,8 +16,13 @@ final class ChatController extends Controller
     public function index(Request $r)
     {
         $uid = $r->user()->id;
-        return response()->json(Conversation::query()->whereHas('participants', fn ($q) => $q->where('users.id', $uid))
-            ->orderByDesc('last_message_at')->limit(50)->get(['id', 'subject', 'last_message_at']));
+        $convs = Conversation::query()->whereHas('participants', fn ($q) => $q->where('users.id', $uid))
+            ->with(['participants' => fn ($q) => $q->where('users.id', '!=', $uid)->with('roles:id,name')])
+            ->orderByDesc('last_message_at')->limit(50)->get(['id', 'subject', 'last_message_at']);
+        // ponytail: "subject" falls back to who the employee is talking to ("Ravi · Supervisor"), so the app's list and
+        // notifications show the sender's name without an app update.
+        return response()->json($convs->map(fn ($c) => ['id' => $c->id, 'last_message_at' => $c->last_message_at,
+            'subject' => $c->subject ?: $c->participants->map(fn ($p) => ChatService::label($p))->implode(', ') ?: null]));
     }
 
     public function messages(Request $r, int $id, ChatService $chat)

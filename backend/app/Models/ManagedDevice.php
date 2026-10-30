@@ -6,6 +6,7 @@ namespace App\Models;
 
 use App\Domain\Devices\ApprovalState;
 use App\Support\BelongsToCompany;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -33,6 +34,12 @@ class ManagedDevice extends Model
             'last_contact_at' => 'datetime',
             'recording_verified_at' => 'datetime',
         ];
+    }
+
+    /** "online" is stored on each contact and never cleared; read it as offline once the phone has been silent for 10 minutes. */
+    protected function presence(): Attribute
+    {
+        return Attribute::get(fn (?string $v) => $v === 'online' && !$this->last_contact_at?->gt(now()->subMinutes(10)) ? 'offline' : $v);
     }
 
     public function credentials(): HasMany

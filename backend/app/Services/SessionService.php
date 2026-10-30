@@ -44,8 +44,7 @@ final class SessionService
         }
         app(\App\Services\Platform\Licensing::class)->assertUsable();   // licence expired past grace / suspended: no work sessions
         if ($device->assigned_user_id !== $user->id) {
-            Audit::record('mobile.login_unassigned', $device, ['user_id' => $user->id]);
-            throw new DomainException('not_assigned', 'This phone is not assigned to you. Contact your administrator.');
+            $this->handOver($device, $user);   // shared phone: no revoke / re-approve needed to change who uses it
         }
         $ff = app(FieldForceIntegration::class);
         $geo = $ff->geofenceGate($user, $lat, $lng);   // throws outside_geofence when SmartPRS blocks this sign-in
@@ -57,6 +56,24 @@ final class SessionService
         Audit::record('mobile.login', $device, ['user_id' => $user->id, 'geofence' => $geo['status']]);
         $ff->recordSession($user, 'login', $lat, $lng, $accuracy, $geo['status']);
         return $tokens + ['employee' => ['id' => $user->id, 'name' => $user->name, 'employee_code' => $user->employee_code]];
+    }
+
+    /**
+     * An approved phone moves to whichever eligible employee signs in on it. The previous employee's session ends (below,
+     * "superseded"); the phone's approval and policy stay. Recorded in the phone's history and the audit log.
+     */
+    private function handOver(ManagedDevice $device, User $user): void
+    {
+        $teamId = $user->teams()->value('teams.id') ?? $device->team_id;
+        \Illuminate\Support\Facades\DB::transaction(function () use ($device, $user, $teamId) {
+            $from = $device->assigned_user_id;
+            \App\Models\DeviceAssignment::query()->where('device_id', $device->id)->whereNull('ended_at')->update(['ended_at' => now(), 'end_reason' => 'signed_in_by_other']);
+            \App\Models\DeviceAssignment::query()->create(['device_id' => $device->id, 'user_id' => $user->id, 'team_id' => $teamId, 'assigned_by' => $user->id, 'assigned_at' => now()]);
+            $device->forceFill(['assigned_user_id' => $user->id, 'team_id' => $teamId])->save();
+            \App\Models\DeviceApprovalEvent::query()->create(['device_id' => $device->id, 'action' => 'reassigned', 'actor_user_id' => $user->id, 'meta' => ['employee_id' => $user->id, 'from_employee_id' => $from, 'team_id' => $teamId, 'via' => 'sign_in']]);
+            Audit::record('device.handed_over', $device, ['from_employee_id' => $from, 'employee_id' => $user->id]);
+        });
+        rescue(fn () => app(PolicyService::class)->refreshDevice($device));
     }
 
     /** Refresh needs the refresh token AND a valid device signature (enforced by route middleware). Rotates both tokens. */

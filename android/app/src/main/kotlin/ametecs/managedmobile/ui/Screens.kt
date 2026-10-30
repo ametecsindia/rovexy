@@ -532,7 +532,7 @@ private fun ChatDialog(vm: AppViewModel, open: Long) {
     val list = androidx.compose.foundation.lazy.rememberLazyListState()
     LaunchedEffect(msgs.size) { if (msgs.isNotEmpty()) list.animateScrollToItem(msgs.size - 1) }
     AlertDialog(onDismissRequest = vm::closeChat, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp),
-        title = { Text(if (open > 0) "Messages" else "Conversations") },
+        title = { Text(if (open > 0) convs.firstOrNull { it.id == open }?.subject ?: "Messages" else "Conversations") },
         confirmButton = { TextButton(onClick = vm::closeChat) { Text("Close") } },
         text = {
             if (open <= 0) {
@@ -543,6 +543,7 @@ private fun ChatDialog(vm: AppViewModel, open: Long) {
                     items(msgs) { m ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = if (m.mine) Arrangement.End else Arrangement.Start) {
                             Column(Modifier.background(if (m.mine) Ds.Navy else Ds.Bg, RoundedCornerShape(14.dp)).padding(10.dp)) {
+                                if (!m.mine && m.from != null) Text(m.from, style = MaterialTheme.typography.labelSmall, color = Ds.Navy, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
                                 Text(m.body, color = if (m.mine) Color.White else Ds.Ink)
                                 Text(m.at.take(16).replace('T', ' ') + if (m.mine && m.read) " · read" else "", style = MaterialTheme.typography.labelSmall,
                                     color = if (m.mine) Ds.GoldSoft else Ds.Muted)
