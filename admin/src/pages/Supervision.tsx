@@ -4,8 +4,8 @@ import 'leaflet/dist/leaflet.css';
 import { api, get, post, fmtDate, qs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { realtime } from '../lib/realtime';
-import { Link, useSearchParams } from 'react-router-dom';
-import { Badge, Card, ErrorBox, Field, Icon, Initials, Notice, Page, Table, useAction, useAsync } from '../components/ui';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Badge, Card, ErrorBox, Field, Icon, Initials, Modal, Notice, Page, Table, useAction, useAsync } from '../components/ui';
 import { ago } from '../lib/unread';
 import { chime, hangupTone, ringback } from '../lib/sound';
 
@@ -563,8 +563,14 @@ function Journey({ j, emp, day, setDay, tz, focus, onFocus, onBack, onFixes }: {
   focus: number | null; onFocus: (n: number) => void; onBack: () => void; onFixes: () => void }) {
   const t = (iso?: string | null) => (iso ? new Date(iso).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit', timeZone: tz }) : '—');
   const s = j?.summary;
+  const { can } = useAuth();
+  const nav = useNavigate();
+  const chat = useAction();
+  const [profile, setProfile] = useState(false);
+  const uid = emp?.user_id ?? j?.employee?.id;
   return (
     <div className="live-list jr-panel">
+      {profile && uid && <ProfileModal id={uid} tz={tz} onClose={() => setProfile(false)} />}
       <div className="jr-head">
         <button className="ghost" onClick={onBack}>← All employees</button>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
@@ -572,6 +578,11 @@ function Journey({ j, emp, day, setDay, tz, focus, onFocus, onBack, onFixes }: {
           <div style={{ flex: 1 }}><strong>{emp?.name ?? j?.employee?.name}</strong><div className="muted small">{emp?.employee_code}{emp?.location ? ` · ${LIVE_TONE[emp.status][1].toLowerCase()} ${t(emp.location.captured_at)}` : ''}</div></div>
           <input type="date" value={day} max={new Date().toLocaleDateString('en-CA')} onChange={(e) => e.target.value && setDay(e.target.value)} aria-label="Day" style={{ width: 'auto' }} />
         </div>
+        <div className="row" style={{ gap: 6, marginTop: 8 }}>
+          {can('employees.view') && <button className="secondary sm" title="View profile" onClick={() => setProfile(true)}><Icon name="eye" size={16} /> Profile</button>}
+          {can('chat.use') && <button className="secondary sm" title="Chat now" disabled={chat.busy || !uid} onClick={() => void chat.run(async () => { const c = await post('/conversations', { user_id: uid }); nav(`/chat?c=${c.id}`); })}><Icon name="chat" size={16} /> Chat</button>}
+        </div>
+        {chat.error && <ErrorBox error={chat.error} />}
       </div>
       {!j ? <p className="muted" style={{ padding: 12 }}>Loading route…</p> : <>
         <div className="jr-stats">
@@ -719,5 +730,33 @@ function LocationMap({ fixes, focus, tz }: { fixes: any[]; focus: number | null;
       <div ref={el} className="map" role="region" aria-label="Map of location fixes" />
       <div className="map-legend"><span><i className="dot-latest" />Latest</span><span><i className="dot-fix" />Earlier fix</span><span><i className="line" />Route</span><span className="muted">{fixes.length} fixes · click a row to show it</span></div>
     </div>
+  );
+}
+
+/** Everything about one employee in one place (live map → Profile). */
+function ProfileModal({ id, tz, onClose }: { id: number; tz?: string; onClose: () => void }) {
+  const p = useAsync(() => get<any>(`/employees/${id}/profile`), [id]);
+  const u = p.data?.user, w = p.data?.work;
+  const dt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short', timeZone: tz }) : '—');
+  const rows: [string, any][] = u ? [['Employee ID', u.employee_code], ['Phone', u.phone ?? '—'], ['E-mail', u.email ?? '—'], ['Status', u.status],
+    ['Roles', u.roles.map((x: any) => x.name).join(', ') || '—'], ['Groups', u.teams.map((x: any) => x.name).join(', ') || '—'],
+    ['Last sign-in', dt(u.last_login_at)], ['Added on', dt(u.created_at)]] : [];
+  const stats: [string, any][] = w ? [['Customers assigned', w.customers_assigned], ['Open follow-ups', w.follow_ups_open], ['Calls today', w.calls_today],
+    ['Calls (30 days)', `${w.connected_30d} connected of ${w.calls_30d}`], ['Talk time (30 days)', `${w.talk_minutes_30d} min`], ['Visits (30 days)', w.visits_30d],
+    ['Payments (30 days)', `${w.payments_30d} · ₹${Number(w.collected_30d).toLocaleString('en-IN')}`]] : [];
+  return (
+    <Modal title={u ? u.name : 'Profile'} onClose={onClose}>
+      <ErrorBox error={p.error} />
+      {!p.data ? <p className="muted">Loading…</p> : <>
+        <table className="kv"><tbody>{rows.map(([k, v]) => <tr key={k}><th>{k}</th><td>{v}</td></tr>)}</tbody></table>
+        <h4>Work</h4>
+        <table className="kv"><tbody>{stats.map(([k, v]) => <tr key={k}><th>{k}</th><td>{v}</td></tr>)}</tbody></table>
+        <h4>Phones</h4>
+        {p.data.devices.length === 0 ? <p className="muted">No phone assigned.</p> : p.data.devices.map((d: any) => (
+          <p key={d.id} style={{ margin: '0 0 8px' }}><strong>{d.manufacturer} {d.model}</strong> · Android {d.os_version} · app {d.app_version ?? '—'}<br />
+            <small className="muted">{d.presence ?? '—'} · last contact {dt(d.last_contact_at)}{d.battery_pct != null ? ` · battery ${d.battery_pct}%` : ''}{d.network_type ? ` · ${d.network_type}` : ''} · {d.compliant ? 'compliant' : 'not compliant'} · recording {d.recording_verified_at ? 'verified' : 'not verified yet'}</small></p>
+        ))}
+      </>}
+    </Modal>
   );
 }

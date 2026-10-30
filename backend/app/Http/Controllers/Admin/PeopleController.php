@@ -32,6 +32,36 @@ final class PeopleController extends Controller
             ->paginate(min(1000, max(1, (int) $r->query('per_page', 100))), ['id', 'employee_code', 'name', 'email', 'phone', 'status', 'last_login_at', 'mfa_enabled_at']));
     }
 
+    /** Full profile of one employee (live map → eye icon): identity, roles and groups, phones, and work in the last 30 days. */
+    public function profile(Request $r, int $id)
+    {
+        $u = User::query()->with(['teams:id,code,name', 'roles:id,key,name'])->findOrFail($id);
+        if (!$r->user()->canSeeUser($u)) {
+            throw new DomainException('forbidden');
+        }
+        $tz = app(CurrentCompany::class)->get()->timezone ?: config('app.timezone');
+        $today = now($tz)->startOfDay()->utc();
+        $since = $today->copy()->subDays(29);
+        $calls = \App\Models\Call::query()->where('user_id', $id)->where('initiated_at', '>=', $since);
+        $pay = \App\Models\CallDisposition::query()->where('user_id', $id)->whereNotNull('payment_mode')->where('submitted_at', '>=', $since);
+        return response()->json([
+            'user' => $u->only(['id', 'employee_code', 'name', 'email', 'phone', 'status', 'last_login_at', 'mfa_enabled_at', 'created_at', 'teams', 'roles']),
+            'devices' => \App\Models\ManagedDevice::query()->where('assigned_user_id', $id)->orderByDesc('last_contact_at')
+                ->get(['id', 'manufacturer', 'model', 'os_version', 'app_version', 'approval_state', 'presence', 'battery_pct', 'network_type', 'last_contact_at', 'compliant', 'recording_verified_at']),
+            'work' => [
+                'customers_assigned' => \App\Models\Customer::query()->where('assigned_user_id', $id)->whereNull('withdrawn_at')->count(),
+                'follow_ups_open' => \App\Models\FollowUp::query()->where('user_id', $id)->where('status', 'open')->count(),
+                'calls_today' => (clone $calls)->where('initiated_at', '>=', $today)->count(),
+                'calls_30d' => (clone $calls)->count(),
+                'connected_30d' => (clone $calls)->where('talk_seconds', '>', 0)->count(),
+                'talk_minutes_30d' => intdiv((int) (clone $calls)->sum('talk_seconds'), 60),
+                'visits_30d' => \App\Models\CustomerEvent::query()->where('user_id', $id)->where('type', 'visit')->where('created_at', '>=', $since)->count(),
+                'payments_30d' => (clone $pay)->count(),
+                'collected_30d' => (float) (clone $pay)->sum('amount'),
+            ],
+        ]);
+    }
+
     public function createEmployee(Request $r, CurrentCompany $current)
     {
         $cid = $current->id();

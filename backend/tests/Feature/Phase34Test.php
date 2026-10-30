@@ -241,4 +241,11 @@ final class Phase34Test extends TestCase
         $this->in(fn () => $this->assertNotNull(ManagedDevice::query()->first()->recording_verified_at));
         $this->as('admin')->getJson('/api/admin/devices')->assertOk()->assertJsonPath('data.0.recording_verified_at', fn ($v) => $v !== null);
     }
+    public function test_employee_profile_for_the_live_map(): void
+    {
+        $this->in(fn () => Customer::query()->create(['customer_ref' => 'C9', 'name' => 'Cust', 'phone' => '+919822222222', 'assigned_user_id' => $this->u['emp']->id]));
+        $this->as('admin')->getJson('/api/admin/employees/' . $this->u['emp']->id . '/profile')->assertOk()
+            ->assertJsonPath('user.employee_code', 'EMP1')->assertJsonPath('work.customers_assigned', 1)->assertJsonPath('work.calls_30d', 0)->assertJsonStructure(['devices', 'user' => ['roles', 'teams']]);
+        $this->as('emp')->getJson('/api/admin/employees/' . $this->u['admin']->id . '/profile')->assertForbidden();
+    }
 }

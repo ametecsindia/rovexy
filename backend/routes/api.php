@@ -217,6 +217,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('reports/portfolio/cases', [Admin\PortfolioReportController::class, 'cases'])->middleware('perm:calls.view');
 
         Route::get('employees', [Admin\PeopleController::class, 'employees'])->middleware('perm:employees.view');
+        Route::get('employees/{id}/profile', [Admin\PeopleController::class, 'profile'])->middleware('perm:employees.view');
         Route::post('employees', [Admin\PeopleController::class, 'createEmployee'])->middleware('perm:employees.manage');
         Route::patch('employees/{id}', [Admin\PeopleController::class, 'updateEmployee'])->middleware('perm:employees.manage');
         Route::post('employees/bulk', [Admin\PeopleController::class, 'bulkUpload'])->middleware('perm:employees.manage');
