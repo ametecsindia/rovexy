@@ -38,8 +38,10 @@ php artisan rovexy:health-check
 
 echo "▶ Restarting workers…"
 php artisan queue:restart
-sudo systemctl reload "$PHP-fpm" 2>/dev/null || true
-sudo systemctl restart rovexy-reverb 2>/dev/null || true
+# -n: never stop for a password (Ctrl+C there skipped "artisan up" and left the site on 503). Without a sudoers rule
+# these are skipped; then run "sudo systemctl reload php8.3-fpm" yourself after the deploy.
+sudo -n systemctl reload "$PHP-fpm" 2>/dev/null || echo "  (reload $PHP-fpm yourself: sudo systemctl reload $PHP-fpm)"
+sudo -n systemctl restart rovexy-reverb 2>/dev/null || true
 
 php artisan up
 trap - EXIT
