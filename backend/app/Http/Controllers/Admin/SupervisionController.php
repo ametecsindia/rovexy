@@ -24,9 +24,9 @@ final class SupervisionController extends Controller
     /** Status is reported as observed: signed-in ≠ working. "Idle"/"active" are in-app signals only. */
     public function presence(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         return response()->json(ManagedDevice::query()->where('approval_state', 'approved')
-            ->when($teams !== null, fn ($q) => $q->whereIn('team_id', $teams))
+            ->when($users !== null, fn ($q) => $q->whereIn('assigned_user_id', $users))
             ->with('assignedUser:id,name,employee_code')
             ->get(['id', 'asset_tag', 'assigned_user_id', 'team_id', 'presence', 'work_state', 'battery_pct', 'network_type', 'last_contact_at', 'compliant', 'policy_state'])
             // ponytail: "online" = heard from in the last 10 min (a signed-in phone reports every 5 min while signed in); no presence job needed.
@@ -48,12 +48,12 @@ final class SupervisionController extends Controller
         $dayStart = \Illuminate\Support\Carbon::parse($f['date'] ?? now($tz)->toDateString(), $tz)->startOfDay()->utc();
         $isToday = $dayStart->equalTo(now($tz)->startOfDay()->utc());
         $dayEnd = $dayStart->copy()->addDay();
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         $team = fn (array $ids) => \Illuminate\Support\Facades\DB::table('team_user')->whereIn('team_id', $ids)->pluck('user_id')->all();
         $pf = $f['portfolio'] ?? null;
         $pfCustomers = $pf === null ? null : \App\Models\Customer::query()->when($pf === 'manual', fn ($q) => $q->whereNull('last_import_id'), fn ($q) => $q->where('last_import_id', (int) $pf))->select('id');
         $devices = ManagedDevice::query()->where('approval_state', 'approved')->whereNotNull('assigned_user_id')
-            ->when($teams !== null, fn ($q) => $q->whereIn('assigned_user_id', $team($teams)))
+            ->when($users !== null, fn ($q) => $q->whereIn('assigned_user_id', $users))
             ->when(!empty($f['team']), fn ($q) => $q->whereIn('assigned_user_id', $team([(int) $f['team']])))
             ->when(!empty($f['employee']), fn ($q) => $q->where('assigned_user_id', (int) $f['employee']))
             // portfolio: employees who hold cases from it
@@ -163,10 +163,9 @@ final class SupervisionController extends Controller
     public function mediaIndex(Request $r)
     {
         abort_unless($r->user()->hasPermission('media.screen') || $r->user()->hasPermission('media.camera') || $r->user()->hasPermission('chat.use') || $r->user()->hasPermission('audit.view'), 403);
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         return response()->json(MediaSession::query()
-            ->when($teams !== null, fn ($q) => $q->where(fn ($w) => $w->where('requested_by', $r->user()->id)
-                ->orWhereIn('user_id', \Illuminate\Support\Facades\DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id'))))
+            ->when($users !== null, fn ($q) => $q->where(fn ($w) => $w->where('requested_by', $r->user()->id)->orWhereIn('user_id', $users)))
             ->latest('id')->paginate(50));
     }
 

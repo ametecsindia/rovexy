@@ -144,17 +144,17 @@ final class SettingsController extends Controller
     public function exportCalls(Request $r)
     {
         $data = $r->validate(['from' => 'required|date', 'to' => 'required|date|after:from', 'portfolio' => 'nullable|string|max:20', 'employee' => 'nullable|integer']);
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         Audit::record('report.calls_exported', null, $data);
         $tz = app(CurrentCompany::class)->get()->timezone;
         $pf = $data['portfolio'] ?? null;
         $names = \App\Models\ImportJob::query()->get(['id', 'portfolio', 'original_name'])->mapWithKeys(fn ($j) => [$j->id => $j->portfolio ?: pathinfo($j->original_name, PATHINFO_FILENAME)]);
-        return response()->streamDownload(function () use ($data, $teams, $tz, $pf, $names) {
+        return response()->streamDownload(function () use ($data, $users, $tz, $pf, $names) {
             $out = fopen('php://output', 'w');
             fputcsv($out, ['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Portfolio', 'Destination', 'Outcome', 'Initiated (' . $tz . ')', 'Ring s', 'Talk s', 'Total s', 'Recording', 'Disposition', 'Amount', 'Payment mode']);
             Call::query()->with(['user:id,employee_code,name', 'customer:id,customer_ref,name,last_import_id', 'disposition:id,call_id,code,amount,payment_mode'])
                 ->where('is_test', false)->whereBetween('initiated_at', [$data['from'], $data['to']])
-                ->when($teams !== null, fn ($q) => $q->whereIn('user_id', DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')))
+                ->when($users !== null, fn ($q) => $q->whereIn('user_id', $users))
                 ->when(!empty($data['employee']), fn ($q) => $q->where('user_id', (int) $data['employee']))
                 ->when($pf === 'manual', fn ($q) => $q->whereHas('customer', fn ($c) => $c->whereNull('last_import_id')))
                 ->when(ctype_digit((string) $pf), fn ($q) => $q->whereHas('customer', fn ($c) => $c->where('last_import_id', (int) $pf)))

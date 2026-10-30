@@ -150,11 +150,13 @@ final class CustomerController extends Controller
      */
     public static function filtered(array $f, \App\Models\User $actor): \Illuminate\Database\Eloquent\Builder
     {
-        $teams = $actor->supervisedTeamIds();
+        $teams = $actor->teamsInView();
+        $one = \App\Support\OrgFilter::userId();
         $v = fn (string $k) => isset($f[$k]) && $f[$k] !== '' ? (string) $f[$k] : null;
         return Customer::query()
             ->when($teams !== null, fn ($q) => $q->where(fn ($w) => $w->whereIn('assigned_team_id', $teams)
                 ->orWhereIn('assigned_user_id', \Illuminate\Support\Facades\DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id'))))
+            ->when($one !== null, fn ($q) => $q->where('assigned_user_id', $one))
             ->when($v('q'), fn ($q, $s) => $q->where(fn ($w) => $w->where('name', 'like', '%' . addcslashes($s, '%_') . '%')->orWhere('customer_ref', $s)))
             ->when($v('status'), fn ($q, $s) => $q->where('status', $s))
             ->when($v('assigned') === 'none', fn ($q) => $q->whereNull('assigned_user_id'))

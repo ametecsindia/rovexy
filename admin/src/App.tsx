@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useUnread, type Unread } from './lib/unread';
 import { askDesktopNotify, chime, desktopNotify, soundPref } from './lib/sound';
 import { useAuth } from './lib/auth';
-import { get, post, put } from './lib/api';
+import { get, orgFilter, post, put, setOrgFilter, type Org } from './lib/api';
 import { disconnectRealtime } from './lib/realtime';
 import { ErrorBox, Field, Icon, Initials, LogoPlaceholder, Modal, Notice, useAction } from './components/ui';
 import { LoginPage } from './pages/Login';
@@ -29,8 +29,7 @@ type NavItem = { to: string; icon: string; label: string; perm?: string; group: 
 /** Sidebar: Dashboard on top, then collapsible sections. Order here = order on screen. */
 export const NAV: NavItem[] = [
   { to: '/', icon: 'home', label: 'Dashboard', group: '' },
-  { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: '' },
-  { to: '/employees', icon: 'people', label: 'Groups & people', perm: 'employees.view', group: 'Team' },
+  { to: '/employees', icon: 'people', label: 'Branches, teams & people', perm: 'employees.view', group: 'Team' },
   { to: '/my-calls', icon: 'call', label: 'My calls (Click2Call)', perm: 'calls.console', group: 'Calling' },
   { to: '/calls', icon: 'call', label: 'Calls & recordings', perm: 'calls.view', group: 'Calling' },
   { to: '/follow-ups', icon: 'event', label: 'Follow-ups', perm: 'calls.view', group: 'Calling' },
@@ -45,22 +44,23 @@ export const NAV: NavItem[] = [
   { to: '/allocation', icon: 'people', label: 'Assignment', perm: 'customers.assign', group: 'Customers' },
   { to: '/field-planning', icon: 'pin', label: 'Field planning (circles & routes)', perm: 'customers.assign', group: 'Customers' },
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
-  { to: '/address-report', icon: 'pin', label: 'Address & reachability', perm: 'customers.view', group: 'Customers' },
   { to: '/devices', icon: 'phone', label: 'Devices & approvals', perm: 'devices.view', group: 'Devices' },
   { to: '/policies', icon: 'shield', label: 'Policies', perm: 'policies.view', group: 'Devices' },
+  { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: 'Reports' },
+  { to: '/reports', icon: 'upload', label: 'Reports & extracts', perm: 'reports.export', group: 'Reports' },
+  { to: '/address-report', icon: 'pin', label: 'Address & reachability', perm: 'customers.view', group: 'Reports' },
   { to: '/location', icon: 'pin', label: 'Status & location', perm: 'location.view', group: 'Supervision' },
   { to: '/chat', icon: 'chat', label: 'Messages', perm: 'chat.use', group: 'Supervision' },
   { to: '/screen', icon: 'screen', label: 'Live screen', perm: 'media.screen', group: 'Supervision' },
   { to: '/camera', icon: 'camera', label: 'Camera sessions', perm: 'media.camera', group: 'Supervision' },
   { to: '/licence', icon: 'shield', label: 'Plan & licence', group: 'Administration' },
-  { to: '/reports', icon: 'chart', label: 'Reports & exports', perm: 'reports.export', group: 'Administration' },
   { to: '/branding', icon: 'palette', label: 'Company branding', perm: 'branding.manage', group: 'Administration' },
   { to: '/retention', icon: 'clock', label: 'Storage & retention', perm: 'settings.storage', group: 'Administration' },
   { to: '/audit', icon: 'check', label: 'Audit logs', perm: 'audit.view', group: 'Administration' },
   { to: '/integrations', icon: 'settings', label: 'Integrations (PRS / EPT / Maps)', perm: 'system.health', group: 'Administration' },
   { to: '/health', icon: 'warning', label: 'System health', perm: 'system.health', group: 'Administration' },
 ];
-const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', Administration: 'settings' };
+const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', Reports: 'chart', Administration: 'settings' };
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -168,6 +168,39 @@ function TopBar({ items, me, logout, pendingPhones }: { items: NavItem[]; me: an
   );
 }
 
+/**
+ * Branch → Team → Employee filter on every page. Every list, map, dashboard, report and export follows it
+ * (lib/api adds it to each request); changing it reloads the page's data. Managers only get their own teams to pick from.
+ */
+function OrgBar({ onChange }: { onChange: () => void }) {
+  const [tree, setTree] = useState<{ branches: any[]; teams: any[]; people: any[] } | null>(null);
+  const [f, setF] = useState<Org>(orgFilter);
+  useEffect(() => { get('/org').then(setTree).catch(() => setTree(null)); }, []);
+  if (!tree || tree.teams.length === 0) return null;
+  const teams = tree.teams.filter((t) => !f.branch || String(t.branch_id) === f.branch);
+  const teamIds = new Set(teams.map((t) => t.id));
+  const people = tree.people.filter((p) => f.team ? p.team_ids.includes(Number(f.team)) : !f.branch || p.team_ids.some((i: number) => teamIds.has(i)));
+  const apply = (o: Org) => { setF(o); setOrgFilter(o); onChange(); };
+  const on = f.branch || f.team || f.user;
+  return (
+    <div className={`org-bar ${on ? 'on' : ''}`} role="group" aria-label="Show data for">
+      <span className="muted small">Showing:</span>
+      {tree.branches.length > 0 && (
+        <select value={f.branch} aria-label="Branch" onChange={(e) => apply({ branch: e.target.value, team: '', user: '' })}>
+          <option value="">All branches</option>{tree.branches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+        </select>
+      )}
+      <select value={f.team} aria-label="Team" onChange={(e) => apply({ ...f, team: e.target.value, user: '' })}>
+        <option value="">All teams</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select>
+      <select value={f.user} aria-label="Employee" onChange={(e) => apply({ ...f, user: e.target.value })}>
+        <option value="">All employees</option>{people.map((p) => <option key={p.id} value={p.id}>{p.name} ({p.employee_code})</option>)}
+      </select>
+      {on && <button className="ghost sm" onClick={() => apply({ branch: '', team: '', user: '' })}>Whole company</button>}
+    </div>
+  );
+}
+
 function SoundToggle() {
   const [on, setOn] = useState(soundPref.on);
   return (
@@ -222,6 +255,7 @@ export function App() {
   }, [me]);
   // Licence ending / ended / suspended: one line on every page until it is renewed.
   const [licenceMsg, setLicenceMsg] = useState<string | null>(null);
+  const [, setOrgTick] = useState(0);   // bumped by the Branch / Team / Employee filter → pages remount and reload
   useEffect(() => { if (me) get<{ message: string | null }>('/licence').then((l) => setLicenceMsg(l.message), () => setLicenceMsg(null)); }, [me]);
   if (loading) return <p className="muted" style={{ padding: 24 }}>Loading…</p>;
   if (!me) return <LoginPage />;
@@ -232,6 +266,7 @@ export function App() {
     setMe(null);
   };
   const items = NAV.filter((n) => !n.perm || can(n.perm));
+  const orgKey = JSON.stringify(orgFilter());
   const name = branding?.display_name ?? me.company.name;
   return (
     <div className="shell">
@@ -239,8 +274,9 @@ export function App() {
       <MessageToast unread={unread} />
       <main className="main">
         <TopBar items={items} me={me} logout={logout} pendingPhones={pendingPhones} />
+        <OrgBar onChange={() => setOrgTick((n) => n + 1)} />
         {licenceMsg && <div className="alert warn" role="status" style={{ margin: '0 24px 12px' }}>{licenceMsg} <Link to="/licence">Plan & licence</Link></div>}
-        <Routes>
+        <Routes key={orgKey}>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/portfolio-reports" element={<PortfolioReportsPage />} />
           <Route path="/employees" element={<EmployeesPage />} />

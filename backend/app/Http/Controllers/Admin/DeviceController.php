@@ -18,9 +18,11 @@ final class DeviceController extends Controller
 {
     public function index(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $teams = $r->user()->teamsInView();
+        $one = \App\Support\OrgFilter::userId();
         return response()->json(ManagedDevice::query()
             ->when($teams !== null, fn ($q) => $q->where(fn ($w) => $w->whereIn('team_id', $teams)->orWhere('approval_state', 'pending')))
+            ->when($one !== null, fn ($q) => $q->where(fn ($w) => $w->where('assigned_user_id', $one)->orWhere('approval_state', 'pending')))
             ->when($r->query('state'), fn ($q, $s) => $q->where('approval_state', $s))
             ->with(['assignedUser:id,name,employee_code', 'team:id,name'])
             ->orderByRaw("approval_state = 'pending' desc")->orderByDesc('id')

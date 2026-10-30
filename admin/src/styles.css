@@ -870,3 +870,10 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
 .top-alert { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; background: #fff4d6; color: #8a5a00; border: 1px solid #f0c75e; font-size: 13px; font-weight: 600; text-decoration: none; animation: vpulse 1.2s ease-in-out infinite; }
 .top-alert:hover { animation: none; background: #ffe9a8; }
 @media (prefers-reduced-motion: reduce) { .top-alert { animation: none; } }
+
+/* Branch / Team / Employee filter under the top bar (every page) */
+.org-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: -10px 0 16px; }
+.org-bar select { width: auto; min-width: 150px; max-width: 240px; padding: 6px 10px; font-size: .88rem; }
+.org-bar.on select { border-color: var(--accent); }
+.branch-head { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 8px; }
+.branch-head h2 { margin: 0; font-size: 1.05rem; }

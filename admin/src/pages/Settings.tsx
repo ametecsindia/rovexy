@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { api, get, post, fmtDate, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { RANGES, rangeName } from '../lib/periods';
 import { Badge, Card, ErrorBox, Field, LogoPlaceholder, Notice, Page, Stat, Table, useAction, useAsync } from '../components/ui';
 
 export function BrandingPage() {
@@ -120,19 +121,21 @@ export function HealthPage() {
 
 export function ReportsPage() {
   const { can } = useAuth();
-  const [from, setFrom] = useState(() => new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10));
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [[from, to], setRange] = useState<[string, string]>(() => RANGES[2][1]());   // last 7 days
+  const setFrom = (v: string) => setRange([v, to]);
+  const setTo = (v: string) => setRange([from, v]);
   const [portfolio, setPortfolio] = useState('');
-  const [employee, setEmployee] = useState('');
   const pfs = useAsync(() => (can('customers.view') ? get<any[]>('/portfolios') : Promise.resolve([])));
-  const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
-  const f = { portfolio, employee };
+  const f = { portfolio };
   const pfName = portfolio === 'manual' ? 'Added by hand' : (pfs.data ?? []).find((p: any) => String(p.id) === portfolio)?.name;
-  const empName = (emps.data?.data ?? []).find((e: any) => String(e.id) === employee)?.name;
-  const scope = [pfName ?? 'All portfolios', empName ?? 'all employees', `${from} to ${to}`].join(' · ');
+  const scope = [pfName ?? 'All portfolios', `${from} to ${to}`, 'branch / team / employee as chosen at the top'].join(' · ');
   return (
-    <Page title="Reports & exports" subtitle="CSV exports are protected against spreadsheet formula injection. Each export is audited.">
+    <Page title="Reports & extracts" subtitle="CSV exports are protected against spreadsheet formula injection. Each export is audited. Branch, team and employee: use the bar at the top.">
       <Card title="Filters">
+        <div className="seg" style={{ marginBottom: 10 }}>
+          {RANGES.filter(([l]) => l !== 'All time').map(([l, fn]) => <button key={l} className={rangeName(from, to) === l ? 'on' : ''} onClick={() => setRange(fn())}>{l}</button>)}
+          <button className={rangeName(from, to) === 'Custom' ? 'on' : ''} disabled title="Pick From / To dates for a custom range">Custom</button>
+        </div>
         <div className="form-grid">
           <Field label="From"><input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} /></Field>
           <Field label="To"><input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} /></Field>
@@ -143,25 +146,16 @@ export function ReportsPage() {
               <option value="manual">Added by hand</option>
             </select>
           </Field>
-          <Field label="Employee">
-            <select value={employee} onChange={(e) => setEmployee(e.target.value)}>
-              <option value="">All employees</option>
-              {(emps.data?.data ?? []).filter((e: any) => e.roles?.some((x: any) => x.key === 'employee')).map((e: any) => <option key={e.id} value={e.id}>{e.name} ({e.employee_code})</option>)}
-            </select>
-          </Field>
         </div>
         <p className="muted small" style={{ margin: 0 }}>Exporting: {scope}</p>
       </Card>
-      <div className="grid2">
-        <Card title="Portfolio-wise summary">
-          <p className="muted">One row per portfolio — cases, calls, connected, not called, callbacks, collections — plus an "All portfolios" total.</p>
-          <a className="button" href={fileUrl(`/api/admin/reports/portfolio.csv${qs({ by: 'portfolio', from, to, ...f })}`)}>Download portfolio-wise CSV</a>
-        </Card>
-        <Card title="Employee-wise summary">
-          <p className="muted">One row per employee — their cases, calls, connect rate, cases not called, callbacks and money collected.</p>
-          <a className="button" href={fileUrl(`/api/admin/reports/portfolio.csv${qs({ by: 'employee', from, to, ...f })}`)}>Download employee-wise CSV</a>
-        </Card>
-      </div>
+      <Card title="Summary reports">
+        <p className="muted">One row per company / branch / team / employee / portfolio: cases, calls, connect rate, callbacks and money collected.</p>
+        <div className="row">
+          {[['company', 'Company total'], ['branch', 'Branch-wise'], ['team', 'Team-wise'], ['employee', 'Employee-wise'], ['portfolio', 'Portfolio-wise']].map(([by, l]) =>
+            <a key={by} className="button secondary" href={fileUrl(`/api/admin/reports/portfolio.csv${qs({ by, from, to, ...f })}`)}>{l} CSV</a>)}
+        </div>
+      </Card>
       <Card title="Call report (every call)">
         <p className="muted">One row per call: employee, customer, portfolio, result, talk time, outcome and payment.</p>
         <a className="button" href={fileUrl(`/api/admin/reports/calls.csv${qs({ from, to: `${to}T23:59:59`, ...f })}`)}>Download call-by-call CSV</a>

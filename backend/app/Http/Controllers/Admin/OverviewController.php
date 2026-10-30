@@ -26,12 +26,15 @@ final class OverviewController extends Controller
     public function show(Request $r)
     {
         $days = in_array((int) $r->query('days', 7), [1, 7, 30], true) ? (int) $r->query('days', 7) : 7;
-        $teams = $r->user()->supervisedTeamIds();
+        $teams = $r->user()->teamsInView();
         if ($r->filled('team_id')) {
             $tid = (int) $r->query('team_id');
             $teams = $teams === null || in_array($tid, $teams, true) ? [$tid] : [];   // never widens a supervisor's scope
         }
-        $users = $teams === null ? null : DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')->all();
+        $users = $teams === null ? null : DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')->map(fn ($i) => (int) $i)->all();
+        if (($one = \App\Support\OrgFilter::userId()) !== null) {
+            $users = $users === null || in_array($one, $users, true) ? [$one] : [];
+        }
         $scope = fn ($q, string $col = 'user_id') => $q->when($users !== null, fn ($q) => $q->whereIn($col, $users));
 
         $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: 'UTC';

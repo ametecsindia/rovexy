@@ -13,11 +13,16 @@ class Team extends Model
 
     protected $table = 'teams';
 
-    protected $fillable = ['code','name'];
+    protected $fillable = ['code', 'name', 'branch_id'];
 
     protected function casts(): array
     {
         return [];
+    }
+
+    public function branch(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(Branch::class);
     }
 
     public function users(): \Illuminate\Database\Eloquent\Relations\BelongsToMany

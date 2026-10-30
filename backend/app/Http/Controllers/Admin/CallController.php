@@ -22,8 +22,8 @@ final class CallController extends Controller
 {
     private function scoped(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
-        return Call::query()->when($teams !== null, fn ($q) => $q->whereIn('user_id', DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')));
+        $users = $r->user()->usersInView();
+        return Call::query()->when($users !== null, fn ($q) => $q->whereIn('user_id', $users));
     }
 
     public function index(Request $r)
@@ -112,9 +112,9 @@ final class CallController extends Controller
 
     public function followUps(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         return response()->json(FollowUp::query()->where('status', 'open')->with(['customer:id,customer_ref,name,status', 'user:id,name'])
-            ->when($teams !== null, fn ($q) => $q->whereIn('user_id', DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')))
+            ->when($users !== null, fn ($q) => $q->whereIn('user_id', $users))
             ->orderBy('due_at')->paginate(100));
     }
 

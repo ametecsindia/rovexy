@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Admin;
 use App\Domain\Customers\PhoneNormaliser;
 use App\Domain\DomainException;
 use App\Http\Controllers\Controller;
+use App\Models\Branch;
 use App\Models\Role;
 use App\Models\Team;
 use App\Models\User;
@@ -22,9 +23,10 @@ final class PeopleController extends Controller
 {
     public function employees(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $teams = $r->user()->teamsInView();
         return response()->json(User::query()
             ->when($teams !== null, fn ($q) => $q->whereHas('teams', fn ($t) => $t->whereIn('teams.id', $teams)))
+            ->when(\App\Support\OrgFilter::userId(), fn ($q, $one) => $q->whereKey($one))
             ->when($r->query('role'), fn ($q, $k) => $q->whereHas('roles', fn ($w) => $w->where('key', $k)))
             ->when($r->query('team_id'), fn ($q, $t) => $q->whereHas('teams', fn ($w) => $w->where('teams.id', $t)))
             ->with(['teams:id,code,name', 'roles:id,key,name'])->orderBy('name')
@@ -134,16 +136,80 @@ final class PeopleController extends Controller
     /** Groups with their manager(s). A manager sees only the groups they manage. */
     public function teams(Request $r)
     {
-        $scope = $r->user()->supervisedTeamIds();
+        $scope = $r->user()->teamsInView();
         return response()->json(Team::query()->when($scope !== null, fn ($q) => $q->whereIn('id', $scope))->withCount('users')
             ->with(['users' => fn ($q) => $q->wherePivot('membership', 'supervisor')->select('users.id', 'users.name', 'users.employee_code')])
             ->orderBy('name')->get()->map(fn (Team $t) => $t->toArray() + ['managers' => $t->users->map->only(['id', 'name', 'employee_code'])->values()])
             ->map(fn ($t) => array_diff_key($t, ['users' => 1])));
     }
 
+    /** Branch → team → people the viewer may see, for the console's Branch / Team / Employee filter. Never narrowed by that filter itself. */
+    public function org(Request $r)
+    {
+        $scope = $r->user()->supervisedTeamIds();
+        $teams = Team::query()->when($scope !== null, fn ($q) => $q->whereIn('id', $scope))->orderBy('name')->get(['id', 'name', 'branch_id']);
+        $people = User::query()->where('status', 'active')->whereHas('teams', fn ($q) => $q->whereIn('teams.id', $teams->pluck('id')))
+            ->with('teams:id')->orderBy('name')->get(['id', 'name', 'employee_code'])
+            ->map(fn (User $u) => ['id' => $u->id, 'name' => $u->name, 'employee_code' => $u->employee_code, 'team_ids' => $u->teams->pluck('id')->map(fn ($i) => (int) $i)->values()]);
+        $branches = Branch::query()->when($scope !== null, fn ($q) => $q->whereIn('id', $teams->pluck('branch_id')->filter()))->orderBy('name')->get(['id', 'name', 'code']);
+        return response()->json(['branches' => $branches, 'teams' => $teams, 'people' => $people]);
+    }
+
+    public function branches(Request $r)
+    {
+        $scope = $r->user()->supervisedTeamIds();
+        return response()->json(Branch::query()->withCount(['teams' => fn ($q) => $q->when($scope !== null, fn ($w) => $w->whereIn('id', $scope))])
+            ->when($scope !== null, fn ($q) => $q->whereHas('teams', fn ($t) => $t->whereIn('id', $scope)))->orderBy('name')->get());
+    }
+
+    public function createBranch(Request $r, CurrentCompany $current)
+    {
+        $data = $r->validate(['name' => ['required', 'string', 'max:100', Rule::unique('branches')->where('company_id', $current->id())],
+            'code' => ['nullable', 'string', 'max:32', 'regex:/^[A-Za-z0-9._-]+$/', Rule::unique('branches')->where('company_id', $current->id())]]);
+        $b = Branch::query()->create(['name' => trim($data['name']), 'code' => $data['code'] ?? $this->uniqueCode(Branch::class, $data['name'], 'BR')]);
+        Audit::record('branch.created', $b);
+        return response()->json(['id' => $b->id], 201);
+    }
+
+    public function updateBranch(Request $r, CurrentCompany $current, int $id)
+    {
+        $b = Branch::query()->findOrFail($id);
+        $data = $r->validate(['name' => ['required', 'string', 'max:100', Rule::unique('branches')->where('company_id', $current->id())->ignore($b->id)]]);
+        $b->forceFill(['name' => trim($data['name'])])->save();
+        Audit::record('branch.renamed', $b);
+        return response()->json(['ok' => true]);
+    }
+
+    /** Deleting a branch keeps its teams and people; the teams just have no branch. */
+    public function deleteBranch(int $id)
+    {
+        $b = Branch::query()->findOrFail($id);
+        Team::query()->where('branch_id', $b->id)->update(['branch_id' => null]);
+        $b->delete();
+        Audit::record('branch.deleted', null, ['branch_id' => $id, 'name' => $b->name]);
+        return response()->json(['ok' => true]);
+    }
+
     /**
-     * Bulk upload of telecallers and managers (SmartDCM-style). Columns: name, group, role (telecaller|manager), employee_code, phone, email.
-     * Groups that do not exist yet are created. Missing User IDs, e-mails and passwords are generated. All-or-nothing: any bad row → nothing saved.
+     * Excel template for the bulk upload: People sheet with Branch / Team / Role dropdowns filled from this company's
+     * branches and teams (a "Lists" sheet holds the values). New names typed over the dropdown are still accepted.
+     */
+    public function bulkTemplate(Request $r)
+    {
+        $branches = Branch::query()->orderBy('name')->pluck('name')->all();
+        $teams = Team::query()->with('branch:id,name')->orderBy('name')->get();
+        $b1 = $branches[0] ?? 'Hyderabad';
+        $t1 = $teams->first(fn ($t) => $t->branch?->name === $b1)?->name ?? $teams->first()?->name ?? 'Team A';
+        $rows = [['name', 'branch', 'team', 'role', 'employee_code', 'phone', 'email'],
+            ['Akshitha', $b1, $t1, 'manager', '', '', ''], ['Ravi Kumar', $b1, $t1, 'telecaller', '', '9876543210', '']];
+        $lists = [$branches ?: [$b1], $teams->pluck('name')->all() ?: [$t1], ['telecaller', 'manager']];
+        $path = \App\Support\XlsxTemplate::build($rows, $lists, ['B' => 0, 'C' => 1, 'D' => 2], 500);
+        return response()->download($path, 'people-template.xlsx', ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend();
+    }
+
+    /**
+     * Bulk upload of telecallers and managers (SmartDCM-style). Columns: name, branch, team, role (telecaller|manager), employee_code, phone, email.
+     * Branches and teams that do not exist yet are created. Missing User IDs, e-mails and passwords are generated. All-or-nothing: any bad row → nothing saved.
      * The generated passwords are returned once (only hashes are stored).
      */
     public function bulkUpload(Request $r, CurrentCompany $current)
@@ -155,13 +221,14 @@ final class PeopleController extends Controller
         $rows = $this->readSheet($data['file']);
         $head = array_map(fn ($h) => strtolower(trim(str_replace([' ', '-'], '_', (string) $h))), array_shift($rows) ?? []);
         $col = fn (string ...$names) => collect($names)->map(fn ($n) => array_search($n, $head, true))->first(fn ($i) => $i !== false);
-        $ix = ['name' => $col('name', 'employee_name', 'telecaller_name'), 'group' => $col('group', 'group_name', 'team', 'branch'),
+        $ix = ['name' => $col('name', 'employee_name', 'telecaller_name'), 'group' => $col('team', 'team_name', 'group', 'group_name'), 'branch' => $col('branch', 'branch_name'),
             'role' => $col('role', 'type'), 'code' => $col('employee_code', 'user_id', 'code', 'emp_code'), 'phone' => $col('phone', 'mobile', 'phone_number'), 'email' => $col('email', 'email_id')];
         if ($ix['name'] === null || $ix['group'] === null) {
-            throw new DomainException('bad_template', 'The file needs at least the columns "name" and "group". Download the template.');
+            throw new DomainException('bad_template', 'The file needs at least the columns "name" and "team". Download the template.');
         }
         $existingCodes = User::query()->pluck('employee_code')->map(fn ($c) => strtolower($c))->flip();
         $existingEmails = User::query()->whereNotNull('email')->pluck('email')->map(fn ($e) => strtolower($e))->flip();
+        $teamBranch = Team::query()->with('branch:id,name')->get()->mapWithKeys(fn ($t) => [strtolower($t->name) => $t->branch?->name]);   // existing team → its branch
         $people = [];
         $errors = [];
         $seenCodes = [];
@@ -174,11 +241,14 @@ final class PeopleController extends Controller
             $line = $n + 2;
             $role = strtolower($v('role')) ?: 'telecaller';
             $role = in_array($role, ['manager', 'supervisor', 'team_leader', 'tl'], true) ? 'manager' : ($role === 'telecaller' || $role === 'employee' || $role === 'agent' ? 'telecaller' : $role);
-            $p = ['line' => $line, 'name' => mb_substr($v('name'), 0, 150), 'group' => mb_substr($v('group'), 0, 100), 'role' => $role,
+            $p = ['line' => $line, 'name' => mb_substr($v('name'), 0, 150), 'group' => mb_substr($v('group'), 0, 100), 'branch' => mb_substr($v('branch'), 0, 100), 'role' => $role,
                 'code' => $v('code'), 'phone' => $v('phone'), 'email' => strtolower($v('email'))];
             $err = [];
             if ($p['name'] === '') { $err[] = 'name is empty'; }
-            if ($p['group'] === '') { $err[] = 'group is empty'; }
+            if ($p['group'] === '') { $err[] = 'team is empty'; }
+            $known = $teamBranch[strtolower($p['group'])] ?? null;
+            if ($p['branch'] !== '' && $known !== null && strcasecmp($known, $p['branch']) !== 0) { $err[] = "team {$p['group']} is in branch {$known}, not {$p['branch']}"; }
+            $p['branch'] !== '' && $p['group'] !== '' && $known === null && $teamBranch[strtolower($p['group'])] = $p['branch'];   // same new team, same branch on every row
             if (!in_array($role, ['manager', 'telecaller'], true)) { $err[] = "role must be telecaller or manager (got \"{$role}\")"; }
             if ($p['code'] !== '' && !preg_match('/^[A-Za-z0-9._-]{1,64}$/', $p['code'])) { $err[] = 'employee_code may contain only letters, digits, . _ -'; }
             if ($p['code'] !== '' && (isset($existingCodes[strtolower($p['code'])]) || isset($seenCodes[strtolower($p['code'])]))) { $err[] = "employee_code {$p['code']} already exists"; }
@@ -202,9 +272,12 @@ final class PeopleController extends Controller
         $created = DB::transaction(function () use ($people, $cid, $domain, &$existingCodes, &$existingEmails) {
             $roleIds = Role::query()->whereIn('key', ['employee', 'supervisor'])->pluck('id', 'key');
             $teams = Team::query()->get()->keyBy(fn ($t) => strtolower($t->name));
+            $branches = Branch::query()->get()->keyBy(fn ($b) => strtolower($b->name));
             $out = [];
             foreach ($people as $p) {
-                $team = $teams[strtolower($p['group'])] ??= Team::query()->create(['name' => $p['group'], 'code' => $this->teamCode($p['group'])]);
+                $branch = $p['branch'] === '' ? null : ($branches[strtolower($p['branch'])] ??= Branch::query()->create(['name' => $p['branch'], 'code' => $this->uniqueCode(Branch::class, $p['branch'], 'BR')]));
+                $team = $teams[strtolower($p['group'])] ??= Team::query()->create(['name' => $p['group'], 'code' => $this->teamCode($p['group']), 'branch_id' => $branch?->id]);
+                $branch && !$team->branch_id && $team->forceFill(['branch_id' => $branch->id])->save();   // existing team without a branch joins the one given
                 $code = $p['code'] !== '' ? $p['code'] : $this->nextCode($p['role'] === 'manager' ? 'MGR' : 'TC', $existingCodes);
                 $existingCodes[strtolower($code)] = true;
                 $email = $p['email'] !== '' ? $p['email'] : strtolower(preg_replace('/[^A-Za-z0-9._-]/', '', $code)) . '@' . $domain;
@@ -216,7 +289,7 @@ final class PeopleController extends Controller
                 $u = User::query()->create(['employee_code' => $code, 'name' => $p['name'], 'email' => $email, 'phone' => $p['phone'] ?: null, 'password' => $password, 'status' => 'active']);
                 $u->roles()->attach($roleIds[$p['role'] === 'manager' ? 'supervisor' : 'employee'], ['company_id' => $cid]);
                 $u->teams()->attach($team->id, ['company_id' => $cid, 'membership' => $p['role'] === 'manager' ? 'supervisor' : 'member']);
-                $out[] = ['employee_code' => $code, 'name' => $p['name'], 'email' => $email, 'password' => $password, 'group' => $team->name, 'role' => $p['role'], 'team_id' => $team->id];
+                $out[] = ['employee_code' => $code, 'name' => $p['name'], 'email' => $email, 'password' => $password, 'branch' => $branch?->name ?? $team->branch?->name ?? '', 'group' => $team->name, 'role' => $p['role'], 'team_id' => $team->id];
             }
             return $out;
         });
@@ -234,6 +307,17 @@ final class PeopleController extends Controller
         $base = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: 'GRP', 0, 24));
         $code = $base;
         for ($i = 2; Team::query()->where('code', $code)->exists(); $i++) {
+            $code = $base . $i;
+        }
+        return $code;
+    }
+
+    /** Code from the name (A–Z, 0–9), made unique within the company. */
+    private function uniqueCode(string $model, string $name, string $fallback): string
+    {
+        $base = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: $fallback, 0, 24));
+        $code = $base;
+        for ($i = 2; $model::query()->where('code', $code)->exists(); $i++) {
             $code = $base . $i;
         }
         return $code;
@@ -282,8 +366,9 @@ final class PeopleController extends Controller
     public function createTeam(Request $r, CurrentCompany $current)
     {
         $data = $r->validate(['code' => ['nullable', 'string', 'max:32', 'regex:/^[A-Za-z0-9._-]+$/', Rule::unique('teams')->where('company_id', $current->id())],
-            'name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('company_id', $current->id())], 'manager_ids' => 'array', 'manager_ids.*' => 'integer']);
-        $t = Team::query()->create(['name' => $data['name'], 'code' => $data['code'] ?? $this->teamCode($data['name'])]);
+            'name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('company_id', $current->id())], 'manager_ids' => 'array', 'manager_ids.*' => 'integer',
+            'branch_id' => ['nullable', 'integer', Rule::exists('branches', 'id')->where('company_id', $current->id())]]);
+        $t = Team::query()->create(['name' => $data['name'], 'code' => $data['code'] ?? $this->teamCode($data['name']), 'branch_id' => $data['branch_id'] ?? null]);
         $managers = User::query()->whereIn('id', $data['manager_ids'] ?? [])->pluck('id');
         $t->users()->attach($managers->mapWithKeys(fn ($id) => [$id => ['company_id' => $t->company_id, 'membership' => 'supervisor']])->all());
         Audit::record('team.created', $t);
@@ -293,8 +378,11 @@ final class PeopleController extends Controller
     public function renameTeam(Request $r, CurrentCompany $current, int $id)
     {
         $team = Team::query()->findOrFail($id);
-        $data = $r->validate(['name' => ['required', 'string', 'max:100', Rule::unique('teams')->where('company_id', $current->id())->ignore($team->id)]]);
-        $team->forceFill(['name' => trim($data['name'])])->save();
+        $data = $r->validate(['name' => ['sometimes', 'required', 'string', 'max:100', Rule::unique('teams')->where('company_id', $current->id())->ignore($team->id)],
+            'branch_id' => ['sometimes', 'nullable', 'integer', Rule::exists('branches', 'id')->where('company_id', $current->id())]]);
+        isset($data['name']) && $team->name = trim($data['name']);
+        array_key_exists('branch_id', $data) && $team->branch_id = $data['branch_id'];
+        $team->save();
         Audit::record('team.renamed', $team);
         return response()->json(['ok' => true]);
     }

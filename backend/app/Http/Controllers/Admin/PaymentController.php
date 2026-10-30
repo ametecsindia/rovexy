@@ -18,9 +18,9 @@ final class PaymentController extends Controller
 {
     private function scoped(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $users = $r->user()->usersInView();
         return CallDisposition::query()->whereNotNull('payment_mode')
-            ->when($teams !== null, fn ($q) => $q->whereIn('user_id', DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')));
+            ->when($users !== null, fn ($q) => $q->whereIn('user_id', $users));
     }
 
     public function index(Request $r)

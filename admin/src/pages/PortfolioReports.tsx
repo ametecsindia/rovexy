@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { get, fmtDate, qs } from '../lib/api';
+import { get, fileUrl, fmtDate, qs } from '../lib/api';
+import { RANGES, rangeName } from '../lib/periods';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Kpi, Modal, Notice, Page, Table, useAsync } from '../components/ui';
 
@@ -13,20 +14,13 @@ function downloadCsv(name: string, header: string[], rows: unknown[][]) {
   a.href = URL.createObjectURL(new Blob(['﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n'], { type: 'text/csv' }));
   a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-const day = (d: Date) => d.toLocaleDateString('en-CA');
 const short = (iso: string | null | undefined, tz?: string) => iso ? new Date(iso).toLocaleString('en-IN', { timeZone: tz, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
-const RANGES: [string, () => [string, string]][] = [
-  ['Today', () => [day(new Date()), day(new Date())]],
-  ['Last 7 days', () => [day(new Date(Date.now() - 6 * 864e5)), day(new Date())]],
-  ['This month', () => { const n = new Date(); return [day(new Date(n.getFullYear(), n.getMonth(), 1)), day(n)]; }],
-  ['All time', () => ['', '']],
-];
 
 /** Calls (connected + not connected, stacked) and collections per day / week / month — two charts, one axis each. */
 function TrendCharts({ trend, period }: { trend: any[]; period: string }) {
   const [hover, setHover] = useState<{ chart: string; i: number } | null>(null);
   if (!trend.length) return <p className="muted">No calls or payments in this range.</p>;
-  const label = (p: string) => { const d = new Date(p + 'T00:00:00'); return period === 'month' ? d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
+  const label = (p: string) => { const d = new Date(p + 'T00:00:00'); return period === 'year' ? String(d.getFullYear()) : period === 'month' ? d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }) : d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }); };
   const W = 640, H = 190, P = { l: 52, r: 8, t: 10, b: 26 };
   const bw = (W - P.l - P.r) / trend.length;
   const every = Math.ceil(trend.length / 10);
@@ -81,8 +75,6 @@ export function PortfolioReportsPage() {
   const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: 'cases', d: -1 });
   const [drill, setDrill] = useState<any | null>(null);
   const r = useAsync(() => get(`/reports/portfolio${qs({ ...f, period })}`), [JSON.stringify(f), period]);
-  const teams = useAsync(() => get<any[]>('/teams'));
-  const emps = useAsync(() => get('/employees'));
   const d = r.data;
   const s = d?.summary;
   const set = (k: string, v: string) => setF({ ...f, [k]: v });
@@ -95,6 +87,8 @@ export function PortfolioReportsPage() {
   const avgCases = d?.employees?.length ? d.employees.reduce((a: number, e: any) => a + e.cases, 0) / d.employees.length : 0;
   const maxCollected = Math.max(0, ...(d?.employees ?? []).map((e: any) => e.collected));
   const maxGroupCollected = Math.max(0, ...(d?.groups ?? []).map((g: any) => g.collected));
+  const maxBranchCollected = Math.max(0, ...(d?.branches ?? []).map((g: any) => g.collected));
+  const csv = (by: string) => fileUrl(`/api/admin/reports/portfolio.csv${qs({ ...f, by })}`);
   const H = ({ k, children }: { k: string; children: string }) => (
     <button className="th-sort" onClick={() => setSort({ k, d: sort.k === k ? (sort.d === 1 ? -1 : 1) : -1 })}>{children}{sort.k === k ? (sort.d === 1 ? ' ▲' : ' ▼') : ''}</button>
   );
@@ -106,7 +100,7 @@ export function PortfolioReportsPage() {
   ].filter(Boolean);
 
   return (
-    <Page title="Portfolio reports" subtitle="Calls, collections, callbacks and pending work per portfolio, group and employee — from live assignment and call records."
+    <Page title="Portfolio reports" subtitle="Calls, collections, callbacks and pending work — company, branch, team and employee wise, per portfolio. Pick branch / team / employee in the bar at the top."
       actions={<button className="secondary" onClick={r.reload}>Refresh</button>}>
       <ErrorBox error={r.error} />
       <Card>
@@ -114,8 +108,6 @@ export function PortfolioReportsPage() {
           <select value={f.portfolio} onChange={(e) => set('portfolio', e.target.value)} aria-label="Portfolio" style={{ minWidth: 220 }}>
             <option value="">All portfolios</option>{(d?.portfolios ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.cases})</option>)}
           </select>
-          <select value={f.group} onChange={(e) => set('group', e.target.value)} aria-label="Group"><option value="">All groups</option><option value="none">No group</option>{(teams.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
-          <select value={f.employee} onChange={(e) => set('employee', e.target.value)} aria-label="Employee"><option value="">All employees</option>{(emps.data?.data ?? []).filter((e: any) => e.roles.some((x: any) => x.key === 'employee')).map((e: any) => <option key={e.id} value={e.id}>{e.name}</option>)}</select>
           <select value={f.assigned} onChange={(e) => set('assigned', e.target.value)} aria-label="Assignment"><option value="">Assigned + unassigned</option><option value="assigned">Assigned cases</option><option value="unassigned">Unassigned cases</option></select>
           <select value={f.call_status} onChange={(e) => set('call_status', e.target.value)} aria-label="Call status"><option value="">Any call status</option><option value="connected">Connected</option><option value="not_connected">Called, not connected</option><option value="not_called">Not called</option></select>
           <select value={f.collection} onChange={(e) => set('collection', e.target.value)} aria-label="Collection status"><option value="">Any collection</option><option value="paid">Paid</option><option value="verified">Paid &amp; verified</option><option value="to_check">Slip to check</option><option value="none">No payment</option></select>
@@ -125,7 +117,8 @@ export function PortfolioReportsPage() {
         <div className="filters filter-bar" style={{ marginTop: 8 }}>
           <input type="date" value={f.from} max={f.to || undefined} onChange={(e) => set('from', e.target.value)} aria-label="From" />
           <input type="date" value={f.to} min={f.from || undefined} onChange={(e) => set('to', e.target.value)} aria-label="To" />
-          {RANGES.map(([l, fn]) => <button key={l} className="ghost" onClick={() => { const [a, b] = fn(); setF({ ...f, from: a, to: b }); }}>{l}</button>)}
+          <div className="seg">{RANGES.map(([l, fn]) => <button key={l} className={rangeName(f.from, f.to) === l ? 'on' : ''} onClick={() => { const [a, b] = fn(); setF({ ...f, from: a, to: b }); }}>{l}</button>)}
+            <button className={rangeName(f.from, f.to) === 'Custom' ? 'on' : ''} disabled title="Pick From / To dates for a custom range">Custom</button></div>
           {active > 0 && <button className="ghost" onClick={() => setF(EMPTY)}>Clear filters ({active})</button>}
         </div>
       </Card>
@@ -147,22 +140,41 @@ export function PortfolioReportsPage() {
           <Kpi icon="chart" tone="gold" label="Collections received" value={inr(s.collected)} sub={`${s.payments} payments · ${inr(s.verified)} verified`} />
           <Kpi icon="event" tone="purple" label="Callbacks pending" value={s.callbacks} sub={s.callbacks_overdue ? `${s.callbacks_overdue} overdue` : 'none overdue'} subTone={s.callbacks_overdue ? 'down' : 'flat'} />
           <Kpi icon="warning" tone="gold" label="Calls not made" value={s.not_made} sub={`assigned, no call · ${s.not_connected_cases} called but not reached`} subTone={s.not_made ? 'down' : 'flat'} />
-          <Kpi icon="people" tone="teal" label="Employees on it" value={s.employees} sub={`${s.groups} groups`} />
+          <Kpi icon="people" tone="teal" label="Employees on it" value={s.employees} sub={`${s.groups} teams · ${(d?.branches ?? []).filter((b: any) => b.branch_id).length} branches`} />
           <Kpi icon="clock" tone="blue" label="Pending cases" value={s.pending_cases} sub="new, in progress or follow-up" />
         </div>
       )}
 
       {d && (
-        <Card title="Trend" actions={<div className="seg">{['day', 'week', 'month'].map((p) => <button key={p} className={period === p ? 'on' : ''} onClick={() => setPeriod(p)}>{p === 'day' ? 'Daily' : p === 'week' ? 'Weekly' : 'Monthly'}</button>)}</div>}>
-          <TrendCharts trend={d.trend} period={d.period} />
+        <Card title="Downloads">
+          <div className="row">
+            {[['company', 'Company total'], ['branch', 'Branch-wise'], ['team', 'Team-wise'], ['employee', 'Employee-wise'], ['portfolio', 'Portfolio-wise']].map(([k, l]) => <a key={k} className="button secondary" href={csv(k)}>{l} CSV</a>)}
+          </div>
+          <p className="muted small" style={{ marginBottom: 0 }}>Same filters and dates as this page, and the branch / team / employee chosen at the top.</p>
         </Card>
       )}
 
       {d && (
-        <Card title="By group" actions={<button className="ghost" onClick={() => downloadCsv('groups.csv', ['Group', 'Cases', 'Unassigned', 'Employees', 'Calls', 'Connected', 'Callbacks', 'Collected'],
-          d.groups.map((g: any) => [g.name, g.cases, g.unassigned, g.employees, g.calls, g.connected, g.callbacks, g.collected]))}>Export CSV</button>}>
-          <Table rows={d.groups.map((g: any, i: number) => ({ ...g, id: i }))} empty="No cases." onRow={(g: any) => g.team_id && set('group', String(g.team_id))} columns={[
-            { key: 'name', label: 'Group' }, { key: 'cases', label: 'Cases', align: 'right' }, { key: 'unassigned', label: 'Unassigned', align: 'right' },
+        <Card title="Trend" actions={<div className="seg">{['day', 'week', 'month', 'year'].map((p) => <button key={p} className={period === p ? 'on' : ''} onClick={() => setPeriod(p)}>{({ day: 'Daily', week: 'Weekly', month: 'Monthly', year: 'Yearly' } as any)[p]}</button>)}</div>}>
+          <TrendCharts trend={d.trend} period={d.period} />
+        </Card>
+      )}
+
+      {d && (d.branches ?? []).some((b: any) => b.branch_id) && (
+        <Card title="By branch" actions={<a className="button ghost" href={csv('branch')}>Export CSV</a>}>
+          <Table rows={d.branches.map((g: any, i: number) => ({ ...g, id: i }))} empty="No cases." columns={[
+            { key: 'name', label: 'Branch' }, { key: 'teams', label: 'Teams', align: 'right' }, { key: 'cases', label: 'Cases', align: 'right' }, { key: 'unassigned', label: 'Unassigned', align: 'right' },
+            { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
+            { key: 'connected', label: 'Connected', align: 'right', render: (g: any) => `${g.connected} (${pct(g.connected, g.calls)}%)` },
+            { key: 'callbacks', label: 'Callbacks', align: 'right' },
+            { key: 'collected', label: 'Collected', render: (g: any) => <Meter v={g.collected} max={maxBranchCollected} text={inr(g.collected)} /> }]} />
+        </Card>
+      )}
+
+      {d && (
+        <Card title="By team" actions={<a className="button ghost" href={csv('team')}>Export CSV</a>}>
+          <Table rows={d.groups.map((g: any, i: number) => ({ ...g, id: i }))} empty="No cases." columns={[
+            { key: 'name', label: 'Team' }, { key: 'branch', label: 'Branch', render: (g: any) => g.branch ?? '—' }, { key: 'cases', label: 'Cases', align: 'right' }, { key: 'unassigned', label: 'Unassigned', align: 'right' },
             { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
             { key: 'connected', label: 'Connected', align: 'right', render: (g: any) => `${g.connected} (${pct(g.connected, g.calls)}%)` },
             { key: 'callbacks', label: 'Callbacks', align: 'right' },
@@ -173,12 +185,12 @@ export function PortfolioReportsPage() {
       {d && (
         <Card title={`Employees (${employees.length})`} actions={<>
           <input placeholder="Search employee" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
-          <button className="ghost" onClick={() => downloadCsv('employee-performance.csv', ['Employee', 'User ID', 'Group', 'Portfolio', 'Assigned cases', 'Calls', 'Connected', 'Called not reached', 'Callbacks pending', 'Callbacks overdue', 'Not called', 'Collected', 'Verified', 'Last activity'],
+          <button className="ghost" onClick={() => downloadCsv('employee-performance.csv', ['Employee', 'User ID', 'Team', 'Portfolio', 'Assigned cases', 'Calls', 'Connected', 'Called not reached', 'Callbacks pending', 'Callbacks overdue', 'Not called', 'Collected', 'Verified', 'Last activity'],
             employees.map((e) => [e.name, e.employee_code, e.groups.join(' / '), e.portfolios.join(' / '), e.cases, e.calls, e.connected, e.not_connected_cases, e.callbacks, e.callbacks_overdue, e.not_made, e.collected, e.verified, e.last_activity ?? '']))}>Export CSV</button></>}>
           <p className="muted" style={{ marginTop: 0 }}>Click an employee for their cases. Flags show high workload, overdue callbacks and low connect rates.</p>
           <div className="table-wrap"><table>
             <thead><tr>
-              <th><H k="name">Employee</H></th><th>Group</th><th>Portfolio</th><th className="num"><H k="cases">Assigned</H></th><th className="num"><H k="connected">Calls completed</H></th>
+              <th><H k="name">Employee</H></th><th>Team</th><th>Portfolio</th><th className="num"><H k="cases">Assigned</H></th><th className="num"><H k="connected">Calls completed</H></th>
               <th className="num"><H k="not_connected_cases">Calls pending</H></th><th className="num"><H k="callbacks">Callbacks</H></th><th className="num"><H k="not_made">Not called</H></th>
               <th><H k="collected">Collected</H></th><th><H k="last_activity">Last activity</H></th>
             </tr></thead>

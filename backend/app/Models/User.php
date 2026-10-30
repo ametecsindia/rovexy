@@ -80,6 +80,23 @@ class User extends Authenticatable
         return $this->teams()->wherePivot('membership', 'supervisor')->pluck('teams.id')->map(fn ($i) => (int) $i)->all();
     }
 
+    /** supervisedTeamIds() narrowed by the console's Branch / Team filter. @return list<int>|null null = every team */
+    public function teamsInView(): ?array
+    {
+        $mine = $this->supervisedTeamIds();
+        $f = \App\Support\OrgFilter::teamIds();
+        return $f === null ? $mine : ($mine === null ? $f : array_values(array_intersect($mine, $f)));
+    }
+
+    /** Users whose work the viewer sees right now (teams in view, or the one filtered employee). @return list<int>|null null = everyone */
+    public function usersInView(): ?array
+    {
+        $teams = $this->teamsInView();
+        $users = $teams === null ? null : DB::table('team_user')->whereIn('team_id', $teams)->distinct()->pluck('user_id')->map(fn ($i) => (int) $i)->all();
+        $one = \App\Support\OrgFilter::userId();
+        return $one === null ? $users : ($users === null || in_array($one, $users, true) ? [$one] : []);
+    }
+
     public function canSeeUser(User $other): bool
     {
         if ($other->company_id !== $this->company_id) {

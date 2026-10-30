@@ -261,7 +261,7 @@ final class FieldPlanController extends Controller
     /** Field employees (role "employee") the signed-in admin may see. */
     private function fieldStaff(Request $r)
     {
-        $teams = $r->user()->supervisedTeamIds();
+        $teams = $r->user()->teamsInView();
         return User::query()->where('status', 'active')->whereHas('roles', fn ($q) => $q->where('key', 'employee'))
             ->when($teams !== null, fn ($q) => $q->whereHas('teams', fn ($t) => $t->whereIn('teams.id', $teams)))
             ->orderBy('name')->get(['id', 'name', 'employee_code', 'company_id']);

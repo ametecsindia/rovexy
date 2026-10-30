@@ -133,19 +133,19 @@ final class ExportService
     /** Users the actor may see (null = all). */
     private function userScope(): ?array
     {
-        $teams = $this->actor->supervisedTeamIds();
-        return $teams === null ? null : DB::table('team_user')->whereIn('team_id', $teams)->pluck('user_id')->map(fn ($i) => (int) $i)->all();
+        return $this->actor->usersInView();
     }
 
     /** Customers in the chosen portfolio and in the actor's groups. */
     private function customerQuery()
     {
         $pf = $this->f['portfolio'] ?? null;
-        $teams = $this->actor->supervisedTeamIds();
+        $teams = $this->actor->teamsInView();
         return Customer::query()
             ->when($pf === 'manual', fn ($q) => $q->whereNull('last_import_id'))
             ->when(ctype_digit((string) $pf), fn ($q) => $q->where('last_import_id', (int) $pf))
             ->when($teams !== null, fn ($q) => $q->whereIn('assigned_team_id', $teams))
+            ->when(\App\Support\OrgFilter::userId(), fn ($q, $one) => $q->where('assigned_user_id', $one))
             ->when(!empty($this->f['employee']), fn ($q) => $q->where('assigned_user_id', (int) $this->f['employee']));
     }
 

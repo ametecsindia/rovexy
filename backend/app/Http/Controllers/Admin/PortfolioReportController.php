@@ -62,12 +62,19 @@ final class PortfolioReportController extends Controller
 
         // Per group: cases by assigned group, plus the group's employees' numbers.
         $teamCases = (clone $cases)->selectRaw('assigned_team_id AS tid, COUNT(*) AS cases, SUM(CASE WHEN assigned_user_id IS NULL THEN 1 ELSE 0 END) AS unassigned')->groupBy('assigned_team_id')->get();
-        $teamNames = Team::query()->pluck('name', 'id');
-        $groups = $teamCases->map(function ($t) use ($employees, $teamNames) {
-            $name = $t->tid ? ($teamNames[$t->tid] ?? '?') : null;
+        $teamRows = Team::query()->with('branch:id,name')->get(['id', 'name', 'branch_id'])->keyBy('id');
+        $groups = $teamCases->map(function ($t) use ($employees, $teamRows) {
+            $name = $t->tid ? ($teamRows[$t->tid]->name ?? '?') : null;
             $emps = $employees->filter(fn ($e) => $t->tid !== null && collect($e['group_ids'])->contains((int) $t->tid));   // by id: two groups with one name never double-count
-            return ['team_id' => $t->tid, 'name' => $name ?? 'No group', 'cases' => (int) $t->cases, 'unassigned' => (int) $t->unassigned, 'employees' => $emps->count(),
+            return ['team_id' => $t->tid, 'name' => $name ?? 'No team', 'branch_id' => $teamRows[$t->tid]->branch_id ?? null, 'branch' => $teamRows[$t->tid]->branch->name ?? null, 'cases' => (int) $t->cases, 'unassigned' => (int) $t->unassigned, 'employees' => $emps->count(),
                 'calls' => $emps->sum('calls'), 'connected' => $emps->sum('connected'), 'collected' => round($emps->sum('collected'), 2), 'callbacks' => $emps->sum('callbacks')];
+        })->sortByDesc('cases')->values();
+        // Per branch = its teams added up (a case has one team, an employee is counted once per branch).
+        $branches = $groups->groupBy(fn ($g) => $g['branch_id'] ?? 0)->map(function ($gs, $bid) use ($employees) {
+            $tids = $gs->pluck('team_id')->filter()->map(fn ($i) => (int) $i);
+            $emps = $employees->filter(fn ($e) => collect($e['group_ids'])->intersect($tids)->isNotEmpty());
+            return ['branch_id' => $bid ?: null, 'name' => $gs->first()['branch'] ?? 'No branch', 'teams' => $tids->count(), 'cases' => $gs->sum('cases'), 'unassigned' => $gs->sum('unassigned'),
+                'employees' => $emps->count(), 'calls' => $emps->sum('calls'), 'connected' => $emps->sum('connected'), 'collected' => round($emps->sum('collected'), 2), 'callbacks' => $emps->sum('callbacks')];
         })->sortByDesc('cases')->values();
 
         $summary = [
@@ -88,11 +95,11 @@ final class PortfolioReportController extends Controller
         ];
 
         // Trend by day / week / month (grouped in PHP: same on MySQL and SQLite). ponytail: fine up to ~100k calls in a range; move to SQL GROUP BY if bigger.
-        $period = in_array($r->query('period'), ['week', 'month'], true) ? $r->query('period') : 'day';
+        $period = in_array($r->query('period'), ['week', 'month', 'year'], true) ? $r->query('period') : 'day';
         $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: config('app.timezone');
         $key = function ($dt) use ($period, $tz) {
             $d = \Illuminate\Support\Carbon::parse($dt)->setTimezone($tz);
-            return match ($period) { 'week' => $d->startOfWeek()->toDateString(), 'month' => $d->format('Y-m-01'), default => $d->toDateString() };
+            return match ($period) { 'week' => $d->startOfWeek()->toDateString(), 'month' => $d->format('Y-m-01'), 'year' => $d->format('Y-01-01'), default => $d->toDateString() };
         };
         $trend = [];
         foreach ((clone $calls)->get(['initiated_at', 'answered_at']) as $c) {
@@ -112,7 +119,7 @@ final class PortfolioReportController extends Controller
         $pf = $r->query('portfolio');
         $job = is_numeric($pf) ? ImportJob::query()->find((int) $pf) : null;
 
-        return response()->json(['summary' => $summary, 'employees' => $employees, 'groups' => $groups, 'trend' => array_values($trend), 'period' => $period,
+        return response()->json(['summary' => $summary, 'employees' => $employees, 'groups' => $groups, 'branches' => $branches, 'trend' => array_values($trend), 'period' => $period,
             'outcomes' => $outcomes, 'portfolio' => $job ? ['id' => $job->id, 'name' => $job->portfolio ?: $job->original_name, 'file' => $job->original_name,
                 'uploaded_at' => $job->created_at, 'rows' => $job->total_rows] : ($pf === 'manual' ? ['id' => 'manual', 'name' => 'Added by hand'] : null),
             'portfolios' => $this->portfolioList($r)]);
@@ -125,18 +132,29 @@ final class PortfolioReportController extends Controller
      */
     public function export(Request $r)
     {
-        $by = $r->query('by') === 'employee' ? 'employee' : 'portfolio';
+        $by = in_array($r->query('by'), ['employee', 'team', 'branch', 'company'], true) ? $r->query('by') : 'portfolio';
         \App\Support\Audit::record('report.portfolio_exported', null, ['by' => $by] + $r->query());
         $pct = fn ($a, $b) => $b ? round($a * 100 / $b) . '%' : '';
-        if ($by === 'employee') {
-            $head = ['Employee', 'Employee code', 'Groups', 'Portfolios', 'Cases', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected',
+        if ($by === 'team' || $by === 'branch') {
+            $data = $this->show($r)->getData(true);
+            $head = $by === 'team' ? ['Team', 'Branch', 'Cases', 'Unassigned', 'Employees', 'Calls', 'Connected', 'Connect rate', 'Callbacks pending', 'Collected']
+                : ['Branch', 'Teams', 'Cases', 'Unassigned', 'Employees', 'Calls', 'Connected', 'Connect rate', 'Callbacks pending', 'Collected'];
+            $rows = array_map(fn ($g) => [$g['name'], $by === 'team' ? ($g['branch'] ?? '') : $g['teams'], $g['cases'], $g['unassigned'], $g['employees'], $g['calls'], $g['connected'],
+                $pct($g['connected'], $g['calls']), $g['callbacks'], $g['collected']], $by === 'team' ? $data['groups'] : $data['branches']);
+        } elseif ($by === 'company') {
+            $s = $this->show($r)->getData(true)['summary'];
+            $head = ['Scope', 'Cases', 'Unassigned', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected', 'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams'];
+            $rows = [['Company total', $s['cases'], $s['unassigned'], $s['pending_cases'], $s['calls'], $s['connected'], $pct($s['connected'], $s['calls']), $s['not_made'], $s['not_connected_cases'],
+                $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups']]];
+        } elseif ($by === 'employee') {
+            $head = ['Employee', 'Employee code', 'Teams', 'Portfolios', 'Cases', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected',
                 'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last call'];
             $rows = array_map(fn ($e) => [$e['name'], $e['employee_code'], implode(', ', $e['groups']), implode(', ', $e['portfolios']), $e['cases'], $e['pending_cases'],
                 $e['calls'], $e['connected'], $pct($e['connected'], $e['calls']), $e['not_made'], $e['not_connected_cases'], $e['callbacks'], $e['callbacks_overdue'],
                 $e['collected'], $e['verified'], $e['last_activity']], $this->show($r)->getData(true)['employees']);
         } else {
             $head = ['Portfolio', 'Cases', 'Unassigned', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected',
-                'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Groups'];
+                'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams'];
             $line = fn (string $name, array $s) => [$name, $s['cases'], $s['unassigned'], $s['pending_cases'], $s['calls'], $s['connected'], $pct($s['connected'], $s['calls']),
                 $s['not_made'], $s['not_connected_cases'], $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups']];
             $only = (string) $r->query('portfolio', '');
@@ -149,7 +167,7 @@ final class PortfolioReportController extends Controller
             }
             if ($only === '' && count($rows) > 1) $rows[] = $line('All portfolios', $this->show($r)->getData(true)['summary']);
         }
-        $name = $by === 'employee' ? 'employee-wise.csv' : 'portfolio-wise.csv';
+        $name = "{$by}-wise.csv";
         return response()->streamDownload(function () use ($head, $rows) {
             $out = fopen('php://output', 'w');
             fputcsv($out, $head);

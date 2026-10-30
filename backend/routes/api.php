@@ -221,6 +221,12 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::post('employees', [Admin\PeopleController::class, 'createEmployee'])->middleware('perm:employees.manage');
         Route::patch('employees/{id}', [Admin\PeopleController::class, 'updateEmployee'])->middleware('perm:employees.manage');
         Route::post('employees/bulk', [Admin\PeopleController::class, 'bulkUpload'])->middleware('perm:employees.manage');
+        Route::get('employees/bulk-template.xlsx', [Admin\PeopleController::class, 'bulkTemplate'])->middleware('perm:employees.manage');
+        Route::get('org', [Admin\PeopleController::class, 'org']);
+        Route::get('branches', [Admin\PeopleController::class, 'branches'])->middleware('perm:employees.view');
+        Route::post('branches', [Admin\PeopleController::class, 'createBranch'])->middleware('perm:employees.manage');
+        Route::patch('branches/{id}', [Admin\PeopleController::class, 'updateBranch'])->middleware('perm:employees.manage');
+        Route::delete('branches/{id}', [Admin\PeopleController::class, 'deleteBranch'])->middleware('perm:employees.manage');
         Route::get('teams', [Admin\PeopleController::class, 'teams'])->middleware('perm:employees.view');
         Route::post('teams', [Admin\PeopleController::class, 'createTeam'])->middleware('perm:employees.manage');
         Route::patch('teams/{id}', [Admin\PeopleController::class, 'renameTeam'])->middleware('perm:employees.manage');
