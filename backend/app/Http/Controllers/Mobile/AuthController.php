@@ -51,9 +51,11 @@ final class AuthController extends Controller
             ] : null,
             'sim_recorder' => config('ammp.telephony.sim_recorder') === 'app' ? 'app' : 'phone',
             'today' => (function () use ($u) {
-                $q = \App\Models\Call::query()->where('provider', '!=', 'manual')->where('user_id', $u->id)->where('initiated_at', '>=', now()->startOfDay());
+                // "Today" in the company's time zone (IST), the same day the dashboard and reports use.
+                $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: config('app.timezone');
+                $q = \App\Models\Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->where('user_id', $u->id)->where('initiated_at', '>=', now($tz)->startOfDay()->utc());
                 return ['calls' => (clone $q)->count(), 'connected' => (clone $q)->whereNotNull('answered_at')->count(), 'talk_seconds' => (int) (clone $q)->sum('talk_seconds'),
-                    'follow_ups_due' => \App\Models\FollowUp::query()->where('user_id', $u->id)->where('status', 'open')->where('due_at', '<=', now()->endOfDay())->count()];
+                    'follow_ups_due' => \App\Models\FollowUp::query()->where('user_id', $u->id)->where('status', 'open')->where('due_at', '<=', now($tz)->endOfDay()->utc())->count()];
             })(),
             'offline_lease_expires_at' => $this->workSession($r)->lease_expires_at->toAtomString(),
             'realtime' => config('broadcasting.default') === 'reverb' && config('broadcasting.connections.reverb.key') ? [

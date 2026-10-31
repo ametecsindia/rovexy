@@ -44,8 +44,8 @@ final class PeopleController extends Controller
         $tz = app(CurrentCompany::class)->get()->timezone ?: config('app.timezone');
         $today = now($tz)->startOfDay()->utc();
         $since = $today->copy()->subDays(29);
-        $calls = \App\Models\Call::query()->where('user_id', $id)->where('initiated_at', '>=', $since);
-        $pay = \App\Models\CallDisposition::query()->where('user_id', $id)->whereNotNull('payment_mode')->where('submitted_at', '>=', $since);
+        $calls = \App\Models\Call::query()->where('user_id', $id)->where('is_test', false)->where('provider', '!=', 'manual')->where('initiated_at', '>=', $since);   // same call rules as dashboard and reports
+        $pay = \App\Models\CallDisposition::query()->where('user_id', $id)->whereNotNull('payment_mode')->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))->where('submitted_at', '>=', $since);
         return response()->json([
             'user' => $u->only(['id', 'employee_code', 'name', 'email', 'phone', 'status', 'last_login_at', 'mfa_enabled_at', 'created_at', 'teams', 'roles']),
             'devices' => \App\Models\ManagedDevice::query()->where('assigned_user_id', $id)->orderByDesc('last_contact_at')
@@ -55,7 +55,7 @@ final class PeopleController extends Controller
                 'follow_ups_open' => \App\Models\FollowUp::query()->where('user_id', $id)->where('status', 'open')->count(),
                 'calls_today' => (clone $calls)->where('initiated_at', '>=', $today)->count(),
                 'calls_30d' => (clone $calls)->count(),
-                'connected_30d' => (clone $calls)->where('talk_seconds', '>', 0)->count(),
+                'connected_30d' => (clone $calls)->whereNotNull('answered_at')->count(),
                 'talk_minutes_30d' => intdiv((int) (clone $calls)->sum('talk_seconds'), 60),
                 'visits_30d' => \App\Models\CustomerEvent::query()->where('user_id', $id)->where('type', 'visit')->where('created_at', '>=', $since)->count(),
                 'payments_30d' => (clone $pay)->count(),

@@ -216,7 +216,7 @@ final class Click2CallSettings
         $teams = $u->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all();
         return DB::transaction(function () use ($teams) {
             $n = Smart31Number::query()->where('active', true)
-                ->where(fn ($q) => $q->whereNull('expires_on')->orWhere('expires_on', '>=', now()->toDateString()))
+                ->where(fn ($q) => $q->whereNull('expires_on')->orWhere('expires_on', '>=', now(\App\Support\CurrentCompany::tz())->toDateString()))
                 ->orderByRaw('last_used_at IS NOT NULL')->orderBy('last_used_at')->orderBy('id')->lockForUpdate()->get()
                 // ponytail: group filter in PHP (team_ids is JSON; pools are tens of numbers). Move to a pivot if pools grow to thousands.
                 ->first(fn ($n) => empty($n->team_ids) || array_intersect(array_map('intval', $n->team_ids), $teams));

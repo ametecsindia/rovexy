@@ -1185,6 +1185,11 @@ final class AcceptanceTest extends TestCase
         $this->assertSame('Axis Q3', $r->json('portfolio.name'));
         $e = collect($r->json('employees'))->firstWhere('employee_code', 'EMP1');
         $this->assertSame([3, 3, 1, 1, 1, 1000.0], [$e['cases'], $e['calls'], $e['connected'], $e['not_made'], $e['callbacks'], (float) $e['collected']]);
+        // Case columns add up: assigned = reached + called-not-reached + not called (P1 / P2 / P3).
+        $this->assertSame([1, 1, 1], [$e['reached_cases'], $e['not_connected_cases'], $e['not_made']]);
+        $this->assertSame($e['cases'], $e['reached_cases'] + $e['not_connected_cases'] + $e['not_made']);
+        $this->assertSame($s['cases'] - $s['unassigned'], $s['reached_cases'] + $s['not_connected_cases'] + $s['not_made']);
+        $this->assertNotNull($e['last_activity']);
         $this->assertSame(1000.0, (float) collect($r->json('trend'))->sum('collected'));
         $this->assertSame(3, collect($r->json('trend'))->sum('calls'));
         // Filters + drill-down.
@@ -1212,6 +1217,11 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(0, $calls('&portfolio=manual'));
         $this->assertSame(3, $calls("&portfolio={$job['id']}&employee=" . $this->users['alpha']['emp']->id));
         $this->assertStringContainsString('Axis Q3', $this->admin('alpha')->get("/api/admin/reports/calls.csv?from=2020-01-01&to=" . now()->addDay()->toDateString() . "&portfolio={$job['id']}")->streamedContent());
+        // A promise (amount, no payment mode) is not a payment in the payments export.
+        $m->work('POST', "/api/mobile/v1/calls/{$call('P3', 30)}/disposition", ['code' => 'CONNECTED_PTP', 'amount' => 500, 'follow_up_at' => now()->addDay()->toAtomString()])->assertOk();
+        $this->assertSame(1000.0, (float) $this->admin('alpha')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}")->json('summary.collected'));
+        // Dashboard "Customers reached" = customers with an answered call (P1, P3), not everyone dialled (P1, P2, P3).
+        $this->assertSame(2, $this->admin('alpha')->getJson('/api/admin/overview?days=1')->json('kpis.customers'));
     }
 
     public function test_local_loopback_workspace_only_in_local_env(): void

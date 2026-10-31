@@ -88,7 +88,7 @@ final class SyncController extends Controller
                 $due = new \DateTimeImmutable((string) ($p['due_at'] ?? 'invalid'));
                 \App\Models\FollowUp::query()->where('customer_id', $c->id)->where('status', 'open')->update(['status' => 'done', 'updated_at' => now()]);
                 \App\Models\FollowUp::query()->create(['customer_id' => $c->id, 'user_id' => $user->id, 'due_at' => $due, 'notes' => mb_substr((string) ($p['notes'] ?? ''), 0, 2000)]);
-                $c->forceFill(['status' => 'follow_up', 'follow_up_on' => $due->format('Y-m-d')])->save();
+                $c->forceFill(['status' => 'follow_up', 'follow_up_on' => $due->setTimezone(new \DateTimeZone(\App\Support\CurrentCompany::tz()))->format('Y-m-d')])->save();
                 return;
             case 'activity':
                 $type = (string) ($p['type'] ?? '');

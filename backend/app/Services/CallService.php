@@ -562,7 +562,7 @@ final class CallService
                 FollowUp::query()->where('customer_id', $call->customer_id)->where('status', 'open')->update(['status' => 'done', 'updated_at' => now()]);
                 if ($follow) {
                     FollowUp::query()->create(['customer_id' => $call->customer_id, 'user_id' => $user->id, 'call_id' => $call->id, 'due_at' => $follow, 'notes' => $notes]);
-                    $c?->forceFill(['status' => 'follow_up', 'follow_up_on' => $follow->format('Y-m-d')])->save();
+                    $c?->forceFill(['status' => 'follow_up', 'follow_up_on' => \Illuminate\Support\Carbon::parse($follow)->setTimezone(\App\Support\CurrentCompany::tz())->format('Y-m-d')])->save();
                 } elseif ($c && $c->status === 'new') {
                     $c->forceFill(['status' => 'in_progress'])->save();
                 } else {

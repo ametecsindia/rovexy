@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
+import { useLiveReload } from '../lib/live';
 import { Link } from 'react-router-dom';
 import { get, post, fmtSeconds, qs } from '../lib/api';
 import { useUnread, ago as agoMsg } from '../lib/unread';
@@ -113,7 +114,7 @@ export function OverviewPage() {
   const { data, error, reload, loading } = useAsync(() => get(`/overview${qs({ days, team_id: team })}`), [days, team]);
   const teams = useAsync(() => (can('employees.view') ? get<any[]>('/teams') : Promise.resolve([])));
   const [inbox, setInbox] = useUnread(can('chat.use'), 10000);
-  useEffect(() => { if (!auto) return; const t = setInterval(reload, 30000); return () => clearInterval(t); }, [auto, reload]);
+  useLiveReload(() => auto && reload(), ['call.', 'case.', 'payment.', 'recording.', 'device.']);   // Live on: updates as things happen
 
   const k = data?.kpis, p = k?.prev, st = data?.status;
   const people: any[] = data?.people ?? [];

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLiveReload } from '../lib/live';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
@@ -159,6 +160,7 @@ export function CustomersPage() {
   const [urlParams] = useSearchParams();
   const [f, setF] = useState({ q: '', status: '', assigned: '', team_id: '', import_id: urlParams.get('import_id') ?? '' });
   const customers = useAsync(() => get(`/customers${qs(f)}`), [f.q, f.status, f.assigned, f.team_id, f.import_id]);
+  useLiveReload(customers.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const teams = useAsync(() => (can('employees.view') ? get<any[]>('/teams') : Promise.resolve([])));
   const portfolios = useAsync(() => get<any[]>('/portfolios'));
@@ -250,6 +252,7 @@ export function CustomerDetailPage() {
   const { id } = useParams();
   const { me, can } = useAuth();
   const c = useAsync(() => get(`/customers/${id}`), [id]);
+  useLiveReload(c.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const [to, setTo] = useState('');
   const [params] = useSearchParams();

@@ -115,7 +115,7 @@ final class OverviewController extends Controller
     private function kpis($q): array
     {
         $row = (clone $q)->selectRaw('count(*) as calls, sum(case when answered_at is not null then 1 else 0 end) as connected, coalesce(sum(talk_seconds),0) as talk, '
-            . 'avg(case when answered_at is not null then talk_seconds end) as avg_talk, avg(ring_seconds) as avg_ring, count(distinct customer_id) as customers, count(distinct user_id) as callers')->first();
+            . 'avg(case when answered_at is not null then talk_seconds end) as avg_talk, avg(ring_seconds) as avg_ring, count(distinct case when answered_at is not null then customer_id end) as customers, count(distinct user_id) as callers')->first();
         return ['calls' => (int) $row->calls, 'connected' => (int) $row->connected, 'talk_seconds' => (int) $row->talk, 'avg_talk' => (int) round((float) $row->avg_talk),
             'avg_ring' => (int) round((float) $row->avg_ring), 'customers' => (int) $row->customers, 'callers' => (int) $row->callers];
     }

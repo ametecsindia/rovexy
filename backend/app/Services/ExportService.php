@@ -168,7 +168,7 @@ final class ExportService
 
     private function paymentQuery()
     {
-        return CallDisposition::query()->whereNotNull('amount')->whereBetween('submitted_at', [$this->from(), $this->to()])
+        return CallDisposition::query()->whereNotNull('payment_mode')->whereBetween('submitted_at', [$this->from(), $this->to()])
             ->whereIn('call_id', $this->inPortfolio($this->byUser(Call::query()->where('is_test', false)))->select('id'))
             ->when(!empty($this->f['employee']), fn ($w) => $w->where('user_id', (int) $this->f['employee']));
     }

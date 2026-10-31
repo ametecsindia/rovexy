@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLiveReload } from '../lib/live';
 import { Link } from 'react-router-dom';
 import { get, fileUrl, fmtDate, qs } from '../lib/api';
 import { RANGES, rangeName } from '../lib/periods';
@@ -75,6 +76,7 @@ export function PortfolioReportsPage() {
   const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: 'cases', d: -1 });
   const [drill, setDrill] = useState<any | null>(null);
   const r = useAsync(() => get(`/reports/portfolio${qs({ ...f, period })}`), [JSON.stringify(f), period]);
+  useLiveReload(r.reload);
   const d = r.data;
   const s = d?.summary;
   const set = (k: string, v: string) => setF({ ...f, [k]: v });
@@ -136,10 +138,10 @@ export function PortfolioReportsPage() {
       {s && (
         <div className="kpi-grid">
           <Kpi icon="call" tone="blue" label="Total calls" value={s.calls} sub={`${s.cases} cases · ${s.unassigned} unassigned`} />
-          <Kpi icon="check" tone="green" label="Calls completed (connected)" value={s.connected} sub={`${pct(s.connected, s.calls)}% of calls`} subTone={pct(s.connected, s.calls) >= 50 ? 'up' : 'flat'} />
+          <Kpi icon="check" tone="green" label="Connected calls" value={s.connected} sub={`${pct(s.connected, s.calls)}% of calls`} subTone={pct(s.connected, s.calls) >= 50 ? 'up' : 'flat'} />
           <Kpi icon="chart" tone="gold" label="Collections received" value={inr(s.collected)} sub={`${s.payments} payments · ${inr(s.verified)} verified`} />
           <Kpi icon="event" tone="purple" label="Callbacks pending" value={s.callbacks} sub={s.callbacks_overdue ? `${s.callbacks_overdue} overdue` : 'none overdue'} subTone={s.callbacks_overdue ? 'down' : 'flat'} />
-          <Kpi icon="warning" tone="gold" label="Calls not made" value={s.not_made} sub={`assigned, no call · ${s.not_connected_cases} called but not reached`} subTone={s.not_made ? 'down' : 'flat'} />
+          <Kpi icon="warning" tone="gold" label="Cases not called" value={s.not_made} sub={`of ${s.cases - s.unassigned} assigned · ${s.reached_cases} reached · ${s.not_connected_cases} called, not reached`} subTone={s.not_made ? 'down' : 'flat'} />
           <Kpi icon="people" tone="teal" label="Employees on it" value={s.employees} sub={`${s.groups} teams · ${(d?.branches ?? []).filter((b: any) => b.branch_id).length} branches`} />
           <Kpi icon="clock" tone="blue" label="Pending cases" value={s.pending_cases} sub="new, in progress or follow-up" />
         </div>
@@ -185,24 +187,28 @@ export function PortfolioReportsPage() {
       {d && (
         <Card title={`Employees (${employees.length})`} actions={<>
           <input placeholder="Search employee" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
-          <button className="ghost" onClick={() => downloadCsv('employee-performance.csv', ['Employee', 'User ID', 'Team', 'Portfolio', 'Assigned cases', 'Calls', 'Connected', 'Called not reached', 'Callbacks pending', 'Callbacks overdue', 'Not called', 'Collected', 'Verified', 'Last activity'],
-            employees.map((e) => [e.name, e.employee_code, e.groups.join(' / '), e.portfolios.join(' / '), e.cases, e.calls, e.connected, e.not_connected_cases, e.callbacks, e.callbacks_overdue, e.not_made, e.collected, e.verified, e.last_activity ?? '']))}>Export CSV</button></>}>
-          <p className="muted" style={{ marginTop: 0 }}>Click an employee for their cases. Flags show high workload, overdue callbacks and low connect rates.</p>
+          <button className="ghost" onClick={() => downloadCsv('employee-performance.csv', ['Employee', 'User ID', 'Team', 'Portfolio', 'Assigned cases', 'Reached', 'Called not reached', 'Not called', 'Calls', 'Calls answered', 'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last activity'],
+            employees.map((e) => [e.name, e.employee_code, e.groups.join(' / '), e.portfolios.join(' / '), e.cases, e.reached_cases, e.not_connected_cases, e.not_made, e.calls, e.connected, e.callbacks, e.callbacks_overdue, e.collected, e.verified, e.last_activity ?? '']))}>Export CSV</button></>}>
+          <p className="muted" style={{ marginTop: 0 }}>Case columns add up: <strong>Assigned = Reached + Called, not reached + Not called</strong>. "Calls answered" counts calls, not cases (one case can be called many times). Collected = payments recorded, excluding rejected slips. Click an employee for their cases.</p>
           <div className="table-wrap"><table>
             <thead><tr>
-              <th><H k="name">Employee</H></th><th>Team</th><th>Portfolio</th><th className="num"><H k="cases">Assigned</H></th><th className="num"><H k="connected">Calls completed</H></th>
-              <th className="num"><H k="not_connected_cases">Calls pending</H></th><th className="num"><H k="callbacks">Callbacks</H></th><th className="num"><H k="not_made">Not called</H></th>
+              <th><H k="name">Employee</H></th><th>Team</th><th>Portfolio</th><th className="num" title="Cases assigned = Reached + Called, not reached + Not called"><H k="cases">Assigned cases</H></th>
+              <th className="num" title="Cases where at least one call was answered"><H k="reached_cases">Reached</H></th>
+              <th className="num" title="Cases called, but no call answered yet"><H k="not_connected_cases">Called, not reached</H></th>
+              <th className="num" title="Cases with no call yet"><H k="not_made">Not called</H></th>
+              <th className="num" title="Calls answered of all calls made (one case can have many calls)"><H k="connected">Calls answered</H></th>
+              <th className="num"><H k="callbacks">Callbacks</H></th>
               <th><H k="collected">Collected</H></th><th><H k="last_activity">Last activity</H></th>
             </tr></thead>
             <tbody>
-              {employees.length === 0 && <tr><td colSpan={10} className="muted">No employees match.</td></tr>}
+              {employees.length === 0 && <tr><td colSpan={11} className="muted">No employees match.</td></tr>}
               {employees.map((e) => (
                 <tr key={e.user_id} className="clickable" onClick={() => setDrill(e)}>
                   <td><span className="linkish">{e.name}</span> <small className="muted">{e.employee_code}</small><div className="flag-row">{flags(e)}</div></td>
                   <td className="nowrap">{e.groups.join(', ') || '—'}</td><td><small>{e.portfolios.join(', ') || '—'}</small></td>
-                  <td className="num">{e.cases}</td><td className="num">{e.connected} <small className="muted">of {e.calls} calls</small></td>
-                  <td className="num">{e.not_connected_cases}</td><td className="num">{e.callbacks}{e.callbacks_overdue ? <small className="bad-text"> ({e.callbacks_overdue} late)</small> : null}</td>
-                  <td className="num">{e.not_made}</td><td><Meter v={e.collected} max={maxCollected} text={inr(e.collected)} /></td>
+                  <td className="num">{e.cases}</td><td className="num">{e.reached_cases}</td><td className="num">{e.not_connected_cases}</td><td className="num">{e.not_made}</td>
+                  <td className="num">{e.connected} <small className="muted">of {e.calls}</small></td>
+                  <td className="num">{e.callbacks}{e.callbacks_overdue ? <small className="bad-text"> ({e.callbacks_overdue} late)</small> : null}</td><td><Meter v={e.collected} max={maxCollected} text={inr(e.collected)} /></td>
                   <td className="nowrap">{e.last_activity ? short(e.last_activity, me?.company.timezone) : <span className="muted">never</span>}</td>
                 </tr>
               ))}
@@ -223,8 +229,8 @@ export function PortfolioReportsPage() {
         <Modal title={`${drill.name} — cases`} onClose={() => setDrill(null)}>
           <div className="wide-modal" />
           <div className="kpi-grid small">
-            <Kpi icon="contacts" tone="blue" label="Assigned cases" value={drill.cases} />
-            <Kpi icon="check" tone="green" label="Calls completed" value={drill.connected} sub={`of ${drill.calls} calls`} />
+            <Kpi icon="contacts" tone="blue" label="Assigned cases" value={drill.cases} sub={`${drill.reached_cases} reached · ${drill.not_connected_cases} not reached · ${drill.not_made} not called`} />
+            <Kpi icon="check" tone="green" label="Calls answered" value={drill.connected} sub={`of ${drill.calls} calls`} />
             <Kpi icon="event" tone="purple" label="Callbacks" value={drill.callbacks} sub={drill.callbacks_overdue ? `${drill.callbacks_overdue} overdue` : undefined} subTone={drill.callbacks_overdue ? 'down' : 'flat'} />
             <Kpi icon="chart" tone="gold" label="Collected" value={inr(drill.collected)} />
           </div>
@@ -243,6 +249,7 @@ function CasesCard({ filter, title }: { filter: Record<string, string>; title: s
   const [exporting, setExporting] = useState(false);
   useEffect(() => setPage(1), [JSON.stringify(filter), sort]);
   const c = useAsync(() => get(`/reports/portfolio/cases${qs({ ...filter, page, sort })}`), [JSON.stringify(filter), page, sort]);
+  useLiveReload(c.reload);
   const exportAll = async () => {
     setExporting(true);
     try {

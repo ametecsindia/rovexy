@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLiveReload } from '../lib/live';
 import { Link } from 'react-router-dom';
 import { get, post, fmtDate, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -14,6 +15,7 @@ export function PaymentsPage() {
   const { can } = useAuth();
   const [f, setF] = useState({ status: 'pending', mode: '', user_id: '', from: '', to: '' });
   const list = useAsync(() => get(`/payments${qs(f)}`), [f.status, f.mode, f.user_id, f.from, f.to]);
+  useLiveReload(list.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const [open, setOpen] = useState<any | null>(null);
   const d = list.data;

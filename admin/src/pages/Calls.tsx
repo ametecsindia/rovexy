@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLiveReload } from '../lib/live';
 import { Link, useSearchParams } from 'react-router-dom';
 import { get, post, put, del, fmtDate, fmtSeconds, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -13,6 +14,7 @@ export function CallsPage() {
   const [f, setF] = useState({ state: params.get('state') ?? '', recording_status: params.get('recording_status') ?? '', user_id: params.get('user_id') ?? '', from: '', to: '', disposition: '' });
   const range = { from: f.from ? `${f.from}T00:00:00` : '', to: f.to ? new Date(new Date(f.to).getTime() + 86400000).toISOString().slice(0, 10) + 'T00:00:00' : '' };
   const calls = useAsync(() => get(`/calls${qs({ ...f, ...range })}`), [f.state, f.recording_status, f.user_id, f.from, f.to, f.disposition]);
+  useLiveReload(calls.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const codes = useAsync(() => get<any[]>('/disposition-codes'));
   const [open, setOpen] = useState<number | null>(null);

@@ -250,7 +250,7 @@ final class ImportService
         }
         unset($a['dpd']);
         if (array_intersect_key($a, array_flip(ImportValidator::MONEY)) !== []) {
-            $a['balance_as_of'] = now()->toDateString();
+            $a['balance_as_of'] = now(\App\Support\CurrentCompany::tz())->toDateString();
         }
         return $a;
     }

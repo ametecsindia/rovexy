@@ -33,6 +33,13 @@ final class CurrentCompany
         return $this->company?->id;
     }
 
+    /** The company's time zone (IST by default). Every "today" / calendar date shown to people uses this; storage stays UTC. */
+    public static function tz(): string
+    {
+        $c = app(self::class);
+        return ($c->bound() ? $c->get()->timezone : null) ?: 'Asia/Kolkata';
+    }
+
     public function bound(): bool
     {
         return $this->company !== null;

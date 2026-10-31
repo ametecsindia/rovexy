@@ -54,23 +54,29 @@ final class CaseService
         return $out;
     }
 
+    /** Calendar date of a stored UTC timestamp, in the company's time zone (what people mean by "the day"). */
+    private static function localDate($at): ?string
+    {
+        return $at === null || $at === '' ? null : \Illuminate\Support\Carbon::parse($at, 'UTC')->setTimezone(\App\Support\CurrentCompany::tz())->toDateString();
+    }
+
     /** Promise + payment totals from a customer's outcomes (oldest first). */
     private function payments(Collection $d): array
     {
         $pay = $d->filter(fn ($x) => $x->payment_mode !== null && $x->review_status !== 'rejected');
         $promise = $d->filter(fn ($x) => $x->amount !== null && $x->payment_mode === null)->last();
         $kept = $promise && $pay->contains(fn ($x) => $x->submitted_at >= $promise->submitted_at);
-        $today = now()->toDateString();
+        $today = now(\App\Support\CurrentCompany::tz())->toDateString();
         return [
             'collected_verified' => round((float) $pay->where('review_status', 'verified')->sum('amount'), 2),
             'collected_pending' => round((float) $pay->where('review_status', 'pending')->sum('amount'), 2),
             // The phone works out "payments recorded today" itself, so the figure is right even before the next sync.
-            'last_payment_recorded_on' => $pay->last() ? substr((string) $pay->last()->submitted_at, 0, 10) : null,
+            'last_payment_recorded_on' => $pay->last() ? self::localDate($pay->last()->submitted_at) : null,
             'last_payment_recorded_amount' => $pay->last() ? (float) $pay->last()->amount : null,
             'promise_amount' => $promise ? (float) $promise->amount : null,
-            'promise_date' => $promise?->follow_up_at ? substr((string) $promise->follow_up_at, 0, 10) : null,
+            'promise_date' => self::localDate($promise?->follow_up_at),
             // open = date not reached; kept = a payment was recorded after the promise; broken = date passed, nothing paid.
-            'promise_status' => $promise ? ($kept ? 'kept' : (substr((string) $promise->follow_up_at, 0, 10) < $today ? 'broken' : 'open')) : null,
+            'promise_status' => $promise ? ($kept ? 'kept' : (($pd = self::localDate($promise->follow_up_at)) !== null && $pd < $today ? 'broken' : 'open')) : null,
         ];
     }
 
@@ -139,9 +145,9 @@ final class CaseService
         $events = CustomerEvent::query()->where('customer_id', $c->id)->with('user:id,name')->orderByDesc('id')->limit(200)->get();
         $promises = $disp->filter(fn ($d) => $d->amount !== null && $d->payment_mode === null)->map(function ($d) use ($pay, $codes) {
             $kept = $pay->contains(fn ($p) => $p->review_status !== 'rejected' && $p->submitted_at >= $d->submitted_at);
-            $date = $d->follow_up_at?->format('Y-m-d');
+            $date = self::localDate($d->follow_up_at);
             return ['amount' => (float) $d->amount, 'date' => $date, 'recorded_at' => $d->submitted_at?->toAtomString(), 'by' => $d->user?->name,
-                'outcome' => $codes[$d->code] ?? $d->code, 'status' => $kept ? 'kept' : ($date !== null && $date < now()->toDateString() ? 'broken' : 'open')];
+                'outcome' => $codes[$d->code] ?? $d->code, 'status' => $kept ? 'kept' : ($date !== null && $date < now(\App\Support\CurrentCompany::tz())->toDateString() ? 'broken' : 'open')];
         })->reverse()->values();
 
         $timeline = collect();
@@ -152,7 +158,7 @@ final class CaseService
                 'call_id' => $call->id, 'state' => $call->state, 'talk_seconds' => (int) $call->talk_seconds, 'number' => $mask($call->destination), 'which' => $call->which_number,
                 'outcome' => $d ? ($codes[$d->code] ?? $d->code) : null, 'outcome_code' => $d?->code, 'notes' => $d?->notes,
                 'amount' => $d?->amount !== null ? (float) $d->amount : null, 'payment_mode' => $d?->payment_mode, 'payment_ref' => $d?->payment_ref,
-                'paid_on' => $d?->paid_on?->format('Y-m-d'), 'review_status' => $d?->review_status, 'promise_date' => $d && $d->amount !== null && $d->payment_mode === null ? $d->follow_up_at?->format('Y-m-d') : null,
+                'paid_on' => $d?->paid_on?->format('Y-m-d'), 'review_status' => $d?->review_status, 'promise_date' => $d && $d->amount !== null && $d->payment_mode === null ? self::localDate($d->follow_up_at) : null,
                 'follow_up_at' => $d?->follow_up_at?->toAtomString(),
                 'recording' => $manual ? null : ['status' => $call->recording_status, 'format' => $call->recording?->format, 'can_play' => $canPlay && $call->recording_status === 'available']]);
         }

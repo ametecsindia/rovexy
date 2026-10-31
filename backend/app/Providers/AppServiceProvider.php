@@ -22,6 +22,19 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->guardProductionConfig();
+        // Live numbers: any change to a case, outcome/payment, callback or assignment tells open consoles to refresh
+        // (dashboard, reports, payments, customers). IDs only; screens re-fetch through their own APIs.
+        // ponytail: one broadcast per company per type per second, so a 10k-row import is one ping, not 10k.
+        $feeds = [\App\Models\Customer::class => 'case.changed', \App\Models\CustomerAssignment::class => 'case.changed', \App\Models\CustomerEvent::class => 'case.changed',
+            \App\Models\FollowUp::class => 'case.changed', \App\Models\CallDisposition::class => 'payment.changed'];
+        foreach ($feeds as $model => $type) {
+            $model::saved(static function ($m) use ($type) {
+                $cid = $m->company_id ?? null;
+                if ($cid !== null && \Illuminate\Support\Facades\Cache::add("feed:{$cid}:{$type}", 1, 1)) {
+                    \App\Events\AdminFeed::dispatchFor((int) $cid, $type, []);
+                }
+            });
+        }
         // One password rule everywhere a password is set (console, staff, employees, website sign-up and buy).
         \Illuminate\Validation\Rules\Password::defaults(fn () => \Illuminate\Validation\Rules\Password::min(8));   // any characters, at least 8
         // Links built from a request (set-password, console, payment) keep https even when a proxy (Cloudflare "Flexible",

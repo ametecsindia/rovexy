@@ -155,7 +155,7 @@ final class SupervisionController extends Controller
         }
         Audit::record('location.viewed', $employee, array_intersect_key($data, ['from' => 1, 'to' => 1]));
         return response()->json(LocationEvent::query()->where('user_id', $employee->id)
-            ->where('captured_at', '>=', $data['from'] ?? now()->startOfDay())->where('captured_at', '<', $data['to'] ?? now()->addMinute())
+            ->where('captured_at', '>=', $data['from'] ?? now(app(\App\Support\CurrentCompany::class)->get()->timezone ?: config('app.timezone'))->startOfDay()->utc())->where('captured_at', '<', $data['to'] ?? now()->addMinute())
             ->orderBy('captured_at')->limit(2000)->get(['lat', 'lng', 'accuracy_m', 'captured_at', 'received_at', 'battery_pct'])
             ->map(fn ($l) => $l->toArray() + ['stale' => $l->captured_at->lt(now()->subMinutes(15))]));
     }
