@@ -50,6 +50,6 @@ class EventQueue(initial: List<QueuedEvent> = emptyList()) {
     fun snapshot(): List<QueuedEvent> = ArrayList(items.values)
 
     companion object {
-        val TYPES = setOf("disposition", "note", "follow_up", "activity", "location", "chat_read")
+        val TYPES = setOf("disposition", "note", "status", "follow_up", "activity", "location", "chat_read")
     }
 }

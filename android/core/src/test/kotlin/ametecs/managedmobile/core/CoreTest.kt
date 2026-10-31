@@ -76,6 +76,7 @@ class CoreTest {
         val a = q.enqueue("activity", "2026-10-01T06:00:00Z", "{}")
         val b = q.enqueue("note", "2026-10-01T06:00:01Z", "{}")
         val c = q.enqueue("location", "2026-10-01T06:00:02Z", "{}")
+        q.enqueue("status", "2026-10-01T06:00:03Z", "{}")   // the case "Status" button
         val rejected = q.applyResults(listOf(SyncResult(a.id, "accepted"), SyncResult(b.id, "duplicate"), SyncResult(c.id, "error")))
         assertTrue(rejected.isEmpty())
         assertEquals(1, q.size())

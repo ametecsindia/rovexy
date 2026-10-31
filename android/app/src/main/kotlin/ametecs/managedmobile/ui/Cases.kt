@@ -376,6 +376,10 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
                 HeroMetric("Days overdue", days?.toString() ?: "—", Modifier.weight(1f), alert = (days ?: 0) > 30)
                 HeroMetric("Outstanding", money(dues?.d("remaining_balance") ?: case.outstanding), Modifier.weight(1f))
             }
+            // Dues drop only after the office verifies a payment; say so, or a collected payment looks ignored.
+            val pending = p?.o("activity")?.d("collected_pending") ?: 0.0
+            if (pending > 0) Text("${money(pending)} collected · waiting for office check. Overdue and outstanding update once it is verified.",
+                color = Ds.GoldSoft, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp, top = 10.dp))
         }
         // Main actions stay at hand on every tab.
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
