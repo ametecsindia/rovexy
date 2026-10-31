@@ -27,7 +27,8 @@ use Illuminate\Support\Facades\DB;
 final class CaseService
 {
     /** Per-case activity for a list of customers, keyed by customer id (2 grouped queries per 1000 cases). */
-    public function activity(Collection $ids): array
+    /** @param ?int $recordedBy only this employee's own payments count as the case's last payment (phone: Paid today / Collected today). */
+    public function activity(Collection $ids, ?int $recordedBy = null): array
     {
         $out = [];
         foreach ($ids->chunk(1000) as $chunk) {
@@ -37,12 +38,12 @@ final class CaseService
             $disp = CallDisposition::query()->join('calls', 'calls.id', '=', 'call_dispositions.call_id')->whereIn('calls.customer_id', $chunk)
                 ->orderBy('call_dispositions.submitted_at')->orderBy('call_dispositions.id')
                 ->get(['calls.customer_id', 'call_dispositions.code', 'call_dispositions.amount', 'call_dispositions.payment_mode', 'call_dispositions.review_status',
-                    'call_dispositions.paid_on', 'call_dispositions.follow_up_at', 'call_dispositions.submitted_at'])->groupBy('customer_id');
+                    'call_dispositions.paid_on', 'call_dispositions.follow_up_at', 'call_dispositions.submitted_at', 'call_dispositions.user_id'])->groupBy('customer_id');
             $fu = FollowUp::query()->whereIn('customer_id', $chunk)->where('status', 'open')->selectRaw('customer_id, MIN(due_at) AS next_at')
                 ->groupBy('customer_id')->pluck('next_at', 'customer_id');
             foreach ($chunk as $id) {
                 $c = $calls[$id] ?? null;
-                $p = $this->payments($disp[$id] ?? collect());
+                $p = $this->payments($disp[$id] ?? collect(), $recordedBy);
                 $out[$id] = [
                     'last_call_at' => $c?->last_call_at ? (new \DateTimeImmutable((string) $c->last_call_at, new \DateTimeZone('UTC')))->format(DATE_ATOM) : null,
                     'calls' => (int) ($c?->calls ?? 0), 'connected' => (int) ($c?->connected ?? 0),
@@ -61,9 +62,11 @@ final class CaseService
     }
 
     /** Promise + payment totals from a customer's outcomes (oldest first). */
-    private function payments(Collection $d): array
+    private function payments(Collection $d, ?int $recordedBy = null): array
     {
         $pay = $d->filter(fn ($x) => $x->payment_mode !== null && $x->review_status !== 'rejected');
+        // A payment someone else recorded (before a reassignment) is the case's history, never this employee's today.
+        $mine = $recordedBy === null ? $pay : $pay->filter(fn ($x) => (int) $x->user_id === $recordedBy);
         $promise = $d->filter(fn ($x) => $x->amount !== null && $x->payment_mode === null)->last();
         $kept = $promise && $pay->contains(fn ($x) => $x->submitted_at >= $promise->submitted_at);
         $today = now(\App\Support\CurrentCompany::tz())->toDateString();
@@ -71,8 +74,8 @@ final class CaseService
             'collected_verified' => round((float) $pay->where('review_status', 'verified')->sum('amount'), 2),
             'collected_pending' => round((float) $pay->where('review_status', 'pending')->sum('amount'), 2),
             // The phone works out "payments recorded today" itself, so the figure is right even before the next sync.
-            'last_payment_recorded_on' => $pay->last() ? self::localDate($pay->last()->submitted_at) : null,
-            'last_payment_recorded_amount' => $pay->last() ? (float) $pay->last()->amount : null,
+            'last_payment_recorded_on' => $mine->last() ? self::localDate($mine->last()->submitted_at) : null,
+            'last_payment_recorded_amount' => $mine->last() ? (float) $mine->last()->amount : null,
             'promise_amount' => $promise ? (float) $promise->amount : null,
             'promise_date' => self::localDate($promise?->follow_up_at),
             // open = date not reached; kept = a payment was recorded after the promise; broken = date passed, nothing paid.

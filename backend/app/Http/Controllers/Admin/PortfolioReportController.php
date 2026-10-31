@@ -30,32 +30,30 @@ final class PortfolioReportController extends Controller
     {
         [$cases, $range, $userId] = $this->caseSet($r);
         $ids = (clone $cases)->select('customers.id');
-        // Everything is counted on the CASE SET, and each employee row = the work on that employee's assigned cases
-        // (whoever made the call / recorded the payment). So a row's calls, payments and case columns always belong
-        // together, rows add up to the summary, and the employee filter shows the same numbers as their row.
-        $calls = $this->calls($ids, $range, null);
-        $pay = $this->payments($ids, $range, null);
-        $fu = FollowUp::query()->where('follow_ups.status', 'open')->whereIn('follow_ups.customer_id', clone $ids);
-        $own = fn ($q, string $fk) => $q->join('customers as oc', 'oc.id', '=', $fk)->whereNotNull('oc.assigned_user_id');
+        // Work is credited ONLY to the person who did it (the call's caller, the payment's recorder, the callback's setter):
+        // a reassigned case never moves earlier work to the new owner. Case columns (reached / not reached / not called)
+        // count only the CURRENT owner's own calls, so a case handed over starts as "not called" for the new owner and
+        // every row still adds up: assigned = reached + called, not reached + not called.
+        $calls = $this->calls($ids, $range, $userId);
+        $pay = $this->payments($ids, $range, $userId);
+        $fu = FollowUp::query()->where('follow_ups.status', 'open')->whereIn('follow_ups.customer_id', clone $ids)->when($userId, fn ($q) => $q->where('follow_ups.user_id', $userId));
 
-        // Per employee (assigned owner of the cases).
+        // Per employee.
         $owned = (clone $cases)->whereNotNull('assigned_user_id')->selectRaw('assigned_user_id AS uid, COUNT(*) AS cases, SUM(CASE WHEN status IN (\'new\',\'in_progress\',\'follow_up\') THEN 1 ELSE 0 END) AS pending')
             ->groupBy('assigned_user_id')->get()->keyBy('uid');
         $notMade = $this->withoutCall((clone $cases)->whereNotNull('assigned_user_id'), $range)->selectRaw('assigned_user_id AS uid, COUNT(*) AS n')->groupBy('assigned_user_id')->pluck('n', 'uid');
         $notConnected = $this->calledNotConnected((clone $cases)->whereNotNull('assigned_user_id'), $range)->selectRaw('assigned_user_id AS uid, COUNT(*) AS n')->groupBy('assigned_user_id')->pluck('n', 'uid');
-        // Every assigned case is exactly one of: reached (a call answered) / called, not reached / not called — the three add up to `cases`.
         $reached = $this->reached((clone $cases)->whereNotNull('assigned_user_id'), $range)->selectRaw('assigned_user_id AS uid, COUNT(*) AS n')->groupBy('assigned_user_id')->pluck('n', 'uid');
-        // Last activity = last call OR field entry (a payment recorded without a call is work too).
-        $lastWork = $own(Call::query()->whereIn('calls.customer_id', clone $ids)->where('calls.is_test', false)
-            ->when($range[0], fn ($q) => $q->where('calls.initiated_at', '>=', $range[0]))->when($range[1], fn ($q) => $q->where('calls.initiated_at', '<', $range[1])), 'calls.customer_id')
-            ->selectRaw('oc.assigned_user_id AS uid, MAX(calls.initiated_at) AS at')->groupBy('oc.assigned_user_id')->pluck('at', 'uid');
-        $byUserCalls = $own(clone $calls, 'calls.customer_id')->selectRaw('oc.assigned_user_id AS uid, COUNT(*) AS calls, SUM(CASE WHEN calls.answered_at IS NOT NULL THEN 1 ELSE 0 END) AS connected')
-            ->groupBy('oc.assigned_user_id')->get()->keyBy('uid');
-        $byUserPay = $own((clone $pay)->join('calls as pc', 'pc.id', '=', 'call_dispositions.call_id'), 'pc.customer_id')
-            ->selectRaw('oc.assigned_user_id AS uid, SUM(call_dispositions.amount) AS amount, SUM(CASE WHEN call_dispositions.review_status = \'verified\' THEN call_dispositions.amount ELSE 0 END) AS verified, COUNT(*) AS n')
-            ->groupBy('oc.assigned_user_id')->get()->keyBy('uid');
-        $byUserFu = $own(clone $fu, 'follow_ups.customer_id')->selectRaw('oc.assigned_user_id AS uid, COUNT(*) AS n, SUM(CASE WHEN follow_ups.due_at < ? THEN 1 ELSE 0 END) AS overdue', [now()])
-            ->groupBy('oc.assigned_user_id')->get()->keyBy('uid');
+        // Last activity = the employee's own last call OR field entry.
+        $lastWork = Call::query()->whereIn('calls.customer_id', clone $ids)->where('calls.is_test', false)->when($userId, fn ($q) => $q->where('calls.user_id', $userId))
+            ->when($range[0], fn ($q) => $q->where('calls.initiated_at', '>=', $range[0]))->when($range[1], fn ($q) => $q->where('calls.initiated_at', '<', $range[1]))
+            ->selectRaw('calls.user_id AS uid, MAX(calls.initiated_at) AS at')->groupBy('calls.user_id')->pluck('at', 'uid');
+        $byUserCalls = (clone $calls)->selectRaw('calls.user_id AS uid, COUNT(*) AS calls, SUM(CASE WHEN calls.answered_at IS NOT NULL THEN 1 ELSE 0 END) AS connected')
+            ->groupBy('calls.user_id')->get()->keyBy('uid');
+        $byUserPay = (clone $pay)->selectRaw('call_dispositions.user_id AS uid, SUM(call_dispositions.amount) AS amount, SUM(CASE WHEN call_dispositions.review_status = \'verified\' THEN call_dispositions.amount ELSE 0 END) AS verified, COUNT(*) AS n')
+            ->groupBy('call_dispositions.user_id')->get()->keyBy('uid');
+        $byUserFu = (clone $fu)->selectRaw('follow_ups.user_id AS uid, COUNT(*) AS n, SUM(CASE WHEN follow_ups.due_at < ? THEN 1 ELSE 0 END) AS overdue', [now()])
+            ->groupBy('follow_ups.user_id')->get()->keyBy('uid');
         $uids = collect([$owned->keys(), $byUserCalls->keys(), $byUserPay->keys()])->flatten()->filter()->unique();
         $users = User::query()->whereIn('id', $uids)->with('teams:id,name')->get(['id', 'name', 'employee_code'])->keyBy('id');
         $pfNames = $this->portfolioNames();
@@ -193,12 +191,13 @@ final class PortfolioReportController extends Controller
     public function cases(Request $r)
     {
         [$cases, $range, $userId] = $this->caseSet($r);
-        $inRange = fn ($q) => $q->where('provider', '!=', 'manual')->when($range[0], fn ($w) => $w->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($w) => $w->where('initiated_at', '<', $range[1]));
+        $inRange = fn ($q) => self::byOwner($q)->where('provider', '!=', 'manual')->when($range[0], fn ($w) => $w->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($w) => $w->where('initiated_at', '<', $range[1]));
         $sort = in_array($r->query('sort'), ['name', 'calls_count', 'last_call_at', 'collected'], true) ? $r->query('sort') : 'id';
         $page = $cases->with(['assignee:id,name,employee_code'])
             ->withCount(['calls as calls_count' => $inRange, 'calls as connected_count' => fn ($q) => $inRange($q)->whereNotNull('answered_at')])
             ->withMax(['calls as last_call_at' => $inRange], 'initiated_at')
-            ->addSelect(['collected' => CallDisposition::query()->selectRaw('COALESCE(SUM(amount),0)')->whereNotNull('payment_mode')->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))
+            ->addSelect(['collected' => CallDisposition::query()->selectRaw('COALESCE(SUM(amount),0)')->whereNotNull('payment_mode')
+                ->where(fn ($x) => $x->whereColumn('call_dispositions.user_id', 'customers.assigned_user_id')->orWhereNull('customers.assigned_user_id'))   // the owner's own payments, as the row->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))
                 ->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))
                 ->when($range[2], fn ($q) => $q->where('paid_on', '>=', $range[2]))->when($range[3], fn ($q) => $q->where('paid_on', '<', $range[3]))])   // same dates as the Collections tile
             ->addSelect(['last_outcome' => CallDisposition::query()->select('code')->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))->orderByDesc('submitted_at')->limit(1)])
@@ -228,7 +227,7 @@ final class PortfolioReportController extends Controller
         $cases->when($pf === 'manual', fn ($w) => $w->whereNull('last_import_id'))->when(ctype_digit((string) $pf), fn ($w) => $w->where('last_import_id', (int) $pf));
         $inRange = fn ($w) => $w->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1]));
         match ($q('call_status')) {
-            'connected' => $cases->whereHas('calls', fn ($w) => $inRange($w)->whereNotNull('answered_at')),
+            'connected' => $cases->whereHas('calls', fn ($w) => self::byOwner($inRange($w))->whereNotNull('answered_at')),
             'not_connected' => $this->calledNotConnected($cases, $range),
             'not_called' => $this->withoutCall($cases, $range),
             default => null,
@@ -263,21 +262,27 @@ final class PortfolioReportController extends Controller
             ->when($range[2], fn ($q) => $q->where('call_dispositions.paid_on', '>=', $range[2]))->when($range[3], fn ($q) => $q->where('call_dispositions.paid_on', '<', $range[3]));
     }
 
+    /** A call counts for a case's status only if the case's current owner made it (any team member for a pool case). */
+    private static function byOwner($w)
+    {
+        return $w->where(fn ($x) => $x->whereColumn('calls.user_id', 'customers.assigned_user_id')->orWhereNull('customers.assigned_user_id'));
+    }
+
     private function withoutCall(Builder $cases, array $range): Builder
     {
-        return $cases->whereDoesntHave('calls', fn ($w) => $w->where('provider', '!=', 'manual')   // a field entry without a call is not a call (same as Total calls)
+        return $cases->whereDoesntHave('calls', fn ($w) => self::byOwner($w)->where('provider', '!=', 'manual')   // a field entry without a call is not a call (same as Total calls)
             ->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1])));
     }
 
     private function reached(Builder $cases, array $range): Builder
     {
-        return $cases->whereHas('calls', fn ($w) => $w->where('provider', '!=', 'manual')->whereNotNull('answered_at')
+        return $cases->whereHas('calls', fn ($w) => self::byOwner($w)->where('provider', '!=', 'manual')->whereNotNull('answered_at')
             ->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1])));
     }
 
     private function calledNotConnected(Builder $cases, array $range): Builder
     {
-        $in = fn ($w) => $w->where('provider', '!=', 'manual')->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1]));
+        $in = fn ($w) => self::byOwner($w)->where('provider', '!=', 'manual')->when($range[0], fn ($x) => $x->where('initiated_at', '>=', $range[0]))->when($range[1], fn ($x) => $x->where('initiated_at', '<', $range[1]));
         return $cases->whereHas('calls', $in)->whereDoesntHave('calls', fn ($w) => $in($w)->whereNotNull('answered_at'));
     }
 

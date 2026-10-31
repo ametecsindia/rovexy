@@ -1222,6 +1222,16 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(1000.0, (float) $this->admin('alpha')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}")->json('summary.collected'));
         // Dashboard "Customers reached" = customers with an answered call (P1, P3), not everyone dialled (P1, P2, P3).
         $this->assertSame(2, $this->admin('alpha')->getJson('/api/admin/overview?days=1')->json('kpis.customers'));
+        // Reassignment: P1 (called + paid by EMP1) moves to EMP2. EMP1 keeps the credit; EMP2 starts it as "not called".
+        $ctx->run($this->a, fn () => Customer::query()->whereKey($cid('P1'))->update(['assigned_user_id' => $this->users['alpha']['emp2']->id]));
+        $r2 = $this->admin('alpha')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}")->assertOk();
+        $e1 = collect($r2->json('employees'))->firstWhere('employee_code', 'EMP1');
+        $e2 = collect($r2->json('employees'))->firstWhere('employee_code', 'EMP2');
+        $this->assertSame([1000.0, 4], [(float) $e1['collected'], $e1['calls']]);                // his work stays his
+        $this->assertSame([0.0, 0, 1, 0, 1], [(float) $e2['collected'], $e2['calls'], $e2['cases'], $e2['reached_cases'], $e2['not_made']]);
+        foreach ([$e1, $e2] as $e) $this->assertSame($e['cases'], $e['reached_cases'] + $e['not_connected_cases'] + $e['not_made']);
+        $drill = collect($this->admin('alpha')->getJson("/api/admin/reports/portfolio/cases?portfolio={$job['id']}&employee=" . $this->users['alpha']['emp2']->id)->json('data'));
+        $this->assertSame([0, 0.0], [$drill->sum('calls'), (float) $drill->sum('collected')]);   // drill-down matches EMP2's row
     }
 
     public function test_local_loopback_workspace_only_in_local_env(): void

@@ -32,7 +32,7 @@ final class CustomerController extends Controller
             // No cap: a cap silently dropped cases past it for good (server_time moves on). ponytail: one response
             // for the whole delta; page it if an employee ever holds tens of thousands of cases.
             ->orderBy('id')->get(self::LIST);
-        $act = $cases->activity($changed->pluck('id'));
+        $act = $cases->activity($changed->pluck('id'), $r->user()->id);
         $portfolios = \App\Models\ImportJob::query()->whereIn('id', $changed->pluck('last_import_id')->filter()->unique())->get(['id', 'portfolio', 'original_name'])
             ->mapWithKeys(fn ($j) => [$j->id => $j->portfolio ?: pathinfo($j->original_name, PATHINFO_FILENAME)]);
         $teams = \App\Models\Team::query()->pluck('name', 'id');
