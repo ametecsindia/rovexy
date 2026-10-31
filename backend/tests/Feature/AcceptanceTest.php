@@ -1232,6 +1232,10 @@ final class AcceptanceTest extends TestCase
         foreach ([$e1, $e2] as $e) $this->assertSame($e['cases'], $e['reached_cases'] + $e['not_connected_cases'] + $e['not_made']);
         $drill = collect($this->admin('alpha')->getJson("/api/admin/reports/portfolio/cases?portfolio={$job['id']}&employee=" . $this->users['alpha']['emp2']->id)->json('data'));
         $this->assertSame([0, 0.0], [$drill->sum('calls'), (float) $drill->sum('collected')]);   // drill-down matches EMP2's row
+        // EMP1's own report still shows his work on P1 after it moved away (and only his cases as assigned).
+        $mine = $this->admin('alpha')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}&employee=" . $this->users['alpha']['emp']->id)->json();
+        $this->assertSame([4, 1000.0], [$mine['summary']['calls'], (float) $mine['summary']['collected']]);
+        $this->assertSame([2, 4, 1000.0], [$mine['employees'][0]['cases'], $mine['employees'][0]['calls'], (float) $mine['employees'][0]['collected']]);
     }
 
     public function test_local_loopback_workspace_only_in_local_env(): void

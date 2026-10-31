@@ -149,3 +149,8 @@ export async function download(path: string, body?: unknown): Promise<void> {
 export function openPrint(path: string): void {
   window.open(`${base}${path}`, '_blank', 'noopener');
 }
+
+/** Today's date (YYYY-MM-DD) in the company's time zone — never the UTC date (before 05:30 IST that is yesterday). */
+export function companyToday(tz = 'Asia/Kolkata'): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: tz });
+}

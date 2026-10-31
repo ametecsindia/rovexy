@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { del, get, post, put, qs } from '../lib/api';
+import { useAuth } from '../lib/auth';
+import { companyToday } from '../lib/api';
 import { Badge, Card, ErrorBox, Field, Notice, Page, Table, toast, useAction, useAsync } from '../components/ui';
 
 /**
@@ -11,9 +13,10 @@ import { Badge, Card, ErrorBox, Field, Notice, Page, Table, toast, useAction, us
  */
 const km = (m?: number | null) => (m == null ? '—' : m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`);
 const mins = (s?: number | null) => (s == null ? '—' : s < 3600 ? `${Math.max(1, Math.round(s / 60))} min` : `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`);
-const today = () => new Date().toISOString().slice(0, 10);
 
 export function FieldPlanningPage() {
+  const { me } = useAuth();
+  const today = () => companyToday(me?.company.timezone);
   const [date, setDate] = useState(today);
   const list = useAsync(() => get(`/field/employees${qs({ date })}`), [date]);
   const [sel, setSel] = useState<number | null>(null);

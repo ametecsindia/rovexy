@@ -39,8 +39,9 @@ final class CallController extends Controller
             ->when($r->query('disposition'), fn ($q, $v) => $q->whereHas('disposition', fn ($d) => $d->where('code', $v)))
             ->when($r->query('state'), fn ($q, $v) => $q->where('state', $v))
             ->when($r->query('recording_status'), fn ($q, $v) => $q->where('recording_status', $v))
-            ->when($r->query('from'), fn ($q, $v) => $q->where('initiated_at', '>=', $v))
-            ->when($r->query('to'), fn ($q, $v) => $q->where('initiated_at', '<', $v))
+            // from/to are the console's local (company-zone) times; stored times are UTC.
+            ->when($r->query('from'), fn ($q, $v) => $q->where('initiated_at', '>=', \Illuminate\Support\Carbon::parse($v, \App\Support\CurrentCompany::tz())->utc()))
+            ->when($r->query('to'), fn ($q, $v) => $q->where('initiated_at', '<', \Illuminate\Support\Carbon::parse($v, \App\Support\CurrentCompany::tz())->utc()))
             ->orderByDesc('initiated_at')->paginate(100)
             ->through(fn (Call $c) => $c->toArray() + ['destination_masked' => PhoneNormaliser::mask($c->destination)]));
     }

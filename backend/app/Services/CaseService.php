@@ -32,7 +32,8 @@ final class CaseService
     {
         $out = [];
         foreach ($ids->chunk(1000) as $chunk) {
-            $calls = Call::query()->whereIn('customer_id', $chunk)->where('provider', '!=', 'manual')
+            $calls = Call::query()->whereIn('customer_id', $chunk)->where('provider', '!=', 'manual')->where('is_test', false)
+                ->when($recordedBy, fn ($q) => $q->where('user_id', $recordedBy))   // phone: "contacted" = by this employee; history stays on the profile
                 ->selectRaw('customer_id, MAX(initiated_at) AS last_call_at, COUNT(*) AS calls, SUM(CASE WHEN answered_at IS NULL THEN 0 ELSE 1 END) AS connected')
                 ->groupBy('customer_id')->get()->keyBy('customer_id');
             $disp = CallDisposition::query()->join('calls', 'calls.id', '=', 'call_dispositions.call_id')->whereIn('calls.customer_id', $chunk)
@@ -76,6 +77,8 @@ final class CaseService
             // The phone works out "payments recorded today" itself, so the figure is right even before the next sync.
             'last_payment_recorded_on' => $mine->last() ? self::localDate($mine->last()->submitted_at) : null,
             'last_payment_recorded_amount' => $mine->last() ? (float) $mine->last()->amount : null,
+            // Sum of this employee's own payments recorded today (company day): the field map's Collected today.
+            'paid_today_amount' => round((float) $mine->filter(fn ($x) => self::localDate($x->submitted_at) === now(\App\Support\CurrentCompany::tz())->toDateString())->sum('amount'), 2),
             'promise_amount' => $promise ? (float) $promise->amount : null,
             'promise_date' => self::localDate($promise?->follow_up_at),
             // open = date not reached; kept = a payment was recorded after the promise; broken = date passed, nothing paid.

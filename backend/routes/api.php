@@ -266,7 +266,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('imports/{id}/errors.csv', [Admin\CustomerController::class, 'errorReport'])->middleware('perm:customers.import');
         Route::get('customers', [Admin\CustomerController::class, 'index'])->middleware('perm:customers.view');
         Route::get('customers/{id}', [Admin\CustomerController::class, 'show'])->whereNumber('id')->middleware('perm:customers.view');
-        Route::post('customers/{id}/note', [Admin\CustomerController::class, 'note'])->whereNumber('id')->middleware('perm:customers.view');
+        Route::post('customers/{id}/note', [Admin\CustomerController::class, 'note'])->whereNumber('id')->middleware('perm:customers.assign');   // writing needs more than view, same as status
         Route::post('customers/{id}/status', [Admin\CustomerController::class, 'status'])->whereNumber('id')->middleware('perm:customers.assign');
         Route::post('customers/assign', [Admin\CustomerController::class, 'assign'])->middleware('perm:customers.assign');
         Route::get('address-changes', [Admin\AddressReportController::class, 'changes'])->middleware('perm:customers.view');

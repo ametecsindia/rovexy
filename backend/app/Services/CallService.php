@@ -556,7 +556,12 @@ final class CallService
             $d = CallDisposition::query()->create(['call_id' => $call->id, 'user_id' => $user->id, 'code' => $dc->code,
                 'notes' => $notes ? mb_substr($notes, 0, 2000) : null, 'follow_up_at' => $follow, 'submitted_at' => now()] + $extra);
             $call->forceFill(['disposition_status' => 'submitted'])->save();
-            if ($call->customer_id) {
+            // A late outcome (offline queue) after the case was reassigned / withdrawn: the result of HIS call is still his
+            // work and is kept, but it must not change the case or the new owner's callbacks.
+            $stillHis = $call->customer_id && Customer::query()->visibleTo($user)->whereKey($call->customer_id)->exists();
+            if ($call->customer_id && !$stillHis) {
+                Customer::query()->whereKey($call->customer_id)->first()?->touch();
+            } elseif ($call->customer_id) {
                 $c = Customer::query()->find($call->customer_id);
                 // ponytail: one open callback per case — new feedback settles the earlier ones.
                 FollowUp::query()->where('customer_id', $call->customer_id)->where('status', 'open')->update(['status' => 'done', 'updated_at' => now()]);

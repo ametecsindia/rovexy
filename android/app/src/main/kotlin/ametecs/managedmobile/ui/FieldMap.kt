@@ -624,7 +624,7 @@ private fun CustomerSheetCard(n: Near, label: String, route: RouteLine?, routeBu
         Row(Modifier.padding(top = 12.dp)) {
             MapKv("Overdue", money(r.overdue), Modifier.weight(1f), if ((r.dpd ?: 0) > 0) Ds.Red else Ds.Ink)
             MapKv("Outstanding", money(r.outstanding), Modifier.weight(1f))
-            MapKv("Collected today", if (r.lastPaymentOn == today) money(r.lastPaymentAmount) else "—", Modifier.weight(1f))
+            MapKv("Collected today", if (r.paidToday > 0) money(r.paidToday) else "—", Modifier.weight(1f))
         }
         Text(listOfNotNull(
             r.lastCallAt?.let { "Last call " + it.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM, h:mm a")) } ?: "Not called yet",

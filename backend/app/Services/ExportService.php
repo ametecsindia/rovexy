@@ -156,19 +156,23 @@ final class ExportService
             ->when(!empty($this->f['employee']), fn ($w) => $w->where('user_id', (int) $this->f['employee']));
     }
 
+    /** Portfolio only: who did the work is filtered by byUser(), so work on a case later reassigned stays in its doer's export. */
     private function inPortfolio($q)
     {
-        return empty($this->f['portfolio']) ? $q : $q->whereIn('customer_id', $this->customerQuery()->select('id'));
+        $pf = $this->f['portfolio'] ?? null;
+        return empty($pf) ? $q : $q->whereIn('customer_id', Customer::query()->select('id')
+            ->when($pf === 'manual', fn ($w) => $w->whereNull('last_import_id'))->when(ctype_digit((string) $pf), fn ($w) => $w->where('last_import_id', (int) $pf)));
     }
 
     private function callQuery()
     {
-        return $this->inPortfolio($this->byUser(Call::query()->where('is_test', false)->whereBetween('initiated_at', [$this->from(), $this->to()])));
+        return $this->inPortfolio($this->byUser(Call::query()->where('is_test', false)->where('provider', '!=', 'manual')->whereBetween('initiated_at', [$this->from(), $this->to()])));
     }
 
     private function paymentQuery()
     {
-        return CallDisposition::query()->whereNotNull('payment_mode')->whereBetween('submitted_at', [$this->from(), $this->to()])
+        return CallDisposition::query()->whereNotNull('payment_mode')   // by paid-on date (company calendar), as the reports and Payments page
+            ->whereBetween('paid_on', [\Illuminate\Support\Carbon::parse($this->f['from'])->toDateString(), \Illuminate\Support\Carbon::parse($this->f['to'])->toDateString()])
             ->whereIn('call_id', $this->inPortfolio($this->byUser(Call::query()->where('is_test', false)))->select('id'))
             ->when(!empty($this->f['employee']), fn ($w) => $w->where('user_id', (int) $this->f['employee']));
     }

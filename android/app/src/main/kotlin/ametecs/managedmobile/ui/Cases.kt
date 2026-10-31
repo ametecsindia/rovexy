@@ -109,6 +109,8 @@ data class CaseRow(
     val lastPaymentOn: LocalDate?, val lastPaymentAmount: Double?,
     /** Map pin (server sends it only when usable) and why it is missing: "missing" | "invalid" | null. */
     val lat: Double? = null, val lng: Double? = null, val locationIssue: String? = null, val address: String? = null,
+    /** Sum of this employee's own payments recorded today (server-computed). */
+    val paidToday: Double = 0.0,
 ) {
     /** Days since the oldest unpaid instalment (null = not uploaded or nothing overdue). */
     val dpd: Int? get() = oldestDue?.takeIf { overdue == null || overdue > 0 }?.let { ChronoUnit.DAYS.between(it, LocalDate.now()).toInt().coerceAtLeast(0) }
@@ -121,7 +123,8 @@ fun CachedCustomer.toCase(): CaseRow {
         date(o.s("due_date")), date(o.s("oldest_due_date")), instant(o.s("last_call_at")), o.s("last_outcome"), o.i("calls") ?: 0, o.i("connected") ?: 0,
         instant(o.s("next_callback_at")), o.d("promise_amount"), date(o.s("promise_date")), o.s("promise_status"), o.d("collected_verified") ?: 0.0,
         o.d("collected_pending") ?: 0.0, date(o.s("last_payment_recorded_on")), o.d("last_payment_recorded_amount"),
-        o.d("lat"), o.d("lng"), o.s("location_issue"), listOfNotNull(o.s("address"), o.s("area"), o.s("city"), o.s("pincode")).joinToString(", ").ifBlank { null })
+        o.d("lat"), o.d("lng"), o.s("location_issue"), listOfNotNull(o.s("address"), o.s("area"), o.s("city"), o.s("pincode")).joinToString(", ").ifBlank { null },
+        o.d("paid_today_amount") ?: 0.0)
 }
 
 private val inr: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply { maximumFractionDigits = 0 }
@@ -189,39 +192,6 @@ fun applyCaseFilter(all: List<CaseRow>, f: CaseFilter, here: android.location.Lo
     }
 }
 
-/** Priority tiles: tap one to see those cases. */
-@Composable
-fun CollectionTiles(all: List<CaseRow>, f: CaseFilter, onTile: (String) -> Unit) {
-    val today = LocalDate.now()
-    val tiles = listOf(
-        Triple("", "Assigned cases", all.size.toString()),
-        Triple("overdue", "Total overdue", money(all.sumOf { if ((it.dpd ?: 0) > 0) it.overdue ?: 0.0 else 0.0 })),
-        Triple("due_today", "Due today", all.count { it.dueDate == today }.toString()),
-        Triple("upcoming", "Instalments in 7 days", all.count { it.dueDate != null && !it.dueDate.isBefore(today) && !it.dueDate.isAfter(today.plusDays(7)) }.toString()),
-        Triple("ptp_today", "Promises due today", all.count { it.promiseStatus == "open" && it.promiseDate == today }.toString()),
-        Triple("ptp_broken", "Broken promises", all.count { it.promiseStatus == "broken" }.toString()),
-        Triple("cb_today", "Callbacks due", all.count { it.callbackDate != null && !it.callbackDate!!.isAfter(today) }.toString()),
-        Triple("not_contacted", "Not contacted", all.count { it.calls == 0 }.toString()),
-        Triple("paid_today", "Payments today", all.count { it.lastPaymentOn == today }.toString()),
-        Triple("verified", "Verified collections", money(all.sumOf { it.verified })),
-    )
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        tiles.forEach { (key, label, value) ->
-            val on = f.tile == key && (key.isNotEmpty() || !f.active)
-            val warn = key in setOf("ptp_broken", "cb_today", "due_today") && value != "0"
-            Column(Modifier.width(128.dp).clip(RoundedCornerShape(16.dp)).background(if (on) Ds.Navy else Ds.Surface).border(1.dp, if (on) Ds.Navy else Ds.Line, RoundedCornerShape(16.dp))
-                .clickable { onTile(key) }.padding(12.dp)) {
-                Text(value, color = if (on) Color.White else if (warn) Ds.Red else Ds.Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                Text(label, color = if (on) Ds.GoldSoft else Ds.Muted, fontSize = 12.sp, maxLines = 2)
-            }
-        }
-    }
-    // Overdue ageing: counts per days-overdue range (tap to filter).
-    val buckets = listOf("0" to "Not overdue", "1-30" to "1–30 days", "31-60" to "31–60", "61-90" to "61–90", "90+" to "90+ days")
-    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        buckets.forEach { (k, label) -> Pill("$label  ${all.count { dpdBucket(it.dpd) == k }}", if (k == "0") Ds.Teal else Ds.Red, f.dpd == k) { onTile("dpd:$k") } }
-    }
-}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable

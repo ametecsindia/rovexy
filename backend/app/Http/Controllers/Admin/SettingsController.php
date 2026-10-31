@@ -153,7 +153,8 @@ final class SettingsController extends Controller
             $out = fopen('php://output', 'w');
             fputcsv($out, ['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Portfolio', 'Destination', 'Outcome', 'Initiated (' . $tz . ')', 'Ring s', 'Talk s', 'Total s', 'Recording', 'Disposition', 'Amount', 'Payment mode']);
             Call::query()->with(['user:id,employee_code,name', 'customer:id,customer_ref,name,last_import_id', 'disposition:id,call_id,code,amount,payment_mode'])
-                ->where('is_test', false)->whereBetween('initiated_at', [$data['from'], $data['to']])
+                ->where('is_test', false)->where('provider', '!=', 'manual')   // field entries are not calls
+                ->whereBetween('initiated_at', [\Illuminate\Support\Carbon::parse($data['from'], \App\Support\CurrentCompany::tz())->utc(), \Illuminate\Support\Carbon::parse($data['to'], \App\Support\CurrentCompany::tz())->utc()])   // company-zone dates
                 ->when($users !== null, fn ($q) => $q->whereIn('user_id', $users))
                 ->when(!empty($data['employee']), fn ($q) => $q->where('user_id', (int) $data['employee']))
                 ->when($pf === 'manual', fn ($q) => $q->whereHas('customer', fn ($c) => $c->whereNull('last_import_id')))

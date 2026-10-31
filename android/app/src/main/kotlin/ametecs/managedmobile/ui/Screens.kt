@@ -355,7 +355,7 @@ fun Dashboard(vm: AppViewModel) {
     val shown = remember(cases, filter, here) { applyCaseFilter(cases, filter, here) }
     val outcomeLabel = { c: String -> codes.firstOrNull { it.code == c }?.label ?: c.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() } }
     val openCase = openId?.let { id -> cases.firstOrNull { it.c.id == id } }
-    val worked = customers.count { it.status != "new" }
+    val worked = cases.count { it.calls > 0 || it.lastPaymentOn != null }   // worked by THIS employee (own calls / payments), not a status set by a previous owner
     val progress by animateFloatAsState(if (customers.isEmpty()) 0f else worked.toFloat() / customers.size, tween(900), label = "progress")
 
     if (openCase != null) CustomerProfile(vm, openCase, vm::closeProfile)

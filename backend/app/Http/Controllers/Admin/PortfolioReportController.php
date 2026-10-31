@@ -30,13 +30,16 @@ final class PortfolioReportController extends Controller
     {
         [$cases, $range, $userId] = $this->caseSet($r);
         $ids = (clone $cases)->select('customers.id');
+        // Work (calls / payments / callbacks / last activity) is found on every case in the filters, NOT only the
+        // employee's current cases: work they did on a case since moved to someone else stays on their report.
+        $workIds = $userId ? $this->caseSet($r, false)[0]->select('customers.id') : $ids;
         // Work is credited ONLY to the person who did it (the call's caller, the payment's recorder, the callback's setter):
         // a reassigned case never moves earlier work to the new owner. Case columns (reached / not reached / not called)
         // count only the CURRENT owner's own calls, so a case handed over starts as "not called" for the new owner and
         // every row still adds up: assigned = reached + called, not reached + not called.
-        $calls = $this->calls($ids, $range, $userId);
-        $pay = $this->payments($ids, $range, $userId);
-        $fu = FollowUp::query()->where('follow_ups.status', 'open')->whereIn('follow_ups.customer_id', clone $ids)->when($userId, fn ($q) => $q->where('follow_ups.user_id', $userId));
+        $calls = $this->calls($workIds, $range, $userId);
+        $pay = $this->payments($workIds, $range, $userId);
+        $fu = FollowUp::query()->where('follow_ups.status', 'open')->whereIn('follow_ups.customer_id', clone $workIds)->when($userId, fn ($q) => $q->where('follow_ups.user_id', $userId));
 
         // Per employee.
         $owned = (clone $cases)->whereNotNull('assigned_user_id')->selectRaw('assigned_user_id AS uid, COUNT(*) AS cases, SUM(CASE WHEN status IN (\'new\',\'in_progress\',\'follow_up\') THEN 1 ELSE 0 END) AS pending')
@@ -45,7 +48,7 @@ final class PortfolioReportController extends Controller
         $notConnected = $this->calledNotConnected((clone $cases)->whereNotNull('assigned_user_id'), $range)->selectRaw('assigned_user_id AS uid, COUNT(*) AS n')->groupBy('assigned_user_id')->pluck('n', 'uid');
         $reached = $this->reached((clone $cases)->whereNotNull('assigned_user_id'), $range)->selectRaw('assigned_user_id AS uid, COUNT(*) AS n')->groupBy('assigned_user_id')->pluck('n', 'uid');
         // Last activity = the employee's own last call OR field entry.
-        $lastWork = Call::query()->whereIn('calls.customer_id', clone $ids)->where('calls.is_test', false)->when($userId, fn ($q) => $q->where('calls.user_id', $userId))
+        $lastWork = Call::query()->whereIn('calls.customer_id', clone $workIds)->where('calls.is_test', false)->when($userId, fn ($q) => $q->where('calls.user_id', $userId))
             ->when($range[0], fn ($q) => $q->where('calls.initiated_at', '>=', $range[0]))->when($range[1], fn ($q) => $q->where('calls.initiated_at', '<', $range[1]))
             ->selectRaw('calls.user_id AS uid, MAX(calls.initiated_at) AS at')->groupBy('calls.user_id')->pluck('at', 'uid');
         $byUserCalls = (clone $calls)->selectRaw('calls.user_id AS uid, COUNT(*) AS calls, SUM(CASE WHEN calls.answered_at IS NOT NULL THEN 1 ELSE 0 END) AS connected')
@@ -197,7 +200,8 @@ final class PortfolioReportController extends Controller
             ->withCount(['calls as calls_count' => $inRange, 'calls as connected_count' => fn ($q) => $inRange($q)->whereNotNull('answered_at')])
             ->withMax(['calls as last_call_at' => $inRange], 'initiated_at')
             ->addSelect(['collected' => CallDisposition::query()->selectRaw('COALESCE(SUM(amount),0)')->whereNotNull('payment_mode')
-                ->where(fn ($x) => $x->whereColumn('call_dispositions.user_id', 'customers.assigned_user_id')->orWhereNull('customers.assigned_user_id'))   // the owner's own payments, as the row->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))
+                ->where(fn ($x) => $x->whereColumn('call_dispositions.user_id', 'customers.assigned_user_id')->orWhereNull('customers.assigned_user_id'))   // the owner's own payments, as the row
+                ->where(fn ($w) => $w->whereNull('review_status')->orWhere('review_status', '!=', 'rejected'))
                 ->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))
                 ->when($range[2], fn ($q) => $q->where('paid_on', '>=', $range[2]))->when($range[3], fn ($q) => $q->where('paid_on', '<', $range[3]))])   // same dates as the Collections tile
             ->addSelect(['last_outcome' => CallDisposition::query()->select('code')->whereIn('call_id', Call::query()->select('id')->whereColumn('calls.customer_id', 'customers.id'))->orderByDesc('submitted_at')->limit(1)])
@@ -212,7 +216,7 @@ final class PortfolioReportController extends Controller
     }
 
     /** @return array{0: Builder, 1: array{0:?string,1:?string,2:?string,3:?string}, 2:?int} */
-    private function caseSet(Request $r): array
+    private function caseSet(Request $r, bool $ownerFilter = true): array
     {
         $q = fn (string $k) => ($v = $r->query($k)) !== null && $v !== '' ? (string) $v : null;
         $tz = app(\App\Support\CurrentCompany::class)->get()->timezone ?: config('app.timezone');
@@ -221,7 +225,7 @@ final class PortfolioReportController extends Controller
             // local calendar dates for paid_on (a DATE column): [from, to + 1 day)
             $q('from') ? \Illuminate\Support\Carbon::parse($q('from'))->toDateString() : null, $q('to') ? \Illuminate\Support\Carbon::parse($q('to'))->addDay()->toDateString() : null];
         $userId = ctype_digit((string) $q('employee')) ? (int) $q('employee') : null;
-        $f = ['team_id' => $q('group'), 'status' => $q('case_status'), 'assigned' => match ($q('assigned')) { 'assigned' => 'any', 'unassigned' => 'none', default => $userId ? (string) $userId : null }];
+        $f = ['team_id' => $q('group'), 'status' => $q('case_status'), 'assigned' => match ($q('assigned')) { 'assigned' => 'any', 'unassigned' => 'none', default => $userId && $ownerFilter ? (string) $userId : null }];
         $cases = CustomerController::filtered(array_filter($f, fn ($v) => $v !== null), $r->user());
         $pf = $q('portfolio');
         $cases->when($pf === 'manual', fn ($w) => $w->whereNull('last_import_id'))->when(ctype_digit((string) $pf), fn ($w) => $w->where('last_import_id', (int) $pf));

@@ -107,7 +107,7 @@ final class FieldPlanController extends Controller
             'address' => implode(', ', array_filter([$c->address, $c->area, $c->city, $c->pincode])),
             'follow_up_due' => $c->follow_up_on !== null && $c->follow_up_on->toDateString() <= $date,
             'overdue_amount' => $c->overdue_amount, 'outstanding' => $c->outstanding,
-            'last_visit' => isset($lastVisit[$c->id]) ? \Illuminate\Support\Carbon::parse($lastVisit[$c->id])->toDateString() : null,
+            'last_visit' => isset($lastVisit[$c->id]) ? \Illuminate\Support\Carbon::parse($lastVisit[$c->id], 'UTC')->setTimezone(\App\Support\CurrentCompany::tz())->toDateString() : null,
             'inside' => $circle ? $circle->contains($c->lat, $c->lng) : null,
             'from_start_m' => $start ? (int) round(GoogleMaps::straightMeters($start, [$c->lat, $c->lng])) : null,
         ])->sortBy(fn ($x) => [$x['inside'] === false ? 1 : 0, $x['follow_up_due'] ? 0 : 1, $x['last_visit'] ?? '0000', -1 * (float) ($x['overdue_amount'] ?? 0)])->values();

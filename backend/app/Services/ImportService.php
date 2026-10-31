@@ -246,7 +246,7 @@ final class ImportService
     public static function accountAttrs(array $a): array
     {
         if (isset($a['dpd']) && !isset($a['oldest_due_date'])) {
-            $a['oldest_due_date'] = now()->subDays($a['dpd'])->toDateString();
+            $a['oldest_due_date'] = now(\App\Support\CurrentCompany::tz())->subDays($a['dpd'])->toDateString();
         }
         unset($a['dpd']);
         if (array_intersect_key($a, array_flip(ImportValidator::MONEY)) !== []) {

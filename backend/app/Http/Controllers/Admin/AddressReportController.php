@@ -76,7 +76,7 @@ final class AddressReportController extends Controller
             'visits' => $this->visitsOf()->selectRaw('COUNT(*)'),
             'last_change_at' => $this->changesOf()->selectRaw('MAX(ac.created_at)'),
             'changes' => $this->changesOf()->selectRaw('COUNT(*)'),
-            'last_call_at' => DB::table('calls as k')->selectRaw('MAX(k.initiated_at)')->whereColumn('k.customer_id', 'customers.id'),
+            'last_call_at' => DB::table('calls as k')->selectRaw('MAX(k.initiated_at)')->whereColumn('k.customer_id', 'customers.id')->where('k.provider', '!=', 'manual')->where('k.is_test', false),
             'last_connected_at' => $this->connectedOf()->selectRaw('MAX(k.answered_at)'),
         ])->orderBy('name')->paginate(50);
         $ts = fn ($v) => $v ? Carbon::parse($v)->toAtomString() : null;
@@ -132,7 +132,7 @@ final class AddressReportController extends Controller
 
     private function connectedOf()
     {
-        return DB::table('calls as k')->whereColumn('k.customer_id', 'customers.id')->whereNotNull('k.answered_at');
+        return DB::table('calls as k')->whereColumn('k.customer_id', 'customers.id')->whereNotNull('k.answered_at')->where('k.provider', '!=', 'manual')->where('k.is_test', false);
     }
 
     /** Usable pin, as Customer::validCoords, in SQL. */
