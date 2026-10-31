@@ -98,7 +98,7 @@ final class CallService
                 'assigned_user_id' => $customer->assigned_user_id, 'assigned_team_id' => $customer->assigned_team_id,
             ] : null, $requestedNumber, $which, [
                 'user_id' => $user->id, 'team_ids' => $user->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all(),
-                'compliant' => $device ? (bool) $device->compliant : true, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
+                'compliant' => $device ? $device->workCompliant() : true, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
             ], new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
 
             if ($route === 'sim') {

@@ -45,7 +45,7 @@ export function DevicesPage() {
             : <span title="Make one test call (to your own number) from this phone; the first recording that arrives verifies it."><Badge value="warn" label="not yet" /></span> },
           { key: 'user', label: 'Employee', render: (d: any) => d.assigned_user?.name ?? '—' },
           { key: 'management_mode', label: 'Management', render: (d: any) => <Badge value={d.management_mode === 'amapi' ? 'supported' : 'requires_setup'} label={d.management_mode === 'amapi' ? 'Android Mgmt' : 'App only'} /> },
-          { key: 'policy_state', label: 'Policy', render: (d: any) => <><Badge value={d.policy_state} /> {d.approval_state === 'approved' && <Badge value={d.compliant} label={d.compliant ? 'compliant' : 'not compliant'} />}</> },
+          { key: 'policy_state', label: 'Policy', render: (d: any) => <><Badge value={d.policy_state} /> {d.approval_state === 'approved' && <span title={d.compliant ? undefined : `Why not compliant: ${nonCompliantReason(d)}`} style={d.compliant ? undefined : { cursor: 'help' }}><Badge value={d.compliant} label={d.compliant ? 'compliant' : 'not compliant'} /></span>}</> },
           { key: 'presence', label: 'Presence', render: (d: any) => <Badge value={d.presence} /> },
           { key: 'last_contact_at', label: 'Last contact', render: (d: any) => fmtDate(d.last_contact_at) },
           { key: 'a', label: '', render: (d: any) => d.approval_state === 'pending' && can('devices.approve') && <button onClick={(e) => { e.stopPropagation(); setApprove(d); }}>Review</button> },

@@ -172,7 +172,7 @@ export function OverviewPage() {
         <>
           <div className="notices">
             {data.devices.pending > 0 && <Notice tone="warn">{data.devices.pending} phone(s) waiting for approval. <Link to="/devices">Review requests</Link></Notice>}
-            {data.devices.non_compliant > 0 && <Notice tone="bad">{data.devices.non_compliant} approved phone(s) are not compliant with policy. <Link to="/devices">Check devices</Link></Notice>}
+            {data.devices.non_compliant > 0 && <Notice tone="bad">{data.devices.non_compliant} of {data.devices.approved} approved phone(s) have not applied the company's required phone policy, so customer calls are blocked on them until they do. <Link to="/devices">See which phones and why</Link></Notice>}
             {data.recordings_failed_7d > 0 && <Notice tone="bad">{data.recordings_failed_7d} recording(s) failed in the last 7 days. <Link to="/calls?recording_status=failed">Review</Link></Notice>}
             {data.follow_ups.overdue > 0 && <Notice tone="warn">{data.follow_ups.overdue} follow-up(s) are overdue. <Link to="/follow-ups">Open follow-ups</Link></Notice>}
             {data.devices.low_battery > 0 && <Notice tone="warn">{data.devices.low_battery} online phone(s) below 20% battery.</Notice>}
@@ -200,7 +200,7 @@ export function OverviewPage() {
             <Stat icon="event" tone="amber" label="Follow-ups due today" value={data.follow_ups.due_today} sub={data.follow_ups.overdue ? `${data.follow_ups.overdue} overdue` : 'nothing overdue'} subTone={data.follow_ups.overdue ? 'down' : 'flat'} to="/follow-ups" />
             <Stat icon="mic" tone="purple" label="Recordings" value={data.recordings.available} sub={`${data.recordings.pending} pending · ${data.recordings.failed} failed`} subTone={data.recordings.failed ? 'down' : 'flat'} to={`/calls?recording_status=${data.recordings.failed ? 'failed' : 'available'}`} />
             <Stat icon="phone" tone="navy" label="Approved phones" value={data.devices.approved} sub={`${data.devices.pending} pending approval`} subTone={data.devices.pending ? 'down' : 'flat'} to="/devices" />
-            <Stat icon="shield" tone={data.devices.non_compliant ? 'red' : 'green'} label="Policy compliance" value={`${pct(data.devices.approved - data.devices.non_compliant, Math.max(1, data.devices.approved))}%`} sub={`${data.devices.non_compliant} not compliant · ${data.devices.silent_24h} silent 24 h+`} subTone={data.devices.non_compliant ? 'down' : 'flat'} to="/policies" />
+            <Stat icon="shield" tone={data.devices.non_compliant ? 'red' : 'green'} label="Policy compliance" value={`${pct(data.devices.approved - data.devices.non_compliant, Math.max(1, data.devices.approved))}%`} sub={`${data.devices.non_compliant} of ${data.devices.approved} phones not following policy · ${data.devices.silent_24h} not heard from in 24 h+`} subTone={data.devices.non_compliant ? 'down' : 'flat'} to="/devices" />
           </div>
 
           {/* Row 3 — trend + team status */}

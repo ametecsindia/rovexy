@@ -80,7 +80,7 @@
           <div class="k b-amber"><small>Follow-ups due today</small>{!! $svg('cal', 'ki a') !!}<b data-k="fu">38</b><p>nothing overdue</p></div>
           <div class="k b-violet"><small>Recordings</small>{!! $svg('mic', 'ki v') !!}<b data-k="rec">871</b><p><span data-k="recp">6</span> pending · 0 failed</p></div>
           <div class="k b-navy"><small>Approved phones</small>{!! $svg('device', 'ki n') !!}<b>10</b><p class="bad">2 pending approval</p></div>
-          <div class="k b-green"><small>Policy compliance</small>{!! $svg('shield', 'ki g') !!}<b>100%</b><p>0 not compliant · 0 silent 24 h+</p></div>
+          <div class="k b-green"><small>Policy compliance</small>{!! $svg('shield', 'ki g') !!}<b>100%</b><p>0 phones not following policy · 0 not heard from in 24 h+</p></div>
         </div>
         <div class="cx-bottom">
           <div class="card"><div class="ch"><b>Calls per day — last 7 days</b><u>View calls →</u></div>

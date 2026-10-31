@@ -194,6 +194,26 @@ final class AcceptanceTest extends TestCase
         $m->work('GET', '/api/mobile/v1/customers')->assertStatus(403)->assertJsonPath('error', 'device_not_compliant'); // …server disagrees
     }
 
+    public function test_policy_change_on_offline_phone_keeps_compliant_label_but_blocks_work_until_ack(): void
+    {
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $device = app(CurrentCompany::class)->withoutScope(fn () => ManagedDevice::query()->where('installation_id', $m->installationId)->first());
+        app(CurrentCompany::class)->run($this->a, function () use ($device) {   // admin changes the policy while the phone is off
+            $v = \App\Models\PolicyVersion::query()->first();
+            $v->forceFill(['settings' => ['offline.access_minutes' => 7] + $v->settings])->save();
+            app(\App\Services\PolicyService::class)->refreshDevice($device);
+        });
+        $device->refresh();
+        $this->assertSame('pending', $device->policy_state);
+        $this->assertTrue($device->compliant);                                   // not "non-compliant" just for being offline
+        $m->work('GET', '/api/mobile/v1/customers')->assertStatus(403);         // …but no work on the old policy
+        $this->ackAll($m);
+        $m->work('GET', '/api/mobile/v1/customers')->assertOk();
+    }
+
     public function test_10_call_restrictions_enforced_server_side(): void
     {
         $this->appOnlyMandatory();

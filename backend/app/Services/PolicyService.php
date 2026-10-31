@@ -76,7 +76,8 @@ final class PolicyService
             $device->forceFill([
                 'desired_policy_fingerprint' => $fp,
                 'policy_state' => 'pending',
-                'compliant' => false,
+                // Keep the last reported verdict: a phone that is off / offline is not "non-compliant", it just hasn't
+                // picked up the new policy yet. Work stays blocked until it does (ManagedDevice::workCompliant()).
                 'compliance_detail' => $detail,
                 'capabilities' => array_merge((array) $device->capabilities, ['matrix' => Capability::matrix($eff['values'], $device->deviceFacts())]),
             ])->save();

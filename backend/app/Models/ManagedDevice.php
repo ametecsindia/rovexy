@@ -62,6 +62,12 @@ class ManagedDevice extends Model
         return $this->belongsTo(Team::class);
     }
 
+    /** Work (customers, calls) needs the last report compliant AND for the policy the server currently wants. */
+    public function workCompliant(): bool
+    {
+        return $this->compliant && $this->applied_policy_fingerprint === $this->desired_policy_fingerprint;
+    }
+
     public function deviceFacts(): array
     {
         return [
