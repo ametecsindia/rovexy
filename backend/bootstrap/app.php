@@ -26,6 +26,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->statefulApi(); // Sanctum SPA cookies + CSRF for /api/admin
         $middleware->append(SecurityHeaders::class);
+        $middleware->redirectGuestsTo(fn (\Illuminate\Http\Request $r) => $r->query('workspace') ? url('/w/' . preg_replace('/[^a-z0-9-]/', '', (string) $r->query('workspace')) . '/admin') : url('/admin'));   // a signed-out file link (slip, recording) goes to sign-in, not a 500 "Route [login] not defined"
         $middleware->web(prepend: [\App\Http\Middleware\BindFixedCompany::class]);   // on-prem: every page belongs to the one company
         $middleware->alias([
             'company' => ResolveCompany::class,

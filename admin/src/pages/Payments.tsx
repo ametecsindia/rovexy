@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Icon, Modal, Notice, Page, Stat, Table, useAction, useAsync } from '../components/ui';
 
 const inr = (v: any) => `₹ ${Number(v ?? 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+// rel="noopener", never "noreferrer": without the Referer the API treats the tab as signed out (Sanctum).
 const slipUrl = (id: number, dl = false) => fileUrl(`/api/admin/payments/${id}/slip${dl ? '?dl=1' : ''}`);   // ?workspace= for /w/<slug>/admin
 const lastTo = () => { try { return localStorage.getItem('pay.mailto') ?? ''; } catch { return ''; } };
 const emails = (s: string) => s.split(/[,;\s]+/).map((x) => x.trim()).filter(Boolean);
@@ -89,8 +90,8 @@ function PaymentDetail({ p, modes, onClose, onChanged }: { p: any; modes: Record
           {p.has_slip ? (
             <>
               {isPdf ? <iframe title="Payment slip" src={slipUrl(p.id)} style={{ width: '100%', height: 360, border: '1px solid var(--border)', borderRadius: 8 }} />
-                : <a href={slipUrl(p.id)} target="_blank" rel="noreferrer"><img src={slipUrl(p.id)} alt="Payment slip" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', border: '1px solid var(--border)', borderRadius: 8 }} /></a>}
-              <p><a href={slipUrl(p.id)} target="_blank" rel="noreferrer">Open full size</a> · <a href={slipUrl(p.id, true)}>Download</a></p>
+                : <a href={slipUrl(p.id)} target="_blank" rel="noopener"><img src={slipUrl(p.id)} alt="Payment slip" style={{ width: '100%', maxHeight: 360, objectFit: 'contain', border: '1px solid var(--border)', borderRadius: 8 }} /></a>}
+              <p><a href={slipUrl(p.id)} target="_blank" rel="noopener">Open full size</a> · <a href={slipUrl(p.id, true)}>Download</a></p>
             </>
           ) : <Notice tone="warn">No slip was uploaded for this payment.</Notice>}
         </div>

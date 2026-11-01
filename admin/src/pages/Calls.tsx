@@ -102,7 +102,7 @@ function CallDetail({ id, onClose }: { id: number; onClose: () => void }) {
             <p><strong>{c.disposition.code.replace(/_/g, ' ').toLowerCase()}</strong> {c.disposition.notes}</p>
             {c.disposition.amount && <p>{c.disposition.payment_mode ? 'Received' : 'Promised'}: <strong>₹ {Number(c.disposition.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>
               {c.disposition.payment_mode && <> · {c.disposition.payment_mode.replace(/_/g, ' ')}{c.disposition.payment_ref && <> · ref <span className="code">{c.disposition.payment_ref}</span></>}{c.disposition.paid_on && <> · paid {c.disposition.paid_on}</>} · <Badge value={c.disposition.review_status ?? 'pending'} label={!c.disposition.review_status || c.disposition.review_status === 'pending' ? 'to check' : c.disposition.review_status} /></>}</p>}
-            {c.disposition.has_slip && <p><a href={fileUrl(`/api/admin/payments/${c.disposition.id}/slip`)} target="_blank" rel="noreferrer">View payment slip</a></p>}
+            {c.disposition.has_slip && <p><a href={fileUrl(`/api/admin/payments/${c.disposition.id}/slip`)} target="_blank" rel="noopener">View payment slip</a></p>}
             {c.disposition.follow_up_at && <p>{c.disposition.captures === 'promise' || c.disposition.amount ? 'Promise / follow-up date' : 'Follow-up'}: {fmtDate(c.disposition.follow_up_at, me?.company.timezone)}</p>}
           </Card>}
         </>
