@@ -121,6 +121,7 @@ final class DemoWorkspace
         $admin = DB::table('users')->where('company_id', $c->id)->where('employee_code', 'admin')->first();
         DB::transaction(function () use ($c, $admin) {
             self::wipe($c);
+            self::deleteFiles($c->id);   // before the rebuild: it writes the new slips into the same folder
             app(CurrentCompany::class)->run($c, function () use ($c, $admin) {
                 CompanyDefaults::apply($c);
                 $demo = $c->demo;
@@ -134,7 +135,6 @@ final class DemoWorkspace
             $c->forceFill(['demo' => ['resets' => ($c->demo['resets'] ?? 0) + 1, 'last_reset_at' => now()->toAtomString()] + $c->demo])->save();
             (new self())->build($c->refresh());
         });
-        self::deleteFiles($c->id);
         PlatformAudit::record('demo.reset', $c, ['city' => $c->demo['city']]);
     }
 

@@ -171,6 +171,8 @@ final class DemoClientTest extends TestCase
         $adminId = DB::table('users')->where('company_id', $a->id)->where('employee_code', 'admin')->value('id');
         $this->super()->postJson("/api/super/demo-clients/{$a->id}/reset")->assertOk();
         $this->assertSame(100, DB::table('customers')->where('company_id', $a->id)->count());
+        $slips = DB::table('call_dispositions')->where('company_id', $a->id)->whereNotNull('slip_key')->pluck('slip_key');
+        $this->assertTrue($slips->isNotEmpty() && $slips->every(fn ($k) => Storage::disk('company_files')->exists($k)), 'slips exist after Clear Demo Data');
         $this->assertSame(0, DB::table('users')->where('company_id', $a->id)->where('employee_code', 'NEW01')->count());
         $this->assertSame(0, DB::table('smart31_numbers')->where('company_id', $a->id)->count());
         $this->assertSame($adminId, DB::table('users')->where('company_id', $a->id)->where('employee_code', 'admin')->value('id'));
