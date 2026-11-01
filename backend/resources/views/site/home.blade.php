@@ -513,7 +513,7 @@ $faqs = [
         <button type="button" role="tab" aria-selected="false" aria-controls="contact">Talk to sales</button>
       </div>
       <form method="post" action="/trial" id="f-trial">
-        @csrf<input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        @csrf<input class="hp" name="hp_x9" tabindex="-1" autocomplete="new-password" aria-hidden="true">
         @if($errors->has('trial'))<div class="err" role="alert">{{ $errors->first('trial') }}</div>@elseif($errors->any() && old('workspace') !== null)<div class="err" role="alert">{{ $errors->first() }}</div>@endif
         <div class="grid2">
           <label>Company name<input name="company" value="{{ old('company') }}" required maxlength="150" autocomplete="organization"></label>
@@ -530,7 +530,7 @@ $faqs = [
         <button class="btn gold wide" type="submit">Create my workspace →</button>
       </form>
       <form method="post" action="/enquiry" id="contact">
-        @csrf<input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        @csrf<input class="hp" name="hp_x9" tabindex="-1" autocomplete="new-password" aria-hidden="true">
         <p class="lead">Large team, a custom package or the SmartPRS / SmartEPT link? We'll call you back within a working day.</p>
         <div class="grid2"><label>Name<input name="name" required maxlength="150" autocomplete="name"></label><label>Company<input name="company" maxlength="150" autocomplete="organization"></label></div>
         <div class="grid2"><label>Mobile<input name="phone" maxlength="20" inputmode="tel" autocomplete="tel"></label><label>E-mail<input type="email" name="email" autocomplete="email"></label></div>

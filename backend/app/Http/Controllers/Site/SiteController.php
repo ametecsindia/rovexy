@@ -58,7 +58,7 @@ final class SiteController extends Controller
 
     public function enquiry(Request $r)
     {
-        if ($r->filled('website')) {
+        if ($r->filled('hp_x9')) {   // hidden robot trap; not called "website": Chrome autofill fills that for real people
             return redirect('/thank-you');        // honeypot: say thanks, save nothing
         }
         $d = $r->validate(['name' => 'required|string|max:150', 'company' => 'nullable|string|max:150', 'email' => 'nullable|email|max:190|required_without:phone',
@@ -73,7 +73,7 @@ final class SiteController extends Controller
 
     public function trial(Request $r)
     {
-        if ($r->filled('website')) {
+        if ($r->filled('hp_x9')) {   // hidden robot trap; not called "website": Chrome autofill fills that for real people
             return redirect('/thank-you');
         }
         $d = $r->validate(['company' => 'required|string|max:150', 'name' => 'required|string|max:150', 'email' => 'required|email|max:190',
@@ -229,7 +229,7 @@ final class SiteController extends Controller
     /** POST /explore-demo: details → e-mail code → demo workspace built for the chosen city → signed in to the console. */
     public function demo(Request $r)
     {
-        if ($r->filled('website')) {
+        if ($r->filled('hp_x9')) {   // hidden robot trap; not called "website": Chrome autofill fills that for real people
             return redirect('/thank-you');
         }
         $d = $r->validate(['name' => 'required|string|max:150', 'business' => 'required|string|max:150', 'mobile' => ['required', 'string', 'max:20', 'regex:/^[+0-9 ()-]{10,20}$/'],
@@ -289,7 +289,7 @@ final class SiteController extends Controller
 
     public function placeOrder(Request $r)
     {
-        if ($r->filled('website')) {
+        if ($r->filled('hp_x9')) {   // hidden robot trap; not called "website": Chrome autofill fills that for real people
             return redirect('/thank-you');
         }
         $own = $r->input('kind') === 'perpetual';   // on-premises perpetual: a licence key, no cloud workspace

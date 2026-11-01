@@ -36,7 +36,7 @@
       <h2>Open my demo</h2>
       <p class="lead">Confirm your e-mail with a 6-digit code, and the console opens.</p>
       <form method="post" action="/explore-demo" id="xd" onsubmit="this.classList.add('sent');this.querySelector('button[type=submit]').disabled=true">
-        @csrf<input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        @csrf<input class="hp" name="hp_x9" tabindex="-1" autocomplete="new-password" aria-hidden="true">
         @if($errors->has('demo'))<div class="err" role="alert">{{ $errors->first('demo') }}</div>@elseif($errors->any())<div class="err" role="alert">{{ $errors->first() }}</div>@endif
         <div class="grid2">
           <label>Your name<input name="name" value="{{ old('name') }}" required maxlength="150" autocomplete="name"></label>

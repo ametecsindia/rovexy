@@ -94,7 +94,7 @@ final class LicensingTest extends TestCase
         $this->assertTrue($l->expires_at->between(now()->addDays(13), now()->addDays(15)));
         $this->assertDatabaseHas('leads', ['email' => 'bina@beta.test', 'source' => 'trial']);
         // honeypot: looks fine to a bot, creates nothing
-        $this->post('/trial', ['website' => 'spam', 'company' => 'X'])->assertRedirect('/thank-you');
+        $this->post('/trial', ['hp_x9' => 'spam', 'company' => 'X'])->assertRedirect('/thank-you');
         $this->assertSame(2, Company::query()->count());
     }
 

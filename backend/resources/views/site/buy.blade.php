@@ -73,7 +73,7 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
 </head>
 <body>
 <form method="post" action="/buy" id="buy" class="card" novalidate>
-  @csrf<input class="hp" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+  @csrf<input class="hp" name="hp_x9" tabindex="-1" autocomplete="new-password" aria-hidden="true">
 
   <section class="cfg" aria-label="Choose your plan">
     <a class="logo" href="/" aria-label="ROVEXY home"><img src="/brand/rovexy-logo-dark.svg" alt="ROVEXY"></a>
