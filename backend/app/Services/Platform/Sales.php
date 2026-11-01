@@ -297,7 +297,8 @@ final class Sales
         return match (true) {
             !preg_match(Workspaces::SLUG, $slug) => 'Workspace: 3–40 lower-case letters, numbers or dashes.',
             Company::query()->where('slug', $slug)->exists() => 'That workspace name is taken. Choose another.',
-            DB::table('users')->where('email', strtolower($email))->where('employee_code', 'admin')->exists() => 'This e-mail already has a ROVEXY workspace. Sign in, or use another e-mail.',
+            DB::table('users')->where('email', strtolower($email))->where('employee_code', 'admin')
+                ->whereIn('company_id', Company::query()->whereNull('demo')->select('id'))->exists() => 'This e-mail already has a ROVEXY workspace. Sign in, or use another e-mail.',
             default => null,
         };
     }

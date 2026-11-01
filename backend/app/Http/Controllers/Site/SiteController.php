@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Site;
 
 use App\Domain\DomainException;
 use App\Http\Controllers\Controller;
+use App\Models\Company;
 use App\Models\Platform\Lead;
 use App\Models\Platform\Plan;
 use App\Models\Platform\SalesOrder;
@@ -146,7 +147,7 @@ final class SiteController extends Controller
 
     private function otpExpired(string $purpose)
     {
-        $back = $purpose === 'buy' ? url('/buy') : url('/#trial');
+        $back = match ($purpose) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), default => url('/#trial') };
         return view('site.message', ['title' => 'This code has expired', 'lines' => ['Codes work for ' . self::OTP_MINUTES . ' minutes. Please fill in the form again.'], 'action' => ['Back to the form', $back]]);
     }
 
@@ -155,7 +156,7 @@ final class SiteController extends Controller
         $d = $r->validate(['token' => 'required|string|size:32']);
         $p = Cache::get("otp:{$d['token']}");
         if (!$p) {
-            return $this->otpExpired($r->input('purpose') === 'buy' ? 'buy' : 'trial');
+            return $this->otpExpired((string) $r->input('purpose'));
         }
         $view = fn (array $extra) => view('site.verify', ['token' => $d['token'], 'email' => $p['email'], 'purpose' => $p['purpose']] + $extra);
         $wait = $p['sent_at'] + self::OTP_RESEND_SECONDS - now()->getTimestamp();
@@ -178,7 +179,7 @@ final class SiteController extends Controller
         $key = "otp:{$d['token']}";
         $p = Cache::get($key);
         if (!$p) {
-            return $this->otpExpired($r->input('purpose') === 'buy' ? 'buy' : 'trial');
+            return $this->otpExpired((string) $r->input('purpose'));
         }
         $view = fn (array $extra) => view('site.verify', ['token' => $d['token'], 'email' => $p['email'], 'purpose' => $p['purpose']] + $extra);
         $code = preg_replace('/\D/', '', $d['code']);
@@ -190,13 +191,16 @@ final class SiteController extends Controller
             if ($p['tries'] >= self::OTP_TRIES) {
                 Cache::forget($key);
                 return view('site.message', ['title' => 'Too many wrong codes', 'lines' => ['For safety this request was cancelled. Please fill in the form again.'],
-                    'action' => ['Back to the form', $p['purpose'] === 'buy' ? url('/buy') : url('/#trial')]]);
+                    'action' => ['Back to the form', match ($p['purpose']) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), default => url('/#trial') }]]);
             }
             Cache::put($key, $p, now()->setTimestamp($p['expires_at']));
             $left = self::OTP_TRIES - $p['tries'];
             return $view(['error' => "That code is not right. {$left} " . ($left === 1 ? 'try' : 'tries') . ' left.']);
         }
         Cache::forget($key);
+        if ($p['purpose'] === 'demo') {
+            return $this->createDemo($p['data']);
+        }
         if ($p['purpose'] === 'buy') {
             return $this->createOrder($p['data'], fn (string $msg) => view('site.message', ['title' => 'We could not place the order', 'lines' => [$msg], 'action' => ['Back to Buy', url('/buy')]]));
         }
@@ -214,6 +218,59 @@ final class SiteController extends Controller
             . PlatformSettings::get('trial_days') . ' days.</p><p>Sign in: <a href="' . e(Workspaces::consoleUrl($company)) . '">' . e(Workspaces::consoleUrl($company)) . '</a> with ' . e($d['email']) . '.</p><p>— Ametecs India</p>');
         return view('site.message', ['title' => 'Your trial is ready', 'lines' => ["Workspace: {$company->slug}", 'Sign in with ' . $d['email'] . ' and the password you chose.',
             'Next: add your team under Groups & people, then approve their phones under Devices.'], 'action' => ['Open my console', Workspaces::consoleUrl($company)]]);
+    }
+
+    /** GET /explore-demo: the demo sign-up page (city decides the team, customers and recordings the demo shows). */
+    public function exploreDemo()
+    {
+        return view('site.explore-demo', ['cities' => \App\Services\Demo\DemoCities::options()]);
+    }
+
+    /** POST /explore-demo: details → e-mail code → demo workspace built for the chosen city → signed in to the console. */
+    public function demo(Request $r)
+    {
+        if ($r->filled('website')) {
+            return redirect('/thank-you');
+        }
+        $d = $r->validate(['name' => 'required|string|max:150', 'business' => 'required|string|max:150', 'mobile' => ['required', 'string', 'max:20', 'regex:/^[+0-9 ()-]{10,20}$/'],
+            'email' => 'required|email|max:190', 'address' => 'required|string|max:300', 'city' => ['required', \Illuminate\Validation\Rule::in(array_keys(\App\Services\Demo\DemoCities::CITIES))],
+            'password' => ['required', 'string', 'max:200', 'confirmed', \Illuminate\Validation\Rules\Password::defaults()], 'terms' => 'accepted'],
+            ['city.in' => 'Choose your city (or the nearest one) from the list.', 'mobile.regex' => 'Enter a 10-digit mobile number.']);
+        $d['email'] = strtolower($d['email']);
+        $back = fn (string $msg) => back()->withInput($r->except(['password', 'password_confirmation']))->withErrors(['demo' => $msg]);
+        if ($mine = Company::query()->whereNotNull('demo')->where('demo->email', $d['email'])->first()) {
+            return view('site.message', ['title' => 'You already have a demo', 'lines' => ["Your demo for {$mine->name} is ready to use. Sign in with {$d['email']}.",
+                'Forgot the password? Use "Forgot password" on the sign-in page.'], 'action' => ['Open my demo', Workspaces::consoleUrl($mine)]]);
+        }
+        return $this->startOtp('demo', ['password' => bcrypt($d['password'])] + \Illuminate\Support\Arr::except($d, ['password', 'password_confirmation', 'terms']), $d['email'], 'your ROVEXY demo', $back);
+    }
+
+    /** After the e-mail code: build the demo, sign the client straight in, tell sales. */
+    private function createDemo(array $d)
+    {
+        try {
+            $company = \App\Services\Demo\DemoWorkspace::register($d);
+        } catch (DomainException $e) {
+            return view('site.message', ['title' => 'We could not open the demo', 'lines' => [$e->getMessage()], 'action' => ['Back to the form', url('/explore-demo')]]);
+        }
+        $city = \App\Services\Demo\DemoCities::get($d['city'])[1];
+        Lead::query()->create(['name' => $d['name'], 'company' => $d['business'], 'email' => $d['email'], 'phone' => $d['mobile'], 'source' => 'demo', 'status' => 'new',
+            'message' => "Opened a demo ({$city}). Address: {$d['address']}"]);
+        if ($to = PlatformSettings::get('seller_email')) {
+            Sales::send($to, "New ROVEXY demo — {$d['business']} ({$city})", '<p>' . collect(['Name' => $d['name'], 'Business' => $d['business'], 'Mobile' => $d['mobile'],
+                'E-mail' => $d['email'], 'Address' => $d['address'], 'City' => $city, 'Console' => Workspaces::consoleUrl($company)])
+                ->map(fn ($v, $k) => '<b>' . e($k) . ':</b> ' . e((string) $v))->implode('<br>') . '</p>');
+        }
+        Sales::send($d['email'], 'Your ROVEXY demo is ready', '<p>Dear ' . e($d['name']) . ',</p><p>Your ROVEXY demo for <b>' . e($d['business']) . '</b> is ready, with a sample team and customers in '
+            . e($city) . '.</p><p>Sign in: <a href="' . e(Workspaces::consoleUrl($company)) . '">' . e(Workspaces::consoleUrl($company)) . '</a> with ' . e($d['email']) . ' and the password you chose.</p><p>— Ametecs India</p>');
+        app(\App\Support\CurrentCompany::class)->run($company, function () {
+            $admin = \App\Models\User::query()->where('employee_code', 'admin')->firstOrFail();
+            \Illuminate\Support\Facades\Auth::guard('web')->login($admin);
+            request()->session()->regenerate();
+            request()->session()->put(['auth_started_at' => time(), 'mfa_verified_at' => time()]);   // the e-mail code was the second factor
+            \App\Support\Audit::record('admin.login', $admin, ['via' => 'demo_signup']);
+        });
+        return redirect(Workspaces::consoleUrl($company));
     }
 
     public function buy(Request $r)

@@ -8,14 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
-/** Tenant root. Not itself tenant-scoped. */
+/** Tenant root. Not itself tenant-scoped. `demo` is set only on demo client workspaces (DemoWorkspace). */
 class Company extends Model
 {
     protected $fillable = ['slug', 'name', 'status', 'timezone', 'default_country', 'amapi_enterprise', 'settings', 'billing_email', 'billing_phone', 'gstin', 'state_code', 'address', 'setup_fee_paid'];
 
     protected function casts(): array
     {
-        return ['settings' => 'array'];
+        return ['settings' => 'array', 'demo' => 'array'];
     }
 
     public function domains(): HasMany

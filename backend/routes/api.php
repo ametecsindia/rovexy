@@ -40,6 +40,12 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::put('auth/password', [$auth, 'password'])->middleware(['platform', 'throttle:admin-login']);
     Route::get('dashboard', [$c, 'dashboard'])->middleware('platform:dashboard');
     Route::get('companies', [$c, 'companies'])->middleware('platform:companies');
+    $dc = \App\Http\Controllers\Platform\DemoController::class;   // Demo Clients ("Explore Demo" registrations)
+    Route::get('demo-clients', [$dc, 'index'])->middleware('platform:companies');
+    Route::get('demo-clients/{id}', [$dc, 'show'])->whereNumber('id')->middleware('platform:companies');
+    Route::get('demo-clients/{id}/slips/{payment}', [$dc, 'slip'])->whereNumber(['id', 'payment'])->middleware('platform:companies');
+    Route::post('demo-clients/{id}/reset', [$dc, 'reset'])->whereNumber('id')->middleware(['platform:companies', 'throttle:10,1']);
+    Route::delete('demo-clients/{id}', [$dc, 'destroy'])->whereNumber('id')->middleware('platform:companies');
     Route::post('companies', [$c, 'createCompany'])->middleware('platform:companies');
     Route::post('companies/{id}/status', [$c, 'setCompanyStatus'])->whereNumber('id')->middleware('platform:companies');
     Route::get('companies/{id}/admins', [$c, 'companyAdmins'])->whereNumber('id')->middleware('platform:companies');

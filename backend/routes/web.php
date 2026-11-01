@@ -53,11 +53,13 @@ Route::middleware('central')->group(function () {
     // Public website: marketing page, free trial, buy → Razorpay, invoices.
     Route::get('/', [SiteController::class, 'home']);
     Route::get('/buy', [SiteController::class, 'buy']);
+    Route::get('/explore-demo', [SiteController::class, 'exploreDemo']);   // demo client sign-up (DemoWorkspace)
     // Live demo of the Android app (static page in public/live-demo; sample data, no server calls).
     Route::get('/demo', fn () => response()->file(public_path('live-demo/index.html'), ['Cache-Control' => 'no-cache']));
     Route::middleware('throttle:site')->group(function () {
         Route::post('/enquiry', [SiteController::class, 'enquiry']);
         Route::post('/trial', [SiteController::class, 'trial']);
+        Route::post('/explore-demo', [SiteController::class, 'demo']);
         Route::post('/trial/verify', [SiteController::class, 'verifyTrial']);
         Route::post('/verify-email', [SiteController::class, 'verifyTrial']);
         Route::post('/verify-email/resend', [SiteController::class, 'resendOtp']);
@@ -72,6 +74,6 @@ Route::middleware('central')->group(function () {
     Route::get('/{page}', [SiteController::class, 'page'])->whereIn('page', ['thank-you', 'privacy', 'terms', 'refund', 'delivery', 'contact']);
     Route::get('/robots.txt', fn () => response("User-agent: *\nDisallow: /admin\nDisallow: /super\nDisallow: /accounts\nDisallow: /w/\nDisallow: /password\nDisallow: /pay/\nDisallow: /api/\nSitemap: " . url('/sitemap.xml') . "\n", 200, ['Content-Type' => 'text/plain']));
     Route::get('/sitemap.xml', fn () => response('<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        . collect(['/', '/demo', '/buy', '/contact', '/privacy', '/terms', '/refund', '/delivery'])->map(fn ($p) => '<url><loc>' . e(url($p)) . '</loc></url>')->implode('')
+        . collect(['/', '/demo', '/explore-demo', '/buy', '/contact', '/privacy', '/terms', '/refund', '/delivery'])->map(fn ($p) => '<url><loc>' . e(url($p)) . '</loc></url>')->implode('')
         . '</urlset>', 200, ['Content-Type' => 'application/xml']));
 });

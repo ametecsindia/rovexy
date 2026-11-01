@@ -55,7 +55,7 @@ final class ConsoleController extends Controller
         $active = fn () => Licence::query()->where('status', 'active');
         $revenue = fn (Carbon $from) => (float) SalesOrder::query()->where('status', 'paid')->where('paid_at', '>=', $from->copy()->utc())->sum('amount');   // Indian month / FY boundaries
         return response()->json([
-            'companies' => Company::query()->count(),
+            'companies' => Company::query()->whereNull('demo')->count(),
             'licences_active' => $active()->whereIn('kind', ['subscription', 'perpetual'])->where(fn ($q) => $q->whereNull('expires_at')->orWhere('expires_at', '>', now()))->count(),
             'onprem_active' => $active()->where('deployment', 'onprem')->whereIn('kind', ['subscription', 'perpetual'])->count(),
             'amc_due_30d' => $active()->where('kind', 'perpetual')->whereBetween('amc_expires_at', [now(), now()->addDays(30)])->count(),
@@ -78,7 +78,7 @@ final class ConsoleController extends Controller
     public function companies(Request $r)
     {
         $q = trim((string) $r->query('q'));
-        $companies = Company::query()->when($q !== '', fn ($w) => $w->where(fn ($x) => $x->where('name', 'like', "%{$q}%")->orWhere('slug', 'like', "%{$q}%")))
+        $companies = Company::query()->whereNull('demo')->when($q !== '', fn ($w) => $w->where(fn ($x) => $x->where('name', 'like', "%{$q}%")->orWhere('slug', 'like', "%{$q}%")))
             ->orderBy('name')->paginate(50);
         $ids = $companies->pluck('id');
         $users = DB::table('users')->whereIn('company_id', $ids)->where('status', 'active')->groupBy('company_id')->selectRaw('company_id, COUNT(*) n')->pluck('n', 'company_id');
@@ -625,7 +625,7 @@ final class ConsoleController extends Controller
     {
         $d = $r->validate(['seller_name' => 'string|max:150', 'seller_address' => 'nullable|string|max:300', 'seller_gstin' => 'nullable|string|max:15',
             'seller_state' => 'digits:2', 'seller_email' => 'nullable|email|max:190', 'seller_phone' => 'nullable|string|max:20', 'invoice_prefix' => 'string|max:8|regex:/^[A-Z0-9]+$/',
-            'gst_rate' => 'numeric|min:0|max:40', 'trial_days' => 'integer|min:1|max:365', 'trial_users' => 'integer|min:1|max:100', 'grace_days' => 'integer|min:0|max:90',
+            'gst_rate' => 'numeric|min:0|max:40', 'trial_days' => 'integer|min:1|max:365', 'trial_users' => 'integer|min:1|max:100', 'grace_days' => 'integer|min:0|max:90', 'demo_calling_from' => ['nullable', 'string', 'max:40', Rule::exists('companies', 'slug')->whereNull('demo')],
             'razorpay_key_id' => 'nullable|string|max:60', 'razorpay_key_secret' => 'nullable|string|max:120', 'razorpay_webhook_secret' => 'nullable|string|max:120',
             'site_announcement' => 'nullable|string|max:200', 'site_hero_title' => 'nullable|string|max:120', 'site_hero_text' => 'nullable|string|max:400',
             'site_meta_description' => 'nullable|string|max:300', 'reminders_enabled' => 'in:0,1', 'trial_verify_email' => 'in:0,1', 'staff_mfa_required' => 'in:0,1',

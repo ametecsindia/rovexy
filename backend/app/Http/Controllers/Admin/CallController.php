@@ -53,7 +53,7 @@ final class CallController extends Controller
         if ($c->recording?->legal_hold) {
             return response()->json(['message' => 'This recording is on legal hold and cannot be deleted.', 'code' => 'legal_hold'], 409);
         }
-        if ($c->recording?->object_key) {
+        if ($c->recording?->object_key && !\App\Services\Demo\DemoWorkspace::sharedKey($c->recording->object_key)) {   // demo recordings are shared by every demo
             Storage::disk(config('ammp.recordings.disk'))->delete($c->recording->object_key);
         }
         Audit::record('call.deleted', $c, ['call_id' => $c->id, 'customer_id' => $c->customer_id, 'user_id' => $c->user_id, 'had_recording' => (bool) $c->recording]);

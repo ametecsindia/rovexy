@@ -24,6 +24,7 @@ final class PlatformSettings
         'gst_rate' => '18',
         'trial_days' => '14',
         'trial_users' => '5',
+        'demo_calling_from' => '',       // demo clients: copy Click2Call / Smart31 calling set-up from this workspace (slug); blank = demos have no calling numbers
         'grace_days' => '7',
         // per-user pricing (Pricing): cloud rates in the plan ladders are the ANNUAL-billing ₹/user/month
         'price_annual_discount_pct' => '25',       // annual is this much cheaper than quarterly (the undiscounted base)

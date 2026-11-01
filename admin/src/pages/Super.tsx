@@ -18,6 +18,7 @@ const STATES: Record<string, string> = { '36': 'Telangana', '37': 'Andhra Prades
 const MENU: { to: string; module: string; label: string; icon: string }[] = [
   { to: '/', module: 'dashboard', label: 'Dashboard', icon: 'home' },
   { to: '/companies', module: 'companies', label: 'Companies', icon: 'people' },
+  { to: '/demo-clients', module: 'companies', label: 'Demo Clients', icon: 'contacts' },
   { to: '/licences', module: 'licences', label: 'Licences', icon: 'shield' },
   { to: '/orders', module: 'orders', label: 'Orders & payments', icon: 'chart' },
   { to: '/billing', module: 'licences', label: 'Calling add-ons, deposits & AMC', icon: 'chart' },
@@ -64,6 +65,7 @@ export function SuperApp() {
         <Routes>
           {can('dashboard') && <Route path="/" element={<Dashboard />} />}
           {can('companies') && <Route path="/companies" element={<Companies can={can('companies', 'manage')} isSuper={me.role === 'super'} />} />}
+          {can('companies') && <Route path="/demo-clients" element={<DemoClients can={can('companies', 'manage')} />} />}
           {can('licences') && <Route path="/licences" element={<Licences can={can('licences', 'manage')} isSuper={me.role === 'super'} />} />}
           {can('orders') && <Route path="/orders" element={<Orders can={can('orders', 'manage')} />} />}
           {can('licences') && <Route path="/billing" element={<BillingOverview />} />}
@@ -160,6 +162,96 @@ function Companies({ can, isSuper }: { can: boolean; isSuper: boolean }) {
       {open !== null && <CompanyDetail id={open} can={can} isSuper={isSuper} onClose={() => { setOpen(null); void list.reload(); }} />}
       {suspend && <SuspendModal name={suspend.name} busy={a.busy} onClose={() => setSuspend(null)} onConfirm={(r) => void setStatus(suspend, 'suspended', r)} />}
     </Page>
+  );
+}
+
+// ── Demo Clients ("Explore Demo" on the website) ──
+const DEMO_STATE: Record<string, [string, string]> = { added: ['approved', 'added by client'], changed: ['pending', 'changed by client'], demo: ['muted', 'demo data'] };
+const DemoState = ({ s }: { s: string }) => <Badge value={DEMO_STATE[s]?.[0] ?? 'muted'} label={DEMO_STATE[s]?.[1] ?? s} />;
+const when = (iso?: string | null) => (iso ? fmtDate(iso) : '—');
+
+function DemoClients({ can }: { can: boolean }) {
+  const [q, setQ] = useState('');
+  const [search, setSearch] = useState('');
+  const [city, setCity] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => { const t = setTimeout(() => setSearch(q), 350); return () => clearTimeout(t); }, [q]);
+  useEffect(() => setPage(1), [search, city]);
+  const list = useAsync(() => get(`/demo-clients${qs({ q: search, city, page })}`), [search, city, page]);
+  const [open, setOpen] = useState<number | null>(null);
+  return (
+    <Page title="Demo Clients" subtitle="Prospects who opened a demo from Explore Demo on the website, with a ready team and customers from their city">
+      <ErrorBox error={list.error} />
+      <Card>
+        <div className="filters">
+          <input type="search" placeholder="Search name, business, e-mail or mobile" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Search demo clients" />
+          <select value={city} onChange={(e) => setCity(e.target.value)} aria-label="City"><option value="">All cities</option>{Object.entries(list.data?.cities ?? {}).map(([k, v]) => <option key={k} value={k}>{v as string}</option>)}</select>
+        </div>
+        <Table rows={list.data?.data} error={list.error} onRow={(c: any) => setOpen(c.id)} empty="No demo clients yet. They appear here when someone uses Explore Demo on the website." columns={[
+          { key: 'business', label: 'Client', render: (c: any) => <><strong>{c.business}</strong><div className="muted small">{c.contact_name} · {c.email} · {c.mobile}</div></> },
+          { key: 'city_name', label: 'City' },
+          { key: 'registered_at', label: 'Registered', render: (c: any) => <>{day(c.registered_at)}<div className="muted small">{c.resets ? `cleared ${c.resets}× · last ${day(c.last_reset_at)}` : 'original data'}</div></> },
+          { key: 'last_active_at', label: 'Last active', render: (c: any) => c.last_active_at ? when(c.last_active_at) : <span className="muted">not yet</span> },
+          { key: 'changes', label: 'Client changes', align: 'right', render: (c: any) => c.changes ? <strong>{c.changes}</strong> : <span className="muted">none</span> },
+          { key: 'customers', label: 'Customers', align: 'right' },
+          { key: 'act', label: '', render: (c: any) => <a className="ghost small" href={c.console_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Console</a> },
+        ]} />
+        <Pager meta={list.data} onPage={setPage} />
+      </Card>
+      {open !== null && <DemoDetail id={open} can={can} onClose={() => { setOpen(null); void list.reload(); }} />}
+    </Page>
+  );
+}
+
+const DEMO_TABS = [['changes', 'Changes'], ['activity', 'Activity'], ['people', 'Employees'], ['customers', 'Customers'], ['numbers', 'Mobile numbers'], ['payments', 'Payments & slips']] as const;
+
+function DemoDetail({ id, can, onClose }: { id: number; can: boolean; onClose: () => void }) {
+  const d = useAsync(() => get(`/demo-clients/${id}`), [id]);
+  const [tab, setTab] = useState<typeof DEMO_TABS[number][0]>('changes');
+  const [only, setOnly] = useState(false);
+  const [confirm, setConfirm] = useState<'' | 'reset' | 'delete'>('');
+  const [typed, setTyped] = useState('');
+  const a = useAction();
+  const x = d.data;
+  const mine = (rows: any[] | undefined) => (only ? rows?.filter((r) => r.state !== 'demo') : rows);
+  const reset = () => a.run(async () => { await post(`/demo-clients/${id}/reset`); toast('Demo data cleared — back to the original dataset'); setConfirm(''); await d.reload(); });
+  const remove = () => a.run(async () => { await del(`/demo-clients/${id}${qs({ confirm: typed })}`); toast(`${x.info.business} deleted`); onClose(); });
+  return (
+    <Modal title={x ? x.info.business : 'Demo client'} onClose={onClose}>
+      <ErrorBox error={d.error ?? a.error} />
+      {!x ? <p className="muted">Loading…</p> : <>
+        <p className="small">{x.info.contact_name} · <a href={`mailto:${x.info.email}`}>{x.info.email}</a> · <a href={`tel:${x.info.mobile}`}>{x.info.mobile}</a><br />
+          <span className="muted">{x.info.address} · demo city <b>{x.info.city_name}</b> · registered {when(x.info.registered_at)}{x.info.resets ? ` · cleared ${x.info.resets}× (last ${when(x.info.last_reset_at)})` : ''}</span></p>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <a className="button secondary" href={x.info.console_url} target="_blank" rel="noreferrer">Open console ↗</a>
+          {can && <button className="secondary" onClick={() => setConfirm('reset')}>Clear Demo Data</button>}
+          {can && <button className="danger" onClick={() => { setTyped(''); setConfirm('delete'); }}>Delete demo client</button>}
+        </div>
+        {confirm === 'reset' && <div className="card">
+          <Notice tone="warn">Removes everything {x.info.business} added or changed — employees, customers, numbers, payments, slips, notes — and restores the original {x.info.city_name} demo data. Their sign-in stays the same. Other demos and real clients are not touched.</Notice>
+          <div className="row"><button className="danger" disabled={a.busy} onClick={() => void reset()}>{a.busy ? 'Clearing…' : 'Yes, clear demo data'}</button><button className="secondary" onClick={() => setConfirm('')}>Cancel</button></div></div>}
+        {confirm === 'delete' && <div className="card">
+          <Notice tone="bad">Deletes this demo workspace and everything in it, for good. The client can no longer sign in. Type <code>{x.info.slug}</code> to confirm.</Notice>
+          <div className="row"><input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={x.info.slug} aria-label="Workspace name" />
+            <button className="danger" disabled={a.busy || typed !== x.info.slug} onClick={() => void remove()}>Delete permanently</button><button className="secondary" onClick={() => setConfirm('')}>Cancel</button></div></div>}
+        <div className="tabs" role="tablist">{DEMO_TABS.map(([k, l]) => <button key={k} role="tab" aria-selected={tab === k} className={`tab${tab === k ? ' on' : ''}`} onClick={() => setTab(k)}>{l}</button>)}</div>
+        {['people', 'customers', 'numbers', 'payments'].includes(tab) && <label className="row small" style={{ gap: 6, marginBottom: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={only} onChange={(e) => setOnly(e.target.checked)} />Only what the client added or changed</label>}
+        {tab === 'changes' && <Table rows={x.changes.map((r: any, i: number) => ({ ...r, id: i }))} columns={[{ key: 'kind', label: 'Records' },
+          { key: 'added', label: 'Added by client', align: 'right', render: (r: any) => r.added || <span className="muted">0</span> }, { key: 'changed', label: 'Demo records changed', align: 'right', render: (r: any) => r.changed || <span className="muted">0</span> }]} />}
+        {tab === 'activity' && <Table rows={x.activity.map((r: any, i: number) => ({ ...r, id: i }))} empty="No activity yet: the client has not changed anything since the demo was built." columns={[
+          { key: 'at', label: 'When', render: (r: any) => when(r.at) }, { key: 'who', label: 'Who' }, { key: 'what', label: 'What' }, { key: 'subject', label: 'Record', render: (r: any) => r.subject ?? '—' }]} />}
+        {tab === 'people' && <Table rows={mine(x.people)} columns={[{ key: 'name', label: 'Name', render: (u: any) => <><strong>{u.name}</strong><div className="muted small">{u.employee_code}{u.email ? ` · ${u.email}` : ''}</div></> },
+          { key: 'phone', label: 'Mobile' }, { key: 'roles', label: 'Role' }, { key: 'teams', label: 'Team' }, { key: 'status', label: 'Status', render: (u: any) => <Badge value={u.status} /> }, { key: 'state', label: '', render: (u: any) => <DemoState s={u.state} /> }]} />}
+        {tab === 'customers' && <Table rows={mine(x.customers)} columns={[{ key: 'name', label: 'Customer', render: (c: any) => <><strong>{c.name}</strong><div className="muted small">{c.ref} · {c.portfolio ?? '—'}</div></> },
+          { key: 'phone', label: 'Mobile' }, { key: 'area', label: 'Area' }, { key: 'assigned_to', label: 'Assigned to' }, { key: 'status', label: 'Status', render: (c: any) => <Badge value={c.status} /> }, { key: 'state', label: '', render: (c: any) => <DemoState s={c.state} /> }]} />}
+        {tab === 'numbers' && <Table rows={mine(x.numbers)?.map((n: any, i: number) => ({ ...n, id: i }))} columns={[{ key: 'number', label: 'Number' }, { key: 'kind', label: 'Type' }, { key: 'owner', label: 'Belongs to' }, { key: 'state', label: '', render: (n: any) => <DemoState s={n.state} /> }]} />}
+        {tab === 'payments' && <Table rows={mine(x.payments)} columns={[{ key: 'paid_on', label: 'Paid on', render: (p: any) => day(p.paid_on) }, { key: 'customer', label: 'Customer' },
+          { key: 'amount', label: 'Amount', align: 'right', render: (p: any) => inr(p.amount) }, { key: 'mode', label: 'Mode', render: (p: any) => <>{p.mode}{p.ref ? <div className="muted small">{p.ref}</div> : null}</> },
+          { key: 'by', label: 'By' }, { key: 'status', label: 'Check', render: (p: any) => <Badge value={p.status} /> },
+          { key: 'slip', label: 'Slip', render: (p: any) => p.slip ? <a href={`/api/super/demo-clients/${id}/slips/${p.id}`} target="_blank" rel="noreferrer">View</a> : <span className="muted">—</span> },
+          { key: 'state', label: '', render: (p: any) => <DemoState s={p.state} /> }]} />}
+      </>}
+    </Modal>
   );
 }
 
@@ -879,7 +971,7 @@ function Settings() {
   const [tested, setTested] = useState('');
   const t = useAction();
   const set = (k: string, v: string) => { setSaved(false); setF((x: any) => ({ ...x, [k]: v })); };
-  const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days',
+  const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days', 'demo_calling_from',
     'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
     'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'setup_on_cloud', 'amc_pct', 'quote_validity_days',
     'price_c2c_user', 'price_smart31_user', 'deposit_per_fos'];
@@ -902,6 +994,7 @@ function Settings() {
         </div></Card>
         <Card title="Trials and expiry"><div className="form-grid">
           <TrialDays value={f.trial_days ?? ''} onChange={(v) => set('trial_days', v)} />{box('trial_users', 'Users in a trial', undefined, 'number')}{box('grace_days', 'Grace after expiry (days)', 'Phones keep working this long after a paid package ends', 'number')}
+          {box('demo_calling_from', 'Demo calls use the numbers of workspace', 'Workspace name (slug) whose Click2Call / Smart31 set-up is copied into each new or reset demo, so demo calls are real calls. Blank = demos have no calling numbers.')}
         </div>
           {s.data.mail_configured
             ? <p className="muted small">New trials and website purchases confirm the buyer's e-mail with a 6-digit code first.</p>
