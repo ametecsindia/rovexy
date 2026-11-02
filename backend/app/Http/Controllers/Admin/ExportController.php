@@ -27,6 +27,7 @@ final class ExportController extends Controller
     public function pack(Request $r)
     {
         $f = $this->filters($r);
+        abort_unless(class_exists(\ZipArchive::class), 503, 'ZIP files cannot be made on this server: the PHP "zip" extension is switched off. Ask your administrator to enable it (php.ini: extension=zip).');
         @set_time_limit(600);
         // Recordings and slips only for people who may download them; the CSVs are always in the pack.
         $media = $r->user()->hasPermission('recordings.download') && $r->boolean('media', true);

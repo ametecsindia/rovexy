@@ -65,6 +65,7 @@ final class RecordingExportController extends Controller
     public function zip(Request $r)
     {
         $f = $this->filters($r);
+        abort_unless(class_exists(\ZipArchive::class), 503, 'ZIP files cannot be made on this server: the PHP "zip" extension is switched off. Ask your administrator to enable it (php.ini: extension=zip).');
         @set_time_limit(900);
         $disk = Storage::disk(config('ammp.recordings.disk'));
         $tz = app(CurrentCompany::class)->get()->timezone ?: 'Asia/Kolkata';
