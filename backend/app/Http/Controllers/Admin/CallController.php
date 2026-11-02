@@ -86,7 +86,7 @@ final class CallController extends Controller
     {
         $rec = $this->availableRecording($r, $id);
         Audit::record('recording.downloaded', $rec, ['call_id' => $rec->call_id, 'sha256' => $rec->sha256]);
-        return response()->json(['url' => $this->temporaryUrl($rec, true), 'sha256' => $rec->sha256, 'filename' => "call-{$rec->call_id}.{$rec->format}"]);
+        return response()->json(['url' => $this->temporaryUrl($rec, true), 'sha256' => $rec->sha256, 'filename' => self::fileName($rec)]);
     }
 
     public function retry(Request $r, int $id)
@@ -107,7 +107,7 @@ final class CallController extends Controller
         $disk = Storage::disk(config('ammp.recordings.disk'));
         $headers = ['Content-Type' => $rec->mime, 'Cache-Control' => 'private, no-store', 'X-Content-Type-Options' => 'nosniff'];
         return $r->boolean('dl')
-            ? $disk->download($rec->object_key, "call-{$rec->call_id}.{$rec->format}", $headers)
+            ? $disk->download($rec->object_key, self::fileName($rec), $headers)
             : $disk->response($rec->object_key, null, $headers);
     }
 
@@ -136,6 +136,13 @@ final class CallController extends Controller
         return response()->json(['ok' => true]);
     }
 
+    /** The company's file-name format (Reports → Recording export), e.g. HDFC_PL123_20261031_143205.mp3. */
+    private static function fileName(Recording $rec): string
+    {
+        $call = \App\Models\Call::query()->find($rec->call_id);
+        return $call ? \App\Services\RecordingName::for($call, $rec->format) : "call-{$rec->call_id}.{$rec->format}";
+    }
+
     private function availableRecording(Request $r, int $callId): Recording
     {
         $c = $this->scoped($r)->findOrFail($callId);
@@ -147,7 +154,7 @@ final class CallController extends Controller
         $ttl = now()->addSeconds((int) config('ammp.recordings.playback_url_ttl'));
         $disk = Storage::disk(config('ammp.recordings.disk'));
         if (config('filesystems.disks.' . config('ammp.recordings.disk') . '.driver') === 's3') {
-            return $disk->temporaryUrl($rec->object_key, $ttl, $download ? ['ResponseContentDisposition' => "attachment; filename=call-{$rec->call_id}.{$rec->format}"] : []);
+            return $disk->temporaryUrl($rec->object_key, $ttl, $download ? ['ResponseContentDisposition' => 'attachment; filename="' . self::fileName($rec) . '"'] : []);
         }
         // The browser's <audio> loads this URL without the X-Workspace header: name the workspace in the (signed) URL, or
         // /w/<slug> consoles got "company_unresolved" and the player showed "no supported source".

@@ -20,6 +20,7 @@ import { IntegrationsPage } from './pages/Integrations';
 import { PaymentsPage } from './pages/Payments';
 import { AllocationPage } from './pages/Allocation';
 import { PortfolioReportsPage } from './pages/PortfolioReports';
+import { RecordingExportPage } from './pages/RecordingExport';
 import { AddressReportPage } from './pages/AddressReport';
 import { LicencePage } from './pages/Licence';
 import { FieldPlanningPage } from './pages/FieldPlanning';
@@ -48,6 +49,7 @@ export const NAV: NavItem[] = [
   { to: '/policies', icon: 'shield', label: 'Policies', perm: 'policies.view', group: 'Devices' },
   { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: 'Reports' },
   { to: '/reports', icon: 'upload', label: 'Reports & extracts', perm: 'reports.export', group: 'Reports' },
+  { to: '/recording-export', icon: 'upload', label: 'Recording export', perm: 'recordings.download', group: 'Reports' },
   { to: '/address-report', icon: 'pin', label: 'Address & reachability', perm: 'customers.view', group: 'Reports' },
   { to: '/location', icon: 'pin', label: 'Status & location', perm: 'location.view', group: 'Supervision' },
   { to: '/chat', icon: 'chat', label: 'Messages', perm: 'chat.use', group: 'Supervision' },
@@ -308,6 +310,7 @@ export function App() {
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/licence" element={<LicencePage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/recording-export" element={<RecordingExportPage />} />
           <Route path="/branding" element={<BrandingPage />} />
           <Route path="/retention" element={<RetentionPage />} />
           <Route path="/audit" element={<AuditPage />} />

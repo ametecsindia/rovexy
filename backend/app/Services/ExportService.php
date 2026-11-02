@@ -81,12 +81,19 @@ final class ExportService
         $skipped = 0;
         if ($withMedia) {
             $recDisk = Storage::disk(config('ammp.recordings.disk'));
-            foreach ($this->callQuery()->whereHas('recording', fn ($q) => $q->where('status', 'available'))->with('recording')->lazyById(500) as $c) {
+            $template = \App\Services\RecordingName::template();
+            $used = [];
+            foreach ($this->callQuery()->whereHas('recording', fn ($q) => $q->where('status', 'available'))->with(['recording', 'customer', 'user', 'disposition'])->lazyById(500) as $c) {
                 if ($files >= self::PACK_MAX_FILES) { $skipped++; continue; }
                 $r = $c->recording;
                 $data = rescue(fn () => $recDisk->get($r->object_key), null, false);
                 if ($data === null) { $skipped++; continue; }
-                $add("recordings/call-{$c->uuid}.{$r->format}", $data);
+                $base = $name = \App\Services\RecordingName::for($c, null, $template);   // the company's file-name format
+                for ($i = 2; isset($used[strtolower($name)]); $i++) {
+                    $name = "{$base}_{$i}";
+                }
+                $used[strtolower($name)] = true;
+                $add("recordings/{$name}.{$r->format}", $data);
                 $files++;
             }
             $slips = Storage::disk('company_files');
