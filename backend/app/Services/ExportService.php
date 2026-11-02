@@ -81,14 +81,13 @@ final class ExportService
         $skipped = 0;
         if ($withMedia) {
             $recDisk = Storage::disk(config('ammp.recordings.disk'));
-            $template = \App\Services\RecordingName::template();
             $used = [];
             foreach ($this->callQuery()->whereHas('recording', fn ($q) => $q->where('status', 'available'))->with(['recording', 'customer', 'user', 'disposition'])->lazyById(500) as $c) {
                 if ($files >= self::PACK_MAX_FILES) { $skipped++; continue; }
                 $r = $c->recording;
                 $data = rescue(fn () => $recDisk->get($r->object_key), null, false);
                 if ($data === null) { $skipped++; continue; }
-                $base = $name = \App\Services\RecordingName::for($c, null, $template);   // the company's file-name format
+                $base = $name = \App\Services\RecordingName::for($c);   // the portfolio's file-name format
                 for ($i = 2; isset($used[strtolower($name)]); $i++) {
                     $name = "{$base}_{$i}";
                 }

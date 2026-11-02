@@ -21,6 +21,7 @@ import { PaymentsPage } from './pages/Payments';
 import { AllocationPage } from './pages/Allocation';
 import { PortfolioReportsPage } from './pages/PortfolioReports';
 import { RecordingExportPage } from './pages/RecordingExport';
+import { RecordingFormatsPage } from './pages/RecordingFormats';
 import { AddressReportPage } from './pages/AddressReport';
 import { LicencePage } from './pages/Licence';
 import { FieldPlanningPage } from './pages/FieldPlanning';
@@ -45,6 +46,7 @@ export const NAV: NavItem[] = [
   { to: '/allocation', icon: 'people', label: 'Assignment', perm: 'customers.assign', group: 'Customers' },
   { to: '/field-planning', icon: 'pin', label: 'Field planning (circles & routes)', perm: 'customers.assign', group: 'Customers' },
   { to: '/customers', icon: 'contacts', label: 'Customers', perm: 'customers.view', group: 'Customers' },
+  { to: '/recording-formats', icon: 'settings', label: 'Recording file names', perm: 'customers.view', group: 'Customers' },
   { to: '/devices', icon: 'phone', label: 'Devices & approvals', perm: 'devices.view', group: 'Devices' },
   { to: '/policies', icon: 'shield', label: 'Policies', perm: 'policies.view', group: 'Devices' },
   { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: 'Reports' },
@@ -311,6 +313,7 @@ export function App() {
           <Route path="/licence" element={<LicencePage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/recording-export" element={<RecordingExportPage />} />
+          <Route path="/recording-formats" element={<RecordingFormatsPage />} />
           <Route path="/branding" element={<BrandingPage />} />
           <Route path="/retention" element={<RetentionPage />} />
           <Route path="/audit" element={<AuditPage />} />

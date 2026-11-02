@@ -63,8 +63,11 @@ final class CustomerController extends Controller
 
     public function upload(Request $r, ImportService $svc)
     {
-        $r->validate(['file' => 'required|file|max:' . (config('ammp.uploads.import_max_mb') * 1024), 'portfolio' => 'nullable|string|max:150']);
+        $r->validate(['file' => 'required|file|max:' . (config('ammp.uploads.import_max_mb') * 1024), 'portfolio' => 'nullable|string|max:150', 'recording_format' => 'nullable|string|max:16']);
         $job = $svc->upload($r->file('file'), $r->user(), $r->input('portfolio'));
+        if ($r->filled('recording_format') && \App\Services\RecordingName::find($r->input('recording_format'))) {
+            $job->forceFill(['recording_format' => $r->input('recording_format')])->save();
+        }
         return response()->json($job, 201);
     }
 
@@ -97,8 +100,12 @@ final class CustomerController extends Controller
 
     public function renameImport(Request $r, int $id)
     {
-        $data = $r->validate(['portfolio' => 'required|string|max:150']);
-        $this->job($r, $id)->forceFill(['portfolio' => trim($data['portfolio'])])->save();
+        $data = $r->validate(['portfolio' => 'sometimes|required|string|max:150', 'recording_format' => 'sometimes|nullable|string|max:16']);
+        if (array_key_exists('recording_format', $data) && $data['recording_format'] !== null && !\App\Services\RecordingName::find($data['recording_format'])) {
+            abort(422, 'Choose a recording file-name format from the list.');
+        }
+        $this->job($r, $id)->forceFill(array_filter(['portfolio' => isset($data['portfolio']) ? trim($data['portfolio']) : null], fn ($v) => $v !== null)
+            + (array_key_exists('recording_format', $data) ? ['recording_format' => $data['recording_format']] : []))->save();
         return response()->json(['ok' => true]);
     }
 
@@ -115,7 +122,7 @@ final class CustomerController extends Controller
         $jobs = ImportJob::query()->whereIn('id', $rows->pluck('last_import_id')->unique())->get()->keyBy('id');
         return response()->json($rows->groupBy('last_import_id')->map(function ($g, $id) use ($jobs, $teams) {
             $j = $jobs[$id] ?? null;
-            return ['id' => (int) $id, 'name' => $j?->portfolio ?: ($j ? pathinfo($j->original_name, PATHINFO_FILENAME) : "Import #{$id}"), 'file' => $j?->original_name,
+            return ['id' => (int) $id, 'name' => $j?->portfolio ?: ($j ? pathinfo($j->original_name, PATHINFO_FILENAME) : "Import #{$id}"), 'file' => $j?->original_name, 'recording_format' => $j?->recording_format,
                 'uploaded_at' => $j?->created_at, 'total' => (int) $g->sum('total'), 'unassigned' => (int) $g->sum('unassigned'),
                 'groups' => $g->map(fn ($x) => ['team_id' => $x->assigned_team_id, 'name' => $x->assigned_team_id ? ($teams[$x->assigned_team_id] ?? '?') : null,
                     'total' => (int) $x->total, 'unassigned' => (int) $x->unassigned])->values()];

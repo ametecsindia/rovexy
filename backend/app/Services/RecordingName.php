@@ -11,8 +11,10 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Company-defined file name for downloaded call recordings (Reports → Recording export), e.g. HDFC_AcmeAgency_PL123_20261031_143205.mp3.
- * Stored in companies.settings.recordings.filename = {parts: [{type: 'text', value} | {type: <field>, format?}], sep}.
+ * Company-defined file names for downloaded call recordings (Customers → Recording file names), e.g.
+ * HDFC_AcmeAgency_PL123_20261031_143205.mp3. A company keeps several named formats (one per bank, say):
+ * companies.settings.recordings = {formats: [{id, name, sep, parts: [{type: 'text', value} | {type: <field>, format?}]}], default: id}.
+ * Each portfolio (import_jobs.recording_format) picks one; customers added by hand and portfolios without one use the default.
  * Used by every recording download: one call, the bulk ZIP and the audit pack.
  */
 final class RecordingName
@@ -39,10 +41,60 @@ final class RecordingName
 
     public const DEFAULT = ['sep' => '_', 'parts' => [['type' => 'customer_ref'], ['type' => 'employee_code'], ['type' => 'date', 'format' => 'Ymd'], ['type' => 'time', 'format' => 'His']]];
 
-    /** The saved template, or the default one. */
+    /** Built-in format until the company saves its own. */
+    public const STANDARD_ID = 'standard';
+
+    /** @return list<array{id: string, name: string, sep: string, parts: list<array>}> (never empty) */
+    public static function formats(): array
+    {
+        $c = app(CurrentCompany::class)->get();
+        $list = (array) ($c?->setting('recordings.formats') ?? []);
+        if (!$list && ($old = $c?->setting('recordings.filename'))) {   // the single format saved before 2 Nov 2026
+            $list = [['id' => self::STANDARD_ID, 'name' => 'Standard'] + $old];
+        }
+        return $list ?: [['id' => self::STANDARD_ID, 'name' => 'Standard'] + self::DEFAULT];
+    }
+
+    public static function defaultId(): string
+    {
+        $ids = array_column(self::formats(), 'id');
+        $d = app(CurrentCompany::class)->get()?->setting('recordings.default');
+        return in_array($d, $ids, true) ? $d : $ids[0];
+    }
+
+    public static function find(?string $id): ?array
+    {
+        foreach (self::formats() as $f) {
+            if ($f['id'] === $id) {
+                return $f;
+            }
+        }
+        return null;
+    }
+
+    /** The default format's template (customers added by hand, portfolios without a format). */
     public static function template(): array
     {
-        return app(CurrentCompany::class)->get()?->setting('recordings.filename') ?: self::DEFAULT;
+        return self::find(self::defaultId());
+    }
+
+    /** The format of the call's portfolio, else the company default. */
+    public static function templateFor(Call $call): array
+    {
+        $cu = $call->relationLoaded('customer') ? $call->customer : $call->customer()->first();
+        $id = $cu?->last_import_id ? DB::table('import_jobs')->where('id', $cu->last_import_id)->value('recording_format') : null;
+        return ($id ? self::find($id) : null) ?? self::template();
+    }
+
+    /** Saves the whole list (the console sends one format at a time; the controller merges). */
+    public static function store(array $formats, string $default): void
+    {
+        $c = app(CurrentCompany::class)->get();
+        $s = $c->settings ?? [];
+        data_set($s, 'recordings.formats', array_values($formats));
+        data_set($s, 'recordings.default', $default);
+        unset($s['recordings']['filename']);
+        $c->forceFill(['settings' => $s])->save();
     }
 
     /** Validates and normalises a template from the console. */
@@ -69,7 +121,7 @@ final class RecordingName
     /** "HDFC_AcmeAgency_PL123_20261031_143205.mp3" for this call (without the extension when $ext is null). */
     public static function for(Call $call, ?string $ext = null, ?array $template = null): string
     {
-        $t = $template ?? self::template();
+        $t = $template ?? self::templateFor($call);
         $sep = $t['sep'];
         $values = array_map(fn ($p) => self::value($call, $p), $t['parts']);
         $values = array_filter(array_map(fn ($v) => self::safe((string) $v, $sep), $values), fn ($v) => $v !== '');

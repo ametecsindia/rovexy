@@ -34,8 +34,11 @@ export function ImportsPage() {
   const nav = useNavigate();
   const imports = useAsync(() => get('/imports'));
   const portfolios = useAsync(() => get<any[]>('/portfolios'));
+  const formats = useAsync(() => get<any>('/recording-formats'));
+  const fmtName = (id: string | null) => { const l = formats.data?.formats ?? []; return (l.find((f: any) => f.id === id) ?? l.find((f: any) => f.is_default))?.name; };
   const [job, setJob] = useState<any | null>(null);
   const [name, setName] = useState('');
+  const [recFormat, setRecFormat] = useState('');
   const [mapping, setMapping] = useState<Record<string, number | null>>({});
   const [onExisting, setOnExisting] = useState('update');
   const [preview, setPreview] = useState<any | null>(null);
@@ -52,7 +55,7 @@ export function ImportsPage() {
     return () => clearInterval(t);
   }, [job]);
 
-  const open = (j: any) => { setJob(j); setName(j.portfolio ?? ''); setMapping(j.mapping ?? {}); setPreview(null); };
+  const open = (j: any) => { setJob(j); setName(j.portfolio ?? ''); setRecFormat(j.recording_format ?? ''); setMapping(j.mapping ?? {}); setPreview(null); };
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const MAX_MB = 20;   // = config ammp.uploads.import_max_mb
   const upload = (file: File) => a.run(async () => {
@@ -62,10 +65,11 @@ export function ImportsPage() {
     const fd = new FormData();
     fd.append('file', file);
     if (name.trim()) fd.append('portfolio', name.trim());
+    if (recFormat) fd.append('recording_format', recFormat);
     open(await post('/imports', fd));
   });
   const check = () => a.run(async () => {
-    if (name.trim() && name.trim() !== job.portfolio) await api('PATCH', `/imports/${job.id}`, { portfolio: name.trim() });
+    if ((name.trim() && name.trim() !== job.portfolio) || (recFormat || null) !== (job.recording_format ?? null)) await api('PATCH', `/imports/${job.id}`, { ...(name.trim() ? { portfolio: name.trim() } : {}), recording_format: recFormat || null });
     setPreview((await post(`/imports/${job.id}/preview`, { mapping, on_existing: onExisting })).result);
     await post(`/imports/${job.id}/validate`);
     setJob(await get(`/imports/${job.id}`));
@@ -84,6 +88,13 @@ export function ImportsPage() {
                   <input value={renaming?.name ?? ''} onChange={(e) => setRenaming({ id: p.id, name: e.target.value })} maxLength={150} required aria-label="New portfolio name" autoFocus style={{ maxWidth: 240 }} />
                   <button type="submit" disabled={a.busy}>Save</button><button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button></form>
               : <><strong>{p.name}</strong>{can('customers.import') && <button type="button" className="ghost small" onClick={() => setRenaming({ id: p.id, name: p.name })} aria-label={`Rename ${p.name}`}>Rename</button>}<br /><small className="muted">{p.file} · {fmtDate(p.uploaded_at)}</small></> },
+          { key: 'recording_format', label: 'Recording file names', render: (p: any) => can('customers.import') && formats.data
+              ? <select value={p.recording_format ?? ''} aria-label={`Recording format for ${p.name}`} style={{ minWidth: 200 }} disabled={a.busy}
+                  onChange={(e) => void a.run(async () => { await api('PATCH', `/imports/${p.id}`, { recording_format: e.target.value || null }); await portfolios.reload(); })}>
+                  <option value="">Default ({fmtName(null)})</option>
+                  {formats.data.formats.map((f: any) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              : <span className="small">{fmtName(p.recording_format) ?? '—'}</span> },
           { key: 'total', label: 'Cases', align: 'right' },
           { key: 'unassigned', label: 'Not assigned', align: 'right', render: (p: any) => p.unassigned ? <Badge value="pending" label={String(p.unassigned)} /> : <Badge value="ok" label="0" /> },
           { key: 'groups', label: 'Groups', render: (p: any) => p.groups.filter((g: any) => g.team_id).map((g: any) => <span key={g.team_id} className="tag">{g.name} · {g.total}</span>) },
@@ -92,16 +103,20 @@ export function ImportsPage() {
       </Card>
 
       {can('customers.import') && (
-        <Card title={job ? `Upload: ${job.original_name}` : 'Upload a new portfolio'} actions={job && <><Badge value={job.status} /><button className="ghost" onClick={() => { setJob(null); setName(''); }}>New upload</button></>}>
+        <Card title={job ? `Upload: ${job.original_name}` : 'Upload a new portfolio'} actions={job && <><Badge value={job.status} /><button className="ghost" onClick={() => { setJob(null); setName(''); setRecFormat(''); }}>New upload</button></>}>
           {!job ? (
             <div className="form-grid">
               <Field label="1. Portfolio name" hint="e.g. HDFC Oct-2026 Bucket 1. Leave blank to use the file name."><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-              <Field label="2. Lead file (.csv or .xlsx)" hint={`Up to ${MAX_MB} MB. Needs Customer ID, Customer name and Phone number columns — see the sample file.`}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
+              <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="2. Recording file names" />
+              <Field label="3. Lead file (.csv or .xlsx)" hint={`Up to ${MAX_MB} MB. Needs Customer ID, Customer name and Phone number columns — see the sample file.`}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
               {a.busy && <Notice tone="info">Uploading and reading the file…</Notice>}
             </div>
           ) : (
             <>
-              <Field label="Portfolio name"><input value={name} onChange={(e) => setName(e.target.value)} disabled={job.status === 'completed'} /></Field>
+              <div className="form-grid">
+                <Field label="Portfolio name"><input value={name} onChange={(e) => setName(e.target.value)} disabled={job.status === 'completed'} /></Field>
+                <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="Recording file names" disabled={job.status === 'completed'} />
+              </div>
               <h3 style={{ marginBottom: 4 }}>Match the columns of your file</h3>
               <p className="muted" style={{ marginTop: 0 }}>Most are matched automatically. * = required. A <b>Caller ID</b> column gives a lead straight to that employee; leave it out to assign later.</p>
               <div className="form-grid">
@@ -153,6 +168,19 @@ export function ImportsPage() {
 
 const STATUS_TONE: Record<string, string> = { new: 'info', in_progress: 'ok', follow_up: 'warn', closed: 'muted', do_not_call: 'bad' };
 const StatusBadge = ({ s }: { s: string }) => <span className={`badge ${STATUS_TONE[s] ?? 'muted'}`}>{s.replace(/_/g, ' ')}</span>;
+
+/** Which recording file-name format the portfolio's downloads use (Customers → Recording file names). */
+function RecFormatField({ formats, value, onChange, label, disabled }: { formats?: any[]; value: string; onChange: (v: string) => void; label: string; disabled?: boolean }) {
+  const def = formats?.find((f) => f.is_default);
+  return (
+    <Field label={label} hint="How this portfolio's call recordings are named when downloaded. Set up formats under Customers → Recording file names.">
+      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled}>
+        <option value="">Default{def ? ` (${def.name})` : ''}</option>
+        {(formats ?? []).map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+      </select>
+    </Field>
+  );
+}
 
 export function CustomersPage() {
   const { can } = useAuth();

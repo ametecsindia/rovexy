@@ -397,10 +397,14 @@ Route::prefix('admin')->middleware('company')->group(function () {
         // G21: more exports + the audit pack (ZIP with recordings, slips and SHA-256 manifest)
         Route::get('reports/export/{kind}.csv', [Admin\ExportController::class, 'csv'])->whereIn('kind', \App\Services\ExportService::KINDS)->middleware(['perm:reports.export', 'throttle:30,1']);
         Route::get('reports/audit-pack.zip', [Admin\ExportController::class, 'pack'])->middleware(['perm:reports.export', 'throttle:6,1']);
-        // Reports → Recording export: bulk ZIP + the company's recording file-name format (also used by single downloads and the audit pack).
-        Route::get('reports/recordings/format', [Admin\RecordingExportController::class, 'format'])->middleware('perm:recordings.download');
-        Route::post('reports/recordings/format/preview', [Admin\RecordingExportController::class, 'preview'])->middleware('perm:recordings.download');
-        Route::put('reports/recordings/format', [Admin\RecordingExportController::class, 'saveFormat'])->middleware('perm:telephony.configure');
+        // Reports → Recording export (bulk ZIP); Customers → Recording file names (named formats; each portfolio picks one).
+        $rf = Admin\RecordingFormatController::class;
+        Route::get('recording-formats', [$rf, 'index'])->middleware('perm:customers.view');
+        Route::post('recording-formats/preview', [$rf, 'preview'])->middleware('perm:customers.view');
+        Route::post('recording-formats', [$rf, 'store'])->middleware('perm:customers.import');
+        Route::put('recording-formats/{id}', [$rf, 'update'])->where('id', '[a-z0-9]{1,16}')->middleware('perm:customers.import');
+        Route::post('recording-formats/{id}/default', [$rf, 'makeDefault'])->where('id', '[a-z0-9]{1,16}')->middleware('perm:customers.import');
+        Route::delete('recording-formats/{id}', [$rf, 'destroy'])->where('id', '[a-z0-9]{1,16}')->middleware('perm:customers.import');
         Route::get('reports/recordings/count', [Admin\RecordingExportController::class, 'count'])->middleware('perm:recordings.download');
         Route::get('reports/recordings.zip', [Admin\RecordingExportController::class, 'zip'])->middleware(['perm:recordings.download', 'throttle:6,1']);
     });

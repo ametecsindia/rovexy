@@ -15,40 +15,12 @@ use Illuminate\Support\Facades\Storage;
 
 /**
  * Reports → Recording export: download many call recordings in one ZIP (date range, portfolio, employee, outcome, minimum talk
- * time + the top-bar branch / team / employee), named by the company's file-name format, with an index.csv.
+ * time + the top-bar branch / team / employee), named by the portfolio's file-name format or one picked on the page, with an index.csv.
  */
 final class RecordingExportController extends Controller
 {
     /** ponytail: one ZIP is built on the server; past this, choose a shorter period. */
     public const MAX_FILES = 3000;
-
-    /** The saved file-name format, the building blocks for the editor, and a sample name from a real recording. */
-    public function format(Request $r)
-    {
-        $sample = $this->query($r->user(), ['from' => now()->subYears(5)->toDateString(), 'to' => now()->toDateString()])->latest('initiated_at')->first();
-        return response()->json(['template' => RecordingName::template(), 'default' => RecordingName::DEFAULT, 'saved' => app(CurrentCompany::class)->get()->setting('recordings.filename') !== null,
-            'fields' => collect(RecordingName::FIELDS)->map(fn ($f, $k) => ['key' => $k, 'label' => $f[0], 'formats' => $f[1]])->values(),
-            'separators' => RecordingName::SEPARATORS, 'sample_call' => $sample?->id]);
-    }
-
-    /** Preview a format (saved or not) on one real recording. */
-    public function preview(Request $r)
-    {
-        $t = RecordingName::clean((array) $r->input('template', []));
-        $call = $r->filled('call') ? Call::query()->find((int) $r->input('call')) : null;
-        return response()->json(['name' => $call ? RecordingName::for($call, $call->recording?->format ?? 'mp3', $t) : null, 'template' => $t]);
-    }
-
-    public function saveFormat(Request $r)
-    {
-        $t = RecordingName::clean((array) $r->input('template', []));
-        $c = app(CurrentCompany::class)->get();
-        $s = $c->settings ?? [];
-        data_set($s, 'recordings.filename', $t);
-        $c->forceFill(['settings' => $s])->save();
-        Audit::record('recordings.filename_saved', null, ['template' => $t]);
-        return response()->json(['template' => $t]);
-    }
 
     /** How many recordings match, their size, and the first few names. */
     public function count(Request $r)
@@ -58,8 +30,12 @@ final class RecordingExportController extends Controller
         $n = (clone $q)->count();
         $bytes = (int) \App\Models\Recording::query()->whereIn('call_id', (clone $q)->select('calls.id'))->sum('size_bytes');
         $first = (clone $q)->with(['customer', 'user', 'disposition', 'recording'])->orderBy('initiated_at')->limit(5)->get();
+        $t = $this->chosen($f);
+        $pf = ctype_digit((string) ($f['portfolio'] ?? '')) ? \App\Models\ImportJob::query()->whereKey((int) $f['portfolio'])->value('recording_format') : null;
         return response()->json(['count' => $n, 'bytes' => $bytes, 'max' => self::MAX_FILES,
-            'names' => $first->map(fn (Call $c) => RecordingName::for($c, $c->recording->format))->values()]);
+            'names' => $first->map(fn (Call $c) => RecordingName::for($c, $c->recording->format, $t))->values(),
+            'formats' => collect(RecordingName::formats())->map(fn ($x) => ['id' => $x['id'], 'name' => $x['name']])->values(), 'default_id' => RecordingName::defaultId(),
+            'portfolio_format' => $pf && RecordingName::find($pf) ? $pf : (($f['portfolio'] ?? '') !== '' ? RecordingName::defaultId() : null)]);
     }
 
     public function zip(Request $r)
@@ -74,7 +50,7 @@ final class RecordingExportController extends Controller
         $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE) === true || throw new \RuntimeException('Could not create the ZIP file.');
         $index = fopen('php://temp', 'w+');
         fputcsv($index, ['File', 'Call number', 'Date and time', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Mobile', 'Talk seconds', 'Outcome', 'SHA-256']);
-        $template = RecordingName::template();
+        $template = $this->chosen($f);   // null = each recording's portfolio format
         $used = [];
         $files = $skipped = 0;
         foreach ($this->query($r->user(), $f)->with(['customer', 'user', 'disposition', 'recording'])->orderBy('initiated_at')->lazy(500) as $c) {
@@ -110,7 +86,13 @@ final class RecordingExportController extends Controller
     private function filters(Request $r): array
     {
         return $r->validate(['from' => 'required|date_format:Y-m-d', 'to' => 'required|date_format:Y-m-d|after_or_equal:from', 'portfolio' => 'nullable|string|max:20',
-            'employee' => 'nullable|integer', 'outcome' => 'nullable|string|max:32', 'min_talk' => 'nullable|integer|min:0|max:36000']);
+            'employee' => 'nullable|integer', 'outcome' => 'nullable|string|max:32', 'min_talk' => 'nullable|integer|min:0|max:36000', 'format' => 'nullable|string|max:16']);
+    }
+
+    /** The format picked on the page; blank = each recording's own portfolio format. */
+    private function chosen(array $f): ?array
+    {
+        return empty($f['format']) ? null : (RecordingName::find($f['format']) ?? abort(422, 'That recording file-name format no longer exists. Choose another.'));
     }
 
     /** Calls with a playable recording, inside the signed-in person's teams and the filters. Test calls are never exported. */
