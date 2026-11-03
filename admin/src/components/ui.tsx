@@ -113,7 +113,7 @@ export function Table<T extends { id?: number | string }>({ rows, columns, empty
   if (rows.length === 0) return <p className="muted">{empty}</p>;
   return (
     <div className="table-wrap">
-      <table>
+      <table className="cards-on-phone">
         <thead>
           <tr>{columns.map((c) => <th key={c.key} className={c.align === 'right' ? 'num' : undefined}>{c.label}</th>)}</tr>
         </thead>
@@ -121,7 +121,7 @@ export function Table<T extends { id?: number | string }>({ rows, columns, empty
           {rows.map((r, i) => (
             <tr key={(r.id as any) ?? i} onClick={onRow ? () => onRow(r) : undefined} className={onRow ? 'clickable' : undefined}>
               {columns.map((c) => (
-                <td key={c.key} className={c.align === 'right' ? 'num' : undefined}>{c.render ? c.render(r) : String((r as any)[c.key] ?? '—')}</td>
+                <td key={c.key} className={c.align === 'right' ? 'num' : undefined} data-label={c.label || undefined}>{c.render ? c.render(r) : String((r as any)[c.key] ?? '—')}</td>
               ))}
             </tr>
           ))}

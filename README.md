@@ -29,7 +29,7 @@ Older technical references: [ARCHITECTURE](docs/ARCHITECTURE.md), [API](docs/API
 ```
 backend/   Laravel app: app/ (Domain = framework-free), database/migrations, routes, tests (PHPUnit)
 admin/     React console + Super Admin + Accounts (builds into backend/public/admin)
-android/   app/ (Compose; flavours play / direct) + core/ (pure Kotlin)
+android/   app/ (Compose; flavours play / direct) + core/ (pure Kotlin) + admin/ (ROVEXY Admin: the console in a phone app)
 desktop/   Electron shell for the console (optional)
 deploy/    cloud server files (nginx, systemd, deploy.sh), onprem/ (env, guides), windows/ (setup.exe: Inno Setup + configure.php)
 brand/     ROVEXY logos

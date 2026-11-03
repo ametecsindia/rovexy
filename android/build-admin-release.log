@@ -1,0 +1,172 @@
+JAVA_HOME=C:\Users\DELL\.jdks\jbr-21.0.11 
+> Task :admin:preBuild UP-TO-DATE
+> Task :admin:preReleaseBuild UP-TO-DATE
+> Task :admin:extractReleaseVersionControlInfo UP-TO-DATE
+> Task :admin:mergeReleaseShaders UP-TO-DATE
+> Task :admin:compileReleaseShaders NO-SOURCE
+> Task :admin:generateReleaseAssets UP-TO-DATE
+> Task :admin:mergeReleaseAssets UP-TO-DATE
+> Task :core:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :core:compileKotlin UP-TO-DATE
+> Task :core:compileJava NO-SOURCE
+> Task :core:processResources NO-SOURCE
+> Task :core:classes UP-TO-DATE
+> Task :core:jar UP-TO-DATE
+> Task :admin:buildKotlinToolingMetadata UP-TO-DATE
+> Task :admin:checkReleaseDuplicateClasses UP-TO-DATE
+> Task :admin:checkKotlinGradlePluginConfigurationErrors SKIPPED
+> Task :admin:generateReleaseBuildConfig
+> Task :admin:checkReleaseAarMetadata UP-TO-DATE
+> Task :admin:generateReleaseResValues UP-TO-DATE
+> Task :admin:mapReleaseSourceSetPaths UP-TO-DATE
+> Task :admin:generateReleaseResources UP-TO-DATE
+> Task :admin:mergeReleaseResources UP-TO-DATE
+> Task :admin:packageReleaseResources UP-TO-DATE
+> Task :admin:parseReleaseLocalResources UP-TO-DATE
+> Task :admin:createReleaseCompatibleScreenManifests
+> Task :admin:extractDeepLinksRelease UP-TO-DATE
+> Task :admin:processReleaseMainManifest
+> Task :admin:processReleaseManifest
+> Task :admin:javaPreCompileRelease UP-TO-DATE
+> Task :admin:mergeReleaseArtProfile UP-TO-DATE
+> Task :admin:extractProguardFiles UP-TO-DATE
+> Task :admin:mergeReleaseStartupProfile UP-TO-DATE
+> Task :admin:mergeReleaseJniLibFolders UP-TO-DATE
+> Task :admin:mergeReleaseNativeLibs NO-SOURCE
+> Task :admin:stripReleaseDebugSymbols NO-SOURCE
+> Task :admin:writeReleaseAppMetadata UP-TO-DATE
+> Task :admin:collectReleaseDependencies UP-TO-DATE
+> Task :admin:configureReleaseDependencies UP-TO-DATE
+> Task :admin:extractReleaseNativeSymbolTables NO-SOURCE
+> Task :admin:parseReleaseIntegrityConfig UP-TO-DATE
+> Task :admin:validateSigningRelease UP-TO-DATE
+> Task :admin:processReleaseManifestForPackage
+> Task :admin:processReleaseResources
+
+> Task :admin:compileReleaseKotlin
+w: file:///C:/laragon/www/Smart%20caller/android/admin/src/main/kotlin/ametecs/rovexy/admin/AdminActivity.kt:161:38 The corresponding parameter in the supertype 'ComponentActivity' is named 'outState'. This may cause problems when calling this function with named arguments.
+
+> Task :admin:compileReleaseJavaWithJavac
+> Task :admin:mergeReleaseGeneratedProguardFiles UP-TO-DATE
+> Task :admin:processReleaseJavaRes UP-TO-DATE
+> Task :admin:mergeReleaseJavaResource UP-TO-DATE
+> Task :admin:generateReleaseLintVitalReportModel
+> Task :admin:expandReleaseArtProfileWildcards
+> Task :admin:lintVitalAnalyzeRelease
+> Task :admin:lintVitalReportRelease
+> Task :admin:lintVitalRelease
+> Task :admin:minifyReleaseWithR8
+> Task :admin:buildReleasePreBundle
+> Task :admin:compileReleaseArtProfile
+> Task :admin:packageReleaseBundle
+> Task :admin:signReleaseBundle
+> Task :admin:produceReleaseBundleIdeListingFile
+> Task :admin:createReleaseBundleListingFileRedirect UP-TO-DATE
+> Task :admin:bundleRelease
+
+[Incubating] Problems report is available at: file:///C:/laragon/www/Smart%20caller/android/build/reports/problems/problems-report.html
+
+Deprecated Gradle features were used in this build, making it incompatible with Gradle 9.0.
+
+You can use '--warning-mode all' to show the individual deprecation warnings and determine if they come from your own scripts or plugins.
+
+For more on this, please refer to https://docs.gradle.org/8.14.3/userguide/command_line_interface.html#sec:command_line_warnings in the Gradle documentation.
+
+BUILD SUCCESSFUL in 2m 15s
+48 actionable tasks: 19 executed, 29 up-to-date
+EXIT 0 
+
+jar verified.
+
+Warning: 
+This jar contains entries whose certificate chain is invalid. Reason: PKIX path building failed: sun.security.provider.certpath.SunCertPathBuilderException: unable to find valid certification path to requested target
+This jar contains entries whose signer certificate is self-signed.
+This jar contains signatures that do not include a timestamp. Without a timestamp, users may not be able to validate this jar after any of the signer certificates expire (as early as 2054-03-04).
+POSIX file permission and/or symlink attributes detected. These attributes are ignored when signing and are not protected by the signature.
+
+This JAR file contains internal inconsistencies that may result in different contents when reading via JarFile and JarInputStream:
+- Manifest is missing when reading via JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools.build.gradle/app-metadata.properties is signed in JarFile but is not signed in JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools.build.libraries/dependencies.pb is signed in JarFile but is not signed in JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools.build.obfuscation/proguard.map is signed in JarFile but is not signed in JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools.build.profiles/baseline.prof is signed in JarFile but is not signed in JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools.build.profiles/baseline.profm is signed in JarFile but is not signed in JarInputStream
+- Entry BUNDLE-METADATA/com.android.tools/r8.json is signed in JarFile but is not signed in JarInputStream
+- Entry BundleConfig.pb is signed in JarFile but is not signed in JarInputStream
+- Entry base/dex/classes.dex is signed in JarFile but is not signed in JarInputStream
+- Entry base/manifest/AndroidManifest.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notification_bg_low_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notification_bg_low_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notification_bg_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notification_bg_normal_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notification_oversize_large_icon_bg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-hdpi-v4/notify_panel_notification_icon_bg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-mdpi-v4/notification_bg_low_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-mdpi-v4/notification_bg_low_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-mdpi-v4/notification_bg_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-mdpi-v4/notification_bg_normal_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-mdpi-v4/notify_panel_notification_icon_bg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-v21/notification_action_background.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-xhdpi-v4/notification_bg_low_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-xhdpi-v4/notification_bg_low_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-xhdpi-v4/notification_bg_normal.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-xhdpi-v4/notification_bg_normal_pressed.9.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable-xhdpi-v4/notify_panel_notification_icon_bg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable/notification_bg.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable/notification_bg_low.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable/notification_icon_background.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable/notification_tile_bg.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/drawable/rovexy_logo.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout-v21/notification_action.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout-v21/notification_action_tombstone.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout-v21/notification_template_custom_big.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout-v21/notification_template_icon_group.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout/notification_template_part_chronometer.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout/notification_template_part_time.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/layout/setup.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-anydpi-v26/ic_launcher.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-hdpi-v4/ic_launcher_fg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-mdpi-v4/ic_launcher_fg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-xhdpi-v4/ic_launcher_fg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-xxhdpi-v4/ic_launcher_fg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/mipmap-xxxhdpi-v4/ic_launcher_fg.png is signed in JarFile but is not signed in JarInputStream
+- Entry base/res/xml/network_security_config.xml is signed in JarFile but is not signed in JarInputStream
+- Entry base/resources.pb is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/DebugProbesKt.bin is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.activity_activity-ktx.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.activity_activity.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.annotation_annotation-experimental.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.arch.core_core-runtime.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.core_core-ktx.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.core_core-viewtree.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.core_core.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.interpolator_interpolator.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-livedata-core.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-runtime-ktx.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-runtime.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-viewmodel-ktx.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-viewmodel-savedstate.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.lifecycle_lifecycle-viewmodel.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.profileinstaller_profileinstaller.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.savedstate_savedstate-ktx.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.savedstate_savedstate.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.startup_startup-runtime.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.tracing_tracing.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/androidx.versionedparcelable_versionedparcelable.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/com/android/build/gradle/app-metadata.properties is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/kotlinx_coroutines_android.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/kotlinx_coroutines_core.version is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/META-INF/version-control-info.textproto is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin-tooling-metadata.json is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/annotation/annotation.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/collections/collections.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/concurrent/atomics/atomics.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/coroutines/coroutines.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/internal/internal.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/kotlin.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/ranges/ranges.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry base/root/kotlin/reflect/reflect.kotlin_builtins is signed in JarFile but is not signed in JarInputStream
+- Entry META-INF/MANIFEST.MF is signed in JarFile but is not signed in JarInputStream
+
+Re-run with the -verbose and -certs options for more details.
+DONE 

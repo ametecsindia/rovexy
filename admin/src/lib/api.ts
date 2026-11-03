@@ -137,8 +137,23 @@ export async function download(path: string, body?: unknown): Promise<void> {
     throw new ApiError(res.status, data?.error ?? `http_${res.status}`, data?.message ?? friendly(data?.error ?? `http_${res.status}`), data);
   }
   const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export';
-  const url = URL.createObjectURL(await res.blob());
-  const a = Object.assign(document.createElement('a'), { href: url, download: decodeURIComponent(name) });
+  await saveBlob(await res.blob(), decodeURIComponent(name));
+}
+
+/** The ROVEXY Admin phone app (android/admin) exposes this; a WebView can't save blob: links itself. */
+type NativeApp = { saveFile(name: string, mime: string, base64: string): void; changeServer(): void };
+export const nativeApp = (): NativeApp | undefined => (window as any).RovexyApp;
+
+/** Save a file built in the browser: a normal download in a browser, Downloads folder in the phone app. */
+export async function saveBlob(blob: Blob, name: string): Promise<void> {
+  const app = nativeApp();
+  if (app) {
+    const b64 = await new Promise<string>((ok) => { const r = new FileReader(); r.onload = () => ok(String(r.result).split(',')[1] ?? ''); r.readAsDataURL(blob); });
+    app.saveFile(name, blob.type, b64);
+    return;
+  }
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: name });
   document.body.appendChild(a);
   a.click();
   a.remove();

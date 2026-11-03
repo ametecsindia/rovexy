@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { api, get, post, fmtDate, qs } from '../lib/api';
+import { api, get, post, fmtDate, nativeApp, qs } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { realtime } from '../lib/realtime';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -328,6 +328,8 @@ async function getMic(): Promise<{ stream: MediaStream | null; problem: string |
   try {
     return { stream: await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }), problem: null };
   } catch (e: any) {
+    if (e?.name === 'NotAllowedError' && nativeApp())
+      return { stream: null, problem: 'Microphone not allowed for ROVEXY Admin: phone Settings → Apps → ROVEXY Admin → Permissions → Microphone → Allow, then tap Retry mic.' };
     // Chrome says "Allowed" but Windows privacy settings can still block it — that also surfaces as NotAllowedError.
     const site = await navigator.permissions?.query({ name: 'microphone' as PermissionName }).then((p) => p.state).catch(() => 'unknown');
     if (e?.name === 'NotAllowedError' && site === 'granted')

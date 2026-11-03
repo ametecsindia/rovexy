@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, del, download as downloadFile, get, patch, post, put, fmtDate } from '../lib/api';
+import { api, del, download as downloadFile, get, patch, post, put, fmtDate, saveBlob } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Modal, Notice, Page, Table, useAction, useAsync } from '../components/ui';
 
@@ -424,11 +424,7 @@ function RoleModal({ role, all, canEdit, onClose, onDone }: { role: any; all: an
 
 const csvCell = (v: unknown) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '');
 function download(name: string, text: string) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob(['\uFEFF' + text], { type: 'text/csv' }));
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  void saveBlob(new Blob(['\uFEFF' + text], { type: 'text/csv' }), name);
 }
 
 /** SmartDCM-style bulk upload: groups + managers + telecallers from one sheet; logins are generated and shown once. */

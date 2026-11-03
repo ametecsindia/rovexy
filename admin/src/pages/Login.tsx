@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import QRCode from 'qrcode';
-import { currentWorkspace, post } from '../lib/api';
+import { currentWorkspace, nativeApp, post } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ErrorBox, Field, useAction } from '../components/ui';
 
@@ -140,6 +140,7 @@ export function LoginPage() {
             <GoButton busy={a.busy} label="Continue" busyLabel="Signing in…" />
           </form>
           <p className="lb-alt"><a href={`/password-forgot${currentWorkspace() ? `?workspace=${currentWorkspace()}` : ''}`}>Forgot password?</a></p>
+          {nativeApp() && <p className="lb-alt"><a href="#" onClick={(e) => { e.preventDefault(); nativeApp()!.changeServer(); }}>Change company or server</a></p>}
         </>
       ) : (
         <>

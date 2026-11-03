@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveReload } from '../lib/live';
 import { Link } from 'react-router-dom';
-import { get, fileUrl, fmtDate, qs } from '../lib/api';
+import { get, fileUrl, fmtDate, qs, saveBlob } from '../lib/api';
 import { RANGES, rangeName } from '../lib/periods';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Kpi, Modal, Notice, Page, Table, useAsync } from '../components/ui';
@@ -11,9 +11,7 @@ const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const EMPTY = { portfolio: '', group: '', employee: '', assigned: '', call_status: '', collection: '', callback: '', case_status: '', from: '', to: '' };
 const csvCell = (v: unknown) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '');
 function downloadCsv(name: string, header: string[], rows: unknown[][]) {
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob(['﻿' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n'], { type: 'text/csv' }));
-  a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  void saveBlob(new Blob(['\uFEFF' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n'], { type: 'text/csv' }), name);
 }
 const short = (iso: string | null | undefined, tz?: string) => iso ? new Date(iso).toLocaleString('en-IN', { timeZone: tz, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
 

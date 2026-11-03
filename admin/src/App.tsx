@@ -162,11 +162,11 @@ function TopBar({ items, me, logout, pendingPhones }: { items: NavItem[]; me: an
         <i>/</i><strong>{page?.label ?? (loc.pathname.startsWith('/customers/') ? 'Customer' : 'Dashboard')}</strong>
       </nav>
       <div className="top-right">
-        {pendingPhones > 0 && <Link to="/devices" className="top-alert" title="Review phone requests">📱 {pendingPhones} phone{pendingPhones > 1 ? 's' : ''} waiting for approval</Link>}
+        {pendingPhones > 0 && <Link to="/devices" className="top-alert" title="Review phone requests">📱 {pendingPhones}<span className="hide-phone"> phone{pendingPhones > 1 ? 's' : ''} waiting for approval</span></Link>}
         <span className="top-time">{now.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })} · {now.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
         <SoundToggle />
         <span className="top-user"><span className="avatar sm">{(me.name ?? '?').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase()}</span>{me.name}</span>
-        <button className="secondary sm" onClick={logout}><Icon name="logout" size={16} /> Sign out</button>
+        <button className="secondary sm" onClick={logout} aria-label="Sign out"><Icon name="logout" size={16} /><span className="hide-phone"> Sign out</span></button>
       </div>
     </header>
   );

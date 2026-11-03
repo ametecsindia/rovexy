@@ -10,4 +10,4 @@ dependencyResolutionManagement {
     repositories { google(); mavenCentral() }
 }
 rootProject.name = "AmetecsManagedMobile"
-include(":core", ":app")
+include(":core", ":app", ":admin")

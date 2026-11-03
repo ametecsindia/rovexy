@@ -877,3 +877,137 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
 .org-bar.on select { border-color: var(--accent); }
 .branch-head { display: flex; align-items: baseline; gap: 10px; margin: 18px 0 8px; }
 .branch-head h2 { margin: 0; font-size: 1.05rem; }
+
+/* ── Phone layout (ROVEXY Admin app and phone browsers), redesigned 3 Nov 2026 ──
+   One system for every page: fixed app bar, compact filter strip, 14 px cards, label/value row cards for every list,
+   two-column number tiles, stacked layouts, 42 px touch targets. Only CSS; no page logic changes. */
+@media (max-width: 640px) {
+  html { -webkit-text-size-adjust: 100%; }
+  body { -webkit-tap-highlight-color: transparent; background: var(--bg); }
+  .main { padding: 68px 14px 40px !important; overflow-wrap: anywhere; }
+  .hide-phone { display: none; }
+
+  /* App bar */
+  .topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 30; height: 58px; margin: 0; padding: 0 10px 0 62px;
+    background: rgba(255,255,255,.94); -webkit-backdrop-filter: saturate(1.4) blur(10px); backdrop-filter: saturate(1.4) blur(10px);
+    border-bottom: 1px solid var(--border); box-shadow: 0 2px 10px rgba(16,32,52,.05);
+    display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow: hidden; }
+  .topbar .crumb { min-width: 0; flex: 1; }
+  .topbar .crumb > :not(strong), .topbar .crumb i { display: none; }
+  .topbar .crumb strong { font-size: 1.02rem; font-weight: 650; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+  .top-time, .top-user, .topbar small { display: none !important; }
+  .top-right { gap: 6px; flex-wrap: nowrap; flex: none; }
+
+  /* Branch / team / employee filter: one compact strip */
+  .org-bar { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; margin: 0 0 14px; }
+  .org-bar > .muted { display: none; }
+  .org-bar select { width: 100%; min-width: 0; max-width: none; height: 36px; min-height: 36px; padding: 4px 22px 4px 9px; font-size: .78rem;
+    border-radius: 10px; background-color: var(--surface); text-overflow: ellipsis; }
+
+  /* Page header */
+  .page-head, .dash-head { flex-direction: column; align-items: stretch; gap: 10px; margin-bottom: 14px; }
+  .page-head h1, .dash-head h1 { font-size: 1.28rem; line-height: 1.25; letter-spacing: -.01em; margin: 0 0 4px; }
+  .page-head p, .dash-head p { font-size: .86rem; line-height: 1.5; }
+  .page-head .crumbs, .dash-head .crumbs { display: none; }
+  .page-head .row, .dash-head .row { flex-wrap: wrap; gap: 8px; }
+  .page-head .row > *, .card-head .row > select, .card-head .row > input { flex: 1 1 auto; }
+
+  /* Cards */
+  .card { padding: 14px; border-radius: 14px; margin-bottom: 12px; box-shadow: 0 1px 2px rgba(16,32,52,.05), 0 4px 14px rgba(16,32,52,.05); }
+  .card-head { margin: -2px -14px 12px; padding: 0 14px 12px; flex-wrap: wrap; gap: 8px; }
+  .card-head h2, .card-head h3 { font-size: 1rem; }
+  .grid2, .grid3, .split, .two-col { grid-template-columns: minmax(0, 1fr) !important; gap: 12px; }
+  [style*="grid-template-columns"] { grid-template-columns: minmax(0, 1fr) !important; }
+  .row { flex-wrap: wrap; }
+
+  /* Number tiles: always two per row, numbers sized to fit */
+  .kpis, .kpi-grid, .kpi-grid.small, .kpi-grid.six, .stat-grid, .stat-grid.compact, .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px; }
+  .kpi, .stat { padding: 12px; border-radius: 14px; min-width: 0; }
+  .kpi-icon, .stat-icon { width: 30px; height: 30px; border-radius: 9px; margin-bottom: 8px; }
+  .kpi-value, .stat-value { font-size: clamp(.98rem, 4.4vw, 1.25rem); line-height: 1.25; overflow-wrap: normal; }
+  .kpi-label, .stat-label { font-size: .72rem; line-height: 1.3; }
+  .kpi-sub { font-size: .72rem; margin-top: 6px; }
+  .kpi:hover, .stat:hover { transform: none; }
+
+  /* Forms and controls */
+  .form-grid, .form-grid.two { grid-template-columns: minmax(0, 1fr); }
+  button, .button, select, input:not([type="checkbox"]):not([type="radio"]):not([type="color"]):not([type="range"]) { min-height: 42px; border-radius: 10px; }
+  button.sm, .button.sm { min-height: 36px; }
+  input, select, textarea { font-size: .95rem; max-width: 100%; }
+  label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { display: flex; flex-wrap: nowrap; align-items: flex-start; gap: 10px; }
+  label > input[type="checkbox"], label > input[type="radio"] { flex: none; margin-top: 3px; width: 18px; height: 18px; }
+  .search, .search-box, .filter-bar input[type="search"] { width: 100%; min-width: 0; }
+  .filter-bar, .filters { padding: 10px; gap: 8px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; }
+  .filter-bar > *, .filters > * { min-width: 0; width: 100%; }
+  .filter-bar > input:first-child, .filters > input:first-child, .filter-bar > .search, .filter-bar > .search-box, .filter-bar > input[type="search"], .filter-bar > .seg, .filters > .seg { grid-column: 1 / -1; }
+  .seg, .tabs, .chips { max-width: 100%; overflow-x: auto; scrollbar-width: none; flex-wrap: nowrap; }
+  .seg::-webkit-scrollbar, .tabs::-webkit-scrollbar, .chips::-webkit-scrollbar { display: none; }
+  .seg button, .tabs .tab { white-space: nowrap; flex: none; }
+  .seg button { padding: 7px 12px; min-height: 36px; }
+
+  /* Steps (Assignment, Calling setup) */
+  .step { flex-direction: column; gap: 6px; }
+  .step-no { align-self: flex-start; flex: none; width: 30px; height: 30px; }
+
+  /* Every <Table> list: one card per row, label on the left, value on the right (wraps under long values) */
+  .table-wrap:has(> .cards-on-phone) { border: 0; overflow: visible; background: transparent; box-shadow: none; }
+  table.cards-on-phone, .cards-on-phone tbody, .cards-on-phone tr, .cards-on-phone td { display: block; width: 100% !important; }
+  .cards-on-phone thead { display: none; }
+  .cards-on-phone tr { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); margin-bottom: 10px; padding: 4px 14px;
+    box-shadow: 0 1px 2px rgba(16,32,52,.05), 0 4px 12px rgba(16,32,52,.04); }
+  .cards-on-phone td { position: relative; padding: 9px 0 9px 38% !important; min-height: 38px; border: 0; border-bottom: 1px solid var(--muted-bg);
+    text-align: right; overflow-wrap: anywhere; white-space: normal !important; font-size: .9rem; }
+  .cards-on-phone td::before { content: attr(data-label); position: absolute; left: 0; top: 10px; width: 36%; text-align: left;
+    color: var(--muted); font-size: .74rem; font-weight: 600; text-transform: uppercase; letter-spacing: .03em; line-height: 1.3; }
+  .cards-on-phone td:not([data-label]) { padding-left: 0 !important; }
+  .cards-on-phone td:last-child { border-bottom: 0; }
+  .cards-on-phone td:first-child { font-weight: 650; }
+  .cards-on-phone td > * { max-width: 100%; }
+  .cards-on-phone td .row { justify-content: flex-end; }
+  .cards-on-phone td select, .cards-on-phone td [style*="min-width"] { width: 100%; min-width: 0 !important; }
+  .cards-on-phone tr:hover td { background: transparent; }
+  .cards-on-phone td:has(.player), .cards-on-phone td:has(audio) { padding: 30px 0 10px !important; text-align: left; }
+  .cards-on-phone td:has(.player) .player, .cards-on-phone td audio { width: 100%; max-width: 100%; }
+  .cards-on-phone td code, .cards-on-phone td pre { display: block; text-align: left; margin-top: 2px; }
+  /* Plain tables that are not <Table>: scroll inside their box instead of pushing the page wider */
+  .table-wrap:not(:has(> .cards-on-phone)) { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.kv { table-layout: fixed; } table.kv th { width: 42%; font-size: .78rem; padding-right: 10px; white-space: normal; overflow-wrap: anywhere; } table.kv td { overflow-wrap: anywhere; }
+  code, .code, pre { white-space: pre-wrap; word-break: break-all; }
+
+  /* Pop-ups open as bottom sheets */
+  .modal-backdrop { padding: 0; place-items: end stretch; }
+  .modal { width: 100% !important; max-width: none !important; max-height: 92vh; border-radius: 20px 20px 0 0; padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .modal > .card-head { margin: -4px -16px 14px; padding: 0 16px 12px; }
+
+  /* Messages and internet calls */
+  .chat2 { height: calc(100dvh - 190px); min-height: 420px; border-radius: 14px; }
+  .chat2-head { padding: 10px 12px; gap: 8px; }
+  .chat2-head .chat2-call { margin-left: auto; }
+  .voice-bar { flex-wrap: wrap; gap: 8px 10px; padding: 12px; }
+  .voice-bar .who { flex: 1 1 calc(100% - 24px); }
+  .voice-bar .who strong { font-size: .95rem; } .voice-bar small { font-size: .82rem; line-height: 1.4; }
+  .voice-bar > button { flex: 1 1 0; }
+  .chat2-compose { padding: 8px 10px calc(8px + env(safe-area-inset-bottom)); }
+
+  /* Dashboard tools: period tabs on top, then team, Live and refresh on one line */
+  .dash-tools { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; width: 100%; }
+  .dash-tools > .seg { grid-column: 1 / -1; justify-self: start; }
+  .dash-tools > select { min-width: 0; width: 100%; }
+  .dash-tools .icon-btn { width: 42px; height: 42px; }
+
+  /* Status & location */
+  .live-top { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .live-top select, .live-top input { min-width: 0; width: 100%; }
+  .live-filters input { min-width: 0; flex: 1 1 100%; }
+  .live-row { gap: 10px; padding: 12px; }
+
+  /* Policies */
+  .pol-group-head { grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .pol-group-head > :nth-child(n+3) { grid-column: 2; justify-self: start; }
+  .pol-row { grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 12px; }
+
+  /* Maps */
+  .map, .leaflet-container { max-width: 100%; border-radius: 12px; }
+
+  .toast { left: 12px; right: 12px; width: auto; bottom: calc(16px + env(safe-area-inset-bottom)); }
+}

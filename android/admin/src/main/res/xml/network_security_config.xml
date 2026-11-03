@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- HTTPS only, system trust anchors only. No global cleartext, no user-CA trust, no validation bypass.
+     On-prem servers need a publicly trusted certificate, or a build-time pinned company CA added below
+     (<certificates src="@raw/company_ca"/>) for that customer's white-label build. -->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
