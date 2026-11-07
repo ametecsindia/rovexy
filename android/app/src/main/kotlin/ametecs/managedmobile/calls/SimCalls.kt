@@ -153,9 +153,10 @@ object SimCalls {
      *  Android gives apps no way to read another app's "auto record calls" switch, so this file IS the proof it is on. */
     fun latestCallRecordingMs(ctx: Context, sinceMs: Long): Long? {
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED) return null
+        rescan(ctx)   // MIUI writes straight to disk; without this the index can miss the test call for hours
         val cols = mutableListOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
         if (Build.VERSION.SDK_INT >= 29) cols += MediaStore.Audio.Media.RELATIVE_PATH
-        return runCatching {
+        return newestCallFileMs(sinceMs) ?: runCatching {
             ctx.contentResolver.query(MediaStore.Audio.Media.EXTERNAL_CONTENT_URI, cols.toTypedArray(), SINCE, since(sinceMs), "${MediaStore.Audio.Media.DATE_MODIFIED} DESC")?.use { c ->
                 while (c.moveToNext()) {
                     val where = (c.getString(3).orEmpty() + "/" + (if (cols.size > 4) c.getString(4).orEmpty() else "") + "/" + c.getString(0).orEmpty()).lowercase()
@@ -178,12 +179,20 @@ object SimCalls {
 
     /** OEM recorders often write the file directly; Android indexes it late. Ask for those folders to be indexed now. */
     fun rescan(ctx: Context) = runCatching {
-        val root = android.os.Environment.getExternalStorageDirectory().absolutePath
-        val dirs = listOf("Music/Recordings/Call Recordings", "Recordings/Call Recordings", "Recordings/Call", "Music/Recordings", "Recordings",
-            "MIUI/sound_recorder/call_rec", "Record/Call", "Call", "CallRecordings", "Sounds/CallRecord")
-            .map { "$root/$it" }.filter { java.io.File(it).exists() }
+        val dirs = callDirs().map { it.absolutePath }
         if (dirs.isNotEmpty()) android.media.MediaScannerConnection.scanFile(ctx, dirs.toTypedArray(), null, null)
     }
+
+    private fun callDirs() = listOf("Music/Recordings/Call Recordings", "Recordings/Call Recordings", "Recordings/Call", "Music/Recordings", "Recordings",
+        "MIUI/sound_recorder/call_rec", "Record/Call", "Call", "CallRecordings", "Sounds/CallRecord")
+        .map { java.io.File(android.os.Environment.getExternalStorageDirectory(), it) }.filter { it.isDirectory }
+
+    /** Newest call-recording file on disk since [sinceMs] — doesn't wait for the media index (audio permission lets us list audio files). */
+    private fun newestCallFileMs(sinceMs: Long): Long? = runCatching {
+        callDirs().flatMap { it.listFiles()?.toList().orEmpty() }
+            .filter { it.isFile && it.length() > 0 && it.lastModified() >= sinceMs && it.path.lowercase().contains("call") }
+            .maxOfOrNull { it.lastModified() }
+    }.getOrNull()
 
     fun read(ctx: Context, f: RecorderFile): ByteArray? = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes() } }.getOrNull()
 }
