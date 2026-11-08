@@ -12,6 +12,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import ametecs.managedmobile.AmmpApp
+import ametecs.managedmobile.calls.RecordingUpload
 import ametecs.managedmobile.data.ApiException
 import java.util.concurrent.TimeUnit
 
@@ -21,6 +22,11 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
         val g = (applicationContext as AmmpApp).graph
         return try {
             if (g.store.getString("registered") == null) return Result.success()   // nothing to sync before registration
+            if (g.session.hasWorkSession) {
+                // Call recordings first: found late or left over from an offline call — uploaded even with the app closed.
+                RecordingUpload.hunt(g, applicationContext)
+                RecordingUpload.uploadPending(g, applicationContext)
+            }
             if (g.session.hasWorkSession) g.work.syncAll() else g.work.syncPolicy()
             Result.success()
         } catch (e: ApiException) {

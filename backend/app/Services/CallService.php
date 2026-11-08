@@ -230,7 +230,8 @@ final class CallService
                     $rec->forceFill(['status' => RecordingState::NotRequired->value])->save();
                     $call->forceFill(['recording_status' => RecordingState::NotRequired->value])->save();
                 } elseif ($recordingFound === false) {
-                    $where = isset($diag['audio_folders_since_call']) ? ' Audio saved since the call: ' . $diag['audio_folders_since_call'] . '.' : '';
+                    $where = (isset($diag['recorder']) ? ' Phone: ' . $diag['recorder'] . '.' : '')
+                        . (isset($diag['audio_folders_since_call']) ? ' Audio saved since the call: ' . $diag['audio_folders_since_call'] . '.' : '');
                     $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => mb_substr('No call recording found on the phone. Turn on automatic call recording in the phone dialer.' . $where, 0, 250)])->save();
                     $call->forceFill(['recording_status' => RecordingState::Failed->value])->save();
                     AdminFeed::dispatchFor($call->company_id, 'recording.failed', ['call_id' => $call->id]);

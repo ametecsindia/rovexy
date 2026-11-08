@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.CallLog
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import android.telecom.TelecomManager
 import androidx.core.content.ContextCompat
@@ -129,6 +130,7 @@ object SimCalls {
 
     /** Newest audio file created since the call started that looks like a call recording of this number. */
     fun findRecording(ctx: Context, number: String, sinceMs: Long): RecorderFile? {
+        folderRecording(ctx, number, sinceMs)?.let { return it }
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED) return null
         val digits = number.filter(Char::isDigit).takeLast(7)
         val base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -152,6 +154,7 @@ object SimCalls {
     /** Time (ms) of the newest call-recorder file — any number — added after [sinceMs], or null.
      *  Android gives apps no way to read another app's "auto record calls" switch, so this file IS the proof it is on. */
     fun latestCallRecordingMs(ctx: Context, sinceMs: Long): Long? {
+        folderFiles(ctx, sinceMs).maxOfOrNull { it.second }?.let { return it }
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED) return null
         rescan(ctx)   // MIUI writes straight to disk; without this the index can miss the test call for hours
         val cols = mutableListOf(MediaStore.Audio.Media.DISPLAY_NAME, MediaStore.Audio.Media.DATE_ADDED, MediaStore.Audio.Media.SIZE, MediaStore.Audio.Media.DATA)
@@ -193,6 +196,87 @@ object SimCalls {
             .filter { it.isFile && it.length() > 0 && it.lastModified() >= sinceMs && it.path.lowercase().contains("call") }
             .maxOfOrNull { it.lastModified() }
     }.getOrNull()
+
+    // ── Recordings folder chosen by the employee (Storage Access Framework) ─────────────────────────────────────────
+    // MIUI/HyperOS keeps a .nomedia file in its recorder folder, and since Android 10 such files are hidden from MediaStore
+    // AND from plain file listing — ROVEXY never saw the test call, so the "Turn on call recording" gate never lifted.
+    // The employee picks the recorder's folder once; Android then lets ROVEXY read it, whatever the brand or recorder app.
+
+    private fun prefs(ctx: Context) = ctx.getSharedPreferences("recorder", Context.MODE_PRIVATE)
+
+    /** The chosen folder, while Android still grants read access to it. */
+    fun folder(ctx: Context): Uri? = prefs(ctx).getString("tree", null)?.let(Uri::parse)
+        ?.takeIf { u -> ctx.contentResolver.persistedUriPermissions.any { it.uri == u && it.isReadPermission } }
+
+    fun setFolder(ctx: Context, tree: Uri) {
+        ctx.contentResolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        prefs(ctx).edit().putString("tree", tree.toString()).apply()
+    }
+
+    fun folderLabel(ctx: Context): String? = folder(ctx)?.let { u ->
+        runCatching { DocumentsContract.getTreeDocumentId(u).substringAfter(':').ifEmpty { "Internal storage" } }.getOrNull()
+    }
+
+    /** Where this brand's Phone app saves call recordings — the folder picker opens there. */
+    fun suggestedFolder(): Uri {
+        val path = when (Build.MANUFACTURER.lowercase()) {
+            "xiaomi", "redmi", "poco" -> "MIUI/sound_recorder/call_rec"
+            "samsung" -> "Recordings/Call"
+            "oppo", "realme", "oneplus" -> "Music/Recordings/Call Recordings"
+            "vivo", "iqoo" -> "Record/Call"
+            "huawei", "honor" -> "Sounds/CallRecord"
+            else -> "Recordings"
+        }
+        return DocumentsContract.buildDocumentUri("com.android.externalstorage.documents", "primary:$path")
+    }
+
+    /** Google's Phone app keeps recordings inside its own private storage: no other app (or folder pick) can reach them. */
+    fun recordingsPrivate(ctx: Context) = defaultDialer(ctx) == "com.google.android.dialer"
+
+    private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "amr", "wav", "3gp", "ogg", "opus", "awb")
+
+    /** Audio files in the chosen folder (and one level of sub-folders) changed at/after [sinceMs], newest first, with their time. */
+    fun folderFiles(ctx: Context, sinceMs: Long): List<Pair<RecorderFile, Long>> {
+        val tree = folder(ctx) ?: return emptyList()
+        val out = mutableListOf<Pair<RecorderFile, Long>>()
+        val cols = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE, DocumentsContract.Document.COLUMN_LAST_MODIFIED, DocumentsContract.Document.COLUMN_SIZE)
+        fun walk(docId: String, depth: Int) {
+            ctx.contentResolver.query(DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId), cols, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0); val name = c.getString(1).orEmpty(); val mime = c.getString(2).orEmpty(); val modified = c.getLong(3)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) { if (depth < 1) walk(id, depth + 1); continue }   // recorders that file by date
+                    val audio = mime.startsWith("audio/") || name.substringAfterLast('.', "").lowercase() in AUDIO_EXT
+                    if (audio && c.getLong(4) > 0 && modified >= sinceMs)
+                        out += RecorderFile(DocumentsContract.buildDocumentUriUsingTree(tree, id), name, mime.ifEmpty { null }, null, c.getLong(4)) to modified
+                }
+            }
+        }
+        runCatching { walk(DocumentsContract.getTreeDocumentId(tree), 0) }
+        return out.sortedByDescending { it.second }
+    }
+
+    /** The call's recording from the chosen folder: the newest file naming this number, else the newest file since the call. */
+    private fun folderRecording(ctx: Context, number: String, sinceMs: Long): RecorderFile? {
+        val files = folderFiles(ctx, sinceMs - 5_000).map { it.first }.ifEmpty { return null }
+        val digits = number.filter(Char::isDigit).takeLast(7)
+        val f = files.firstOrNull { it.name.filter(Char::isDigit).contains(digits) } ?: files.first()
+        return f.copy(durationSeconds = durationOf(ctx, f.uri))
+    }
+
+    private fun durationOf(ctx: Context, uri: Uri): Int? = runCatching {
+        val r = android.media.MediaMetadataRetriever()
+        try { r.setDataSource(ctx, uri); r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong()?.div(1000)?.toInt() }
+        finally { r.release() }
+    }.getOrNull()?.takeIf { it > 0 }
+
+    /** One line for the admin (sent with every SIM call) and the setup screen: who records, where ROVEXY looks. */
+    fun recorderStatus(ctx: Context): String = listOfNotNull(
+        "Phone app: ${defaultDialer(ctx) ?: "none"}",
+        if (recordingsPrivate(ctx)) "recordings private to Google Phone" else null,
+        "folder: ${folderLabel(ctx) ?: "not chosen"}",
+        if (ContextCompat.checkSelfPermission(ctx, audioPermission) == PackageManager.PERMISSION_GRANTED) null else "audio permission missing",
+    ).joinToString(", ")
 
     fun read(ctx: Context, f: RecorderFile): ByteArray? = runCatching { ctx.contentResolver.openInputStream(f.uri)?.use { it.readBytes() } }.getOrNull()
 }

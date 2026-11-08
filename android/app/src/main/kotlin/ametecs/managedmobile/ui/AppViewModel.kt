@@ -10,6 +10,7 @@ import ametecs.managedmobile.AmmpApp
 import ametecs.managedmobile.BuildConfig
 import ametecs.managedmobile.calls.CallRecordService
 import ametecs.managedmobile.calls.CallSession
+import ametecs.managedmobile.calls.RecordingUpload
 import ametecs.managedmobile.calls.SimCalls
 import ametecs.managedmobile.core.Backoff
 import ametecs.managedmobile.core.CachedCustomer
@@ -19,6 +20,7 @@ import ametecs.managedmobile.data.ApiException
 import ametecs.managedmobile.data.obj
 import ametecs.managedmobile.data.str
 import ametecs.managedmobile.work.LocationService
+import ametecs.managedmobile.work.SyncWorker
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,6 +54,9 @@ data class ChatConv(val id: Long, val subject: String?, val lastAt: String?)
 data class ChatMsg(val id: Long, val mine: Boolean, val body: String, val at: String, val read: Boolean, val from: String? = null)
 /** Call feedback option. captures: none | promise (amount + date) | payment (amount, mode, reference, date, slip). */
 data class Outcome(val code: String, val label: String, val captures: String = "none", val needsFollowUp: Boolean = false)
+/** Call-recording setup facts for the gate screen. [locked] = Google Phone app (recordings unreachable for other apps). */
+data class RecordingSetup(val brand: String = "", val folder: String? = null, val locked: Boolean = false, val lastSeen: String? = null,
+                          val clickToCall: Boolean = false)
 data class Disclosure(val recorded: Boolean, val notice: String, val location: String?, val liveView: Boolean, val camera: Boolean)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -102,19 +107,44 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Recorded calls need the Phone app's auto-record ON. Proof = a call-recording file on the phone (see SimCalls.latestCallRecordingMs). */
     val recordingGate = MutableStateFlow(false)
+    /** What the "Turn on call recording" screen shows about this phone: who records, where ROVEXY looks, what it found. */
+    val recordingGateInfo = MutableStateFlow(RecordingSetup())
     fun openCallSettings() { SimCalls.openCallSettings(getApplication()) }
     fun closeRecordingGate() { recordingGate.value = false }
 
-    /** True while calls must stay blocked. Strict: every phone starts blocked and unlocks only when a call recording made
-     *  AFTER that moment is found (a test call from the Phone app). An answered call without a recording blocks again. */
+    /** Employee picked the folder the Phone app saves recordings in (Xiaomi/Redmi and anything MediaStore can't see). */
+    fun recorderFolderPicked(uri: android.net.Uri) {
+        runCatching { SimCalls.setFolder(getApplication(), uri) }.onFailure { error.value = "Could not use that folder: ${it.message}" }
+        checkRecordingNow()
+    }
+
+    /** "Check again": unlocks calling when a recording is now found, else refreshes what the screen says. */
+    fun checkRecordingNow() {
+        val ctx = getApplication<Application>()
+        if (!recordingBlocked(ctx)) { recordingGate.value = false; return }   // found: the gate closes and Call works
+        refreshRecordingInfo(ctx)
+    }
+
+    private fun refreshRecordingInfo(ctx: Application) {
+        val last = SimCalls.latestCallRecordingMs(ctx, System.currentTimeMillis() - 7 * 86_400_000L)
+        recordingGateInfo.value = RecordingSetup(
+            brand = Build.MANUFACTURER.lowercase(), folder = SimCalls.folderLabel(ctx), locked = SimCalls.recordingsPrivate(ctx),
+            lastSeen = last?.let { java.text.SimpleDateFormat("d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(it)) },
+            clickToCall = "server" in callingRoutes)
+    }
+
+    /** True while calls must stay blocked. A phone unlocks when a call recording is found that was saved after the block
+     *  started; the very first time, any recording from the last 24 h counts (a test call made before opening ROVEXY).
+     *  An answered call without a recording blocks again, strictly from that moment. */
     private fun recordingBlocked(ctx: Application): Boolean {
         if (!SimCalls.phoneRecorder || disclosure.value?.recorded != true) return false
-        val blockedSince = g.store.getString("rec_block_since")?.toLongOrNull()
-        if (blockedSince == null && g.store.getString("rec_ok") == "1") return false
-        if (blockedSince != null && SimCalls.latestCallRecordingMs(ctx, blockedSince) != null) {
+        val stored = g.store.getString("rec_block_since")?.toLongOrNull()
+        if (stored == null && g.store.getString("rec_ok") == "1") return false
+        val blockedSince = stored ?: (System.currentTimeMillis() - 24 * 3_600_000L).also { g.store.putString("rec_block_since", it.toString()) }
+        if (SimCalls.latestCallRecordingMs(ctx, blockedSince) != null) {
             g.store.putString("rec_ok", "1"); g.store.putString("rec_block_since", null); return false
         }
-        if (blockedSince == null) g.store.putString("rec_block_since", System.currentTimeMillis().toString())   // a test call from now on unlocks
+        refreshRecordingInfo(ctx)
         return true
     }
     private var finishing = false
@@ -508,19 +538,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Late upload of a recording the phone's recorder saved after the call screen closed. True when done or given up. */
     private suspend fun huntRecording(): Boolean {
-        val h = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject } ?: return true
+        if (g.store.getString("rec_hunt") == null) return true
         if (g.store.getString("sim_pending") != null || finishing) return false
-        val since = h.str("since")!!.toLong()
-        if (System.currentTimeMillis() - since > 30 * 60_000) { g.store.putString("rec_hunt", null); return true }
         val ctx = getApplication<Application>()
         SimCalls.rescan(ctx); delay(1500)
-        val f = SimCalls.findRecording(ctx, h.str("number")!!, since) ?: return false
-        g.store.putString("rec_hunt", null)
-        g.store.putString("rec_ok", "1"); g.store.putString("rec_block_since", null)
-        g.store.putString("sim_pending", buildJsonObject {
-            put("id", h.str("id")!!); put("number", h.str("number")!!); put("since", since.toString())
-            put("stage", "upload"); put("uri", f.uri.toString()); put("name", f.name); put("mime", f.mime ?: "audio/mp4"); f.durationSeconds?.let { put("dur", it) }
-        }.toString())
+        if (!RecordingUpload.hunt(g, ctx)) return g.store.getString("rec_hunt") == null   // not found yet (or given up after 24 h)
         finishing = true
         try { finishSimCall() } finally { finishing = false }
         return true
@@ -596,6 +618,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         offhook?.let { put("offhook_seconds", it) }
                         put("missing_permissions", missing.joinToString(","))
                         put("phone", "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL} / Android ${android.os.Build.VERSION.RELEASE}")
+                        put("recorder", SimCalls.recorderStatus(ctx))
                         file?.let { put("recording_file", it.name) }
                         put("in_app_recorder", when { SimCalls.phoneRecorder -> "off (phone's own recorder mode)"; !CallRecordService.accessibilityOn(ctx) -> "accessibility_off"; own.length() > 2_000 -> "recorded ${own.length() / 1024} KB, speaker ${when (CallRecordService.speakerOn) { true -> "on"; false -> "could not switch on"; null -> "n/a" }}, ${CallRecordService.lastInfo ?: "no level info"}"; else -> CallRecordService.lastError ?: "no_audio" })
                         if (talk > 0 && file == null) put("audio_folders_since_call", SimCalls.recentAudioFolders(ctx, log?.startedAtMs ?: since).joinToString(" | ").ifEmpty { "none" })
@@ -623,17 +646,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             if (stage == "upload") {
-                val current = g.api.json.parseToJsonElement(g.store.getString("sim_pending")!!).jsonObject
                 show(call.value?.state ?: "completed", "Uploading the call recording…")
-                val f = SimCalls.RecorderFile(android.net.Uri.parse(current.str("uri")), current.str("name")!!, current.str("mime"), current.str("dur")?.toIntOrNull(), 0)
-                val bytes = SimCalls.read(ctx, f) ?: run { g.store.putString("sim_pending", null); show(call.value?.state ?: "completed", "The recording file is no longer readable."); return }
-                val r = g.session.workUpload("/api/mobile/v1/calls/$id/recording") {
-                    okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
-                        .apply { f.durationSeconds?.let { addFormDataPart("duration_seconds", it.toString()) } }
-                        .addFormDataPart("file", f.name, bytes.toRequestBody((f.mime ?: "audio/mp4").toMediaTypeOrNull())).build()
-                }.obj()
-                g.store.putString("sim_pending", null)
-                if (f.uri.scheme == "file") f.uri.path?.let { java.io.File(it).delete() }   // in-app recording uploaded: remove the local copy
+                val waiting = g.store.getString("sim_pending") != null   // false: the background sync already uploaded it
+                val r = RecordingUpload.uploadPending(g, ctx)
+                    ?: run { show(call.value?.state ?: "completed", if (waiting) "The recording file is no longer readable." else "Call recording uploaded."); return }
                 applyCall(id, r, customer)
             }
             refreshToday()
@@ -641,7 +657,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             if (e.status in 400..499 && e.status != 401 && e.status != 429) g.store.putString("sim_pending", null)   // server refused: do not retry forever
             show(call.value?.state ?: "saving", "Could not save the call: ${e.message}")
         } catch (e: java.io.IOException) {
-            show(call.value?.state ?: "saving", "No connection. The call will be saved when you are back online — tap Finish call.")
+            SyncWorker.syncNow(ctx)   // runs as soon as there is a connection, even with the app closed
+            show(call.value?.state ?: "saving", if (g.store.getString("sim_pending")?.contains("\"upload\"") == true)
+                "No connection. The recording is saved on the phone and uploads automatically when you are back online."
+                else "No connection. The call will be saved when you are back online — tap Finish call.")
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {

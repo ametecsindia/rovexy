@@ -85,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ametecs.managedmobile.core.CachedCustomer
+import ametecs.managedmobile.calls.SimCalls
 import ametecs.managedmobile.media.MediaRequest
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -459,7 +460,7 @@ fun Dashboard(vm: AppViewModel) {
     val setup by vm.recorderSetup.collectAsState()
     if (setup) RecorderSetupDialog(vm::openRecorderSettings, vm::closeRecorderSetup)
     val recGate by vm.recordingGate.collectAsState()
-    if (recGate) RecordingGateDialog(vm::openCallSettings, vm::closeRecordingGate)
+    if (recGate) RecordingGateDialog(vm)
     if (showDisclosure) disclosure?.let { d -> DisclosureDialog(d) { showDisclosure = false } }
     if (showFilters) FilterSheet(cases, filter, onApply = { filter = it; showFilters = false }, onDismiss = { showFilters = false })
     chatOpen?.let { ChatDialog(vm, it) }
@@ -498,14 +499,42 @@ private fun RecorderSetupDialog(open: () -> Unit, close: () -> Unit) {
 }
 
 @Composable
-private fun RecordingGateDialog(open: () -> Unit, close: () -> Unit) {
-    AlertDialog(onDismissRequest = close, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Mic, Ds.Red, 48) },
+private fun RecordingGateDialog(vm: AppViewModel) {
+    val info by vm.recordingGateInfo.collectAsState()
+    val pickFolder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { u -> if (u != null) vm.recorderFolderPicked(u) }
+    val xiaomi = info.brand in setOf("xiaomi", "redmi", "poco")
+    val steps = when {
+        info.locked -> "This phone uses Google's Phone app. It keeps call recordings inside itself, where no other app can reach them, " +
+            "so ROVEXY cannot collect them.\n\nTo use SIM calls: open Default apps and choose the phone maker's own Phone app " +
+            "(if the phone has one), switch on its auto call recording, then choose its recordings folder below." +
+            if (info.clickToCall) "\n\nOr call with Click2Call — those calls are recorded by the company server." else ""
+        xiaomi -> "1. Tap Open call settings → Call recording → Record calls automatically → ON (All numbers).\n" +
+            "2. Tap Choose recordings folder. Open MIUI › sound_recorder › call_rec, tap Use this folder, then Allow.\n" +
+            "3. Make one short test call from the Phone app to any number that answers.\n4. Come back and tap Check again."
+        else -> "1. Tap Open call settings and switch auto call recording ON for all calls " +
+            "(Samsung: Record calls → Auto record calls; OPPO/OnePlus/Realme: Call recording → Auto-record all calls; Vivo: Call recording → Record all calls).\n" +
+            "2. Tap Choose recordings folder and pick the folder your Phone app saves recordings in, then Allow.\n" +
+            "3. Make one short test call from the Phone app to any number that answers.\n4. Come back and tap Check again."
+    }
+    AlertDialog(onDismissRequest = vm::closeRecordingGate, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Mic, Ds.Red, 48) },
         title = { Text("Turn on call recording") }, text = {
-            Text("Company calls must be recorded. Calls are blocked until your Phone app records them.\n\n" +
-                "1. Tap Open call settings.\n2. Open Record calls (Samsung: Record calls → Auto record calls; OPPO/OnePlus: Call recording → Auto-record all calls).\n" +
-                "3. Switch auto-recording ON for all calls.\n4. Make one short test call from your Phone app (any number that answers).\n5. Come back and tap Call again.\n\n" +
-                "Calling unlocks as soon as the recording of that test call is found on the phone.", style = MaterialTheme.typography.bodyMedium)
-        }, confirmButton = { PrimaryButton("Open call settings", onClick = open) }, dismissButton = { TextButton(onClick = close) { Text("Not now") } })
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Company calls must be recorded. SIM calls stay blocked until ROVEXY finds a recording made by your Phone app.", style = MaterialTheme.typography.bodyMedium)
+                // Status: what ROVEXY sees on this phone right now.
+                Column(Modifier.fillMaxWidth().background(Ds.Bg, RoundedCornerShape(12.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(if (info.folder != null) "✓ Recordings folder: ${info.folder}" else "✗ Recordings folder: not chosen",
+                        color = if (info.folder != null) Ds.Green else Ds.Amber, style = MaterialTheme.typography.bodySmall)
+                    Text(if (info.lastSeen != null) "✓ Last recording found: ${info.lastSeen}" else "✗ No call recording found yet",
+                        color = if (info.lastSeen != null) Ds.Green else Ds.Red, style = MaterialTheme.typography.bodySmall)
+                }
+                Text(steps, style = MaterialTheme.typography.bodyMedium)
+                OutlinedButton(onClick = { pickFolder.launch(SimCalls.suggestedFolder()) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (info.folder != null) "Change recordings folder" else "Choose recordings folder")
+                }
+                OutlinedButton(onClick = vm::checkRecordingNow, modifier = Modifier.fillMaxWidth()) { Text("Check again") }
+            }
+        }, confirmButton = { PrimaryButton("Open call settings", onClick = vm::openCallSettings) },
+        dismissButton = { TextButton(onClick = vm::closeRecordingGate) { Text("Not now") } })
 }
 
 @Composable
