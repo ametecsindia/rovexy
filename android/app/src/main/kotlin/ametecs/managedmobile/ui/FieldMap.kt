@@ -1,6 +1,11 @@
 package ametecs.managedmobile.ui
 
 import android.Manifest
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.asPaddingValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -165,7 +170,7 @@ private fun friendly(e: Throwable): String = when (e) {
     else -> "Map service is not available right now."
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilter, onClose: () -> Unit) {
     val ctx = LocalContext.current
@@ -336,7 +341,7 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
         sheetShadowElevation = 16.dp,
         sheetShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
         sheetContent = {
-            LazyColumn(Modifier.fillMaxWidth().fillMaxHeight(0.86f), state = list) {
+            LazyColumn(Modifier.fillMaxWidth().fillMaxHeight(0.86f), state = list, contentPadding = WindowInsets.navigationBars.asPaddingValues()) {
                 // 1. The customer that matters now: the one tapped, else the nearest.
                 item(key = "hero") {
                     if (hero != null) CustomerSheetCard(hero, label = if (sel != null) (if (hero.r.c.id == nearest?.r?.c?.id) "NEAREST · SELECTED" else "SELECTED") else "NEAREST CUSTOMER",
@@ -367,10 +372,10 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(if (planning) "Tick up to $MAX_STOPS customers below" else "Customers ${if (radiusKm == 0) "by distance" else "within $radiusKm km"} · ${nearby.size}",
-                                color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f))
+                                color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, modifier = Modifier.weight(1f), maxLines = 2, overflow = TextOverflow.Ellipsis)
                             TextButton(onClick = { planning = !planning; if (!planning) picked = emptyList() }) { Text(if (planning) "Cancel" else "Plan a route", color = Ds.Navy) }
                         }
-                        if (planning) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (planning) FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(enabled = picked.isNotEmpty() && !routeBusy, onClick = { selected = null; scope.launch { loadRoute(picked, optimize = true) } },
                                 colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy), shape = RoundedCornerShape(12.dp)) { Text("Show route (${picked.size})") }
                             val r = route
@@ -458,7 +463,7 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
                             Icon(AmmpIcons.Search, null, tint = Ds.Muted, modifier = Modifier.size(20.dp))
                             Spacer(Modifier.width(10.dp))
                             Box(Modifier.weight(1f)) {
-                                if (filter.query.isEmpty()) Text("Search customer", color = Ds.Muted, fontSize = 15.sp)
+                                if (filter.query.isEmpty()) Text("Search customer", color = Ds.Muted, fontSize = 15.sp, maxLines = 1)
                                 BasicTextField(filter.query, { filter = filter.copy(query = it) }, singleLine = true,
                                     textStyle = MaterialTheme.typography.bodyLarge.copy(color = Ds.Ink, fontSize = 15.sp), modifier = Modifier.fillMaxWidth())
                             }
@@ -664,15 +669,15 @@ private fun SheetAction(icon: ImageVector, label: String, modifier: Modifier, en
     Column(modifier.clip(RoundedCornerShape(14.dp)).background(Ds.Bg).clickable(enabled = enabled, onClick = onClick).padding(vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = if (enabled) Ds.Navy else Ds.Muted, modifier = Modifier.size(20.dp))
-        Text(label, fontSize = 12.sp, color = if (enabled) Ds.Ink else Ds.Muted, fontWeight = FontWeight.Medium, modifier = Modifier.padding(top = 2.dp))
+        Text(label, fontSize = 12.sp, color = if (enabled) Ds.Ink else Ds.Muted, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp, start = 4.dp, end = 4.dp))
     }
 }
 
 @Composable
 private fun MapKv(label: String, value: String, modifier: Modifier, color: Color = Ds.Ink) {
     Column(modifier) {
-        Text(value, color = color, fontWeight = FontWeight.SemiBold, fontSize = 15.sp, maxLines = 1)
-        Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1)
+        Text(value, color = color, fontWeight = FontWeight.SemiBold, fontSize = fitSp(value, 15), maxLines = 1, softWrap = false)
+        Text(label, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -729,7 +734,7 @@ private fun RouteSummary(r: RouteLine, pinned: List<CaseRow>) {
                 Box(Modifier.size(22.dp).background(Color(0xFF7C3AED), CircleShape), contentAlignment = Alignment.Center) { Text("${i + 1}", color = Color.White, fontSize = 11.sp) }
                 Spacer(Modifier.width(8.dp))
                 Text(pinned.firstOrNull { it.c.id == id }?.c?.name ?: "#$id", fontSize = 14.sp, color = Ds.Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                leg?.let { Text("+${km(it.meters)} · ${eta(it.seconds)}", fontSize = 12.sp, color = Ds.Muted) }
+                leg?.let { Text("+${km(it.meters)} · ${eta(it.seconds)}", fontSize = 12.sp, color = Ds.Muted, maxLines = 1, softWrap = false) }
             }
         }
         Text("Order chosen by Google for the shortest drive; the farthest customer is last.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
@@ -737,6 +742,7 @@ private fun RouteSummary(r: RouteLine, pinned: List<CaseRow>) {
 }
 
 /** Set a case's map pin: GPS at the customer's door, or Google's match for the case address (confirmed before saving). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun UpdateLocationDialog(vm: AppViewModel, case: CaseRow, onDone: () -> Unit) {
     val scope = rememberCoroutineScope()
@@ -752,7 +758,7 @@ fun UpdateLocationDialog(vm: AppViewModel, case: CaseRow, onDone: () -> Unit) {
     AlertDialog(onDismissRequest = onDone, title = { Text("Update location · ${case.c.name}") }, text = {
         Column {
             Text("Use your GPS when you are at the customer's door, or look up the case address.", style = MaterialTheme.typography.bodySmall)
-            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(enabled = !busy, onClick = { run {
                     val f = vm.freshLocation() ?: throw ApiException(0, "no_fix", "Your location could not be detected. Turn on GPS and try again.")
                     source = "gps"; accuracy = if (f.hasAccuracy()) f.accuracy else null

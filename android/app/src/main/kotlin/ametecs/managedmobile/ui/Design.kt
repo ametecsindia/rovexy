@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.Typography
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -30,8 +31,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -56,18 +61,41 @@ object Ds {
     val Card = RoundedCornerShape(20.dp)
 }
 
+/** Narrowest width (dp) the screens are designed for; phones narrower than this are scaled to fit, not squeezed. */
+private const val DESIGN_WIDTH_DP = 360f
+/** System "Text size" range honoured. Xiaomi/Redmi/Vivo often ship at 1.3+, which wrapped every card. */
+private const val MIN_FONT_SCALE = 0.85f
+private const val MAX_FONT_SCALE = 1.15f
+
 @Composable
-fun AmmpTheme(content: @Composable () -> Unit) = MaterialTheme(
-    colorScheme = lightColorScheme(primary = Ds.Navy, secondary = Ds.Gold, background = Ds.Bg, surface = Ds.Surface, onSurface = Ds.Ink, error = Ds.Red),
-    typography = Typography(
-        headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
-        titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
-        bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
-        bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = Ds.Muted),
-        labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp),
-    ),
-    content = content,
-)
+fun AmmpTheme(content: @Composable () -> Unit) {
+    // One layout on every phone: a raised "Display size" (or a small screen) leaves fewer than 360 dp of width, so the
+    // whole UI is scaled down to fit 360 dp instead of wrapping and overflowing; the text-size setting is kept within range.
+    val d = LocalDensity.current
+    val widthDp = LocalConfiguration.current.screenWidthDp
+    val fit = if (widthDp in 1 until DESIGN_WIDTH_DP.toInt()) widthDp / DESIGN_WIDTH_DP else 1f
+    val density = Density(d.density * fit, d.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE))
+    CompositionLocalProvider(LocalDensity provides density) {
+        MaterialTheme(
+            colorScheme = lightColorScheme(primary = Ds.Navy, secondary = Ds.Gold, background = Ds.Bg, surface = Ds.Surface, onSurface = Ds.Ink, error = Ds.Red),
+            typography = Typography(
+                headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
+                titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                bodyMedium = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
+                bodySmall = TextStyle(fontSize = 12.sp, lineHeight = 16.sp, color = Ds.Muted),
+                labelSmall = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 1.2.sp),
+            ),
+            content = content,
+        )
+    }
+}
+
+/** Font size for a number/amount in a narrow column: long values (₹12,34,567 · 12 · 100%) step down instead of being cut. */
+fun fitSp(text: String, base: Int) = when {
+    text.length <= 7 -> base.sp
+    text.length <= 10 -> (base - 3).sp
+    else -> (base - 5).sp
+}
 
 private fun glyph(d: String): ImageVector = ImageVector.Builder(defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f)
     .addPath(PathParser().parsePathString(d).toNodes(), fill = SolidColor(Color.White)).build()
@@ -121,7 +149,7 @@ fun Pill(text: String, color: Color, selected: Boolean = true, onClick: (() -> U
     Box(Modifier.background(if (selected) color else Ds.Surface, RoundedCornerShape(50))
         .border(1.dp, if (selected) color else Ds.Line, RoundedCornerShape(50))
         .let { m -> if (onClick != null) m.clickable(onClick = onClick) else m }.padding(horizontal = 14.dp, vertical = 7.dp)) {
-        Text(text, color = if (selected) Color.White else Ds.Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Text(text, color = if (selected) Color.White else Ds.Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
     }
 }
 
@@ -129,7 +157,7 @@ fun Pill(text: String, color: Color, selected: Boolean = true, onClick: (() -> U
 fun StatusTag(status: String) {
     val c = statusColor(status)
     Box(Modifier.background(c.copy(alpha = 0.10f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(status.replace('_', ' ').replaceFirstChar { it.uppercase() }, color = c, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(status.replace('_', ' ').replaceFirstChar { it.uppercase() }, color = c, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -152,7 +180,7 @@ fun Avatar(name: String, size: Int = 44) {
 @Composable
 fun SectionTitle(text: String, trailing: (@Composable RowScope.() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(text, style = MaterialTheme.typography.titleMedium, color = Ds.Ink, modifier = Modifier.weight(1f))
+        Text(text, style = MaterialTheme.typography.titleMedium, color = Ds.Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
         trailing?.invoke(this)
     }
 }
@@ -164,10 +192,10 @@ fun Banner(icon: ImageVector, tint: Color, title: String, body: String, action: 
             IconTile(icon, tint, 40)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold, color = Ds.Ink, fontSize = 14.sp)
-                Text(body, style = MaterialTheme.typography.bodySmall)
+                Text(title, fontWeight = FontWeight.SemiBold, color = Ds.Ink, fontSize = 14.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(body, style = MaterialTheme.typography.bodySmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
             }
-            if (action != null) Text(action, color = tint, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, modifier = Modifier.padding(start = 8.dp))
+            if (action != null) Text(action, color = tint, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 8.dp))
         }
     }
 }

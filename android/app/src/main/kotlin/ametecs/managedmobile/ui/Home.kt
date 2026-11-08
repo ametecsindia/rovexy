@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -68,8 +69,8 @@ fun TodayCard(t: Today, modifier: Modifier = Modifier) {
             ).forEachIndexed { i, (v, l, c) ->
                 if (i > 0) Box(Modifier.width(1.dp).height(36.dp).background(Ds.Line).align(Alignment.CenterVertically))
                 Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(v, color = c, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-                    Text(l, color = Ds.Muted, fontSize = 11.sp, maxLines = 1)
+                    Text(v, color = c, fontSize = fitSp(v, 18), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    Text(l, color = Ds.Muted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 2.dp))
                 }
             }
         }
@@ -97,7 +98,7 @@ fun PriorityTiles(all: List<CaseRow>, f: CaseFilter, onTile: (String) -> Unit) {
             Column(Modifier.width(112.dp).clip(RoundedCornerShape(16.dp)).background(if (on) Ds.Navy else Color.White)
                 .border(1.dp, if (on) Ds.Navy else if (warn) Ds.Amber.copy(alpha = 0.5f) else Ds.Line, RoundedCornerShape(16.dp))
                 .clickable { onTile(key) }.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                Text(n.toString(), color = if (on) Color.White else if (warn) Ds.Amber else Ds.Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                Text(n.toString(), color = if (on) Color.White else if (warn) Ds.Amber else Ds.Ink, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
                 Text(label, color = if (on) Ds.GoldSoft else Ds.Muted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -154,7 +155,7 @@ fun SearchFilterBar(f: CaseFilter, shown: Int, total: Int, onChange: (CaseFilter
                 Row(Modifier.padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(AmmpIcons.Filter, null, tint = if (chips.isNotEmpty()) Color.White else Ds.Navy, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (chips.isEmpty()) "Filter" else "Filter · ${chips.size}", color = if (chips.isNotEmpty()) Color.White else Ds.Navy, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Text(if (chips.isEmpty()) "Filter" else "Filter · ${chips.size}", color = if (chips.isNotEmpty()) Color.White else Ds.Navy, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -163,7 +164,7 @@ fun SearchFilterBar(f: CaseFilter, shown: Int, total: Int, onChange: (CaseFilter
             chips.forEach { (label, without) ->
                 Row(Modifier.clip(RoundedCornerShape(50)).background(Ds.Navy.copy(alpha = 0.08f)).clickable { onChange(without) }.padding(start = 12.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text(label, color = Ds.Navy, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(label, color = Ds.Navy, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false)
                     Spacer(Modifier.width(4.dp))
                     Icon(AmmpIcons.Close, "Remove $label", tint = Ds.Navy, modifier = Modifier.size(14.dp))
                 }
@@ -172,11 +173,12 @@ fun SearchFilterBar(f: CaseFilter, shown: Int, total: Int, onChange: (CaseFilter
                 modifier = Modifier.clickable { onChange(CaseFilter(query = f.query, sort = f.sort)) }.padding(6.dp))
         }
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (chips.isEmpty() && f.query.isBlank()) "My cases" else "Matching cases", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-            Text("  $shown of $total", color = Ds.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text(if (chips.isEmpty() && f.query.isBlank()) "My cases" else "Matching cases", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, maxLines = 1, softWrap = false)
+            Text("  $shown of $total", color = Ds.Muted, fontSize = 13.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Box {
                 Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable { sortOpen = true }.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Sort: " + (SORTS.toMap()[f.sort] ?: ""), color = Ds.Navy, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text("Sort: " + (SORTS.toMap()[f.sort] ?: ""), color = Ds.Navy, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 180.dp))
                     Text(" ▾", color = Ds.Navy, fontSize = 13.sp)
                 }
                 androidx.compose.material3.DropdownMenu(sortOpen, onDismissRequest = { sortOpen = false }) {
@@ -203,7 +205,7 @@ fun FilterSheet(all: List<CaseRow>, start: CaseFilter, onApply: (CaseFilter) -> 
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             opts.forEach { (k, l) ->
                 val on = current == k
-                Text(l, color = if (on) Color.White else Ds.Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium,
+                Text(l, color = if (on) Color.White else Ds.Ink, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, softWrap = false,
                     modifier = Modifier.clip(RoundedCornerShape(50)).background(if (on) Ds.Navy else Color.White)
                         .border(1.dp, if (on) Ds.Navy else Ds.Line, RoundedCornerShape(50)).clickable { pick(if (on) "" else k) }   // tap again = off
                         .padding(horizontal = 14.dp, vertical = 8.dp))
@@ -231,7 +233,7 @@ fun FilterSheet(all: List<CaseRow>, start: CaseFilter, onApply: (CaseFilter) -> 
             Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(onClick = onDismiss, modifier = Modifier.weight(1f).height(50.dp), shape = RoundedCornerShape(14.dp)) { Text("Cancel", color = Ds.Ink) }
                 Button(onClick = { onApply(f) }, modifier = Modifier.weight(2f).height(50.dp), shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy)) { Text("Show $count case${if (count == 1) "" else "s"}", fontWeight = FontWeight.SemiBold) }
+                    colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy)) { Text("Show $count case${if (count == 1) "" else "s"}", fontWeight = FontWeight.SemiBold, maxLines = 1) }
             }
         }
     }
@@ -248,9 +250,10 @@ fun MapShortcut(nearbyText: String, onClick: () -> Unit) {
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Customers near me", color = Ds.NavyInk, fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
-            Text(nearbyText, color = Ds.NavyInk.copy(alpha = 0.75f), fontSize = 12.sp)
+            Text("Customers near me", color = Ds.NavyInk, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(nearbyText, color = Ds.NavyInk.copy(alpha = 0.75f), fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
-        Text("Open map ›", color = Ds.NavyInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+        Spacer(Modifier.width(8.dp))
+        Text("Open map ›", color = Ds.NavyInk, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, softWrap = false)
     }
 }

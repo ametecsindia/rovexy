@@ -265,7 +265,7 @@ fun AuthLayout(vm: AppViewModel, mode: String) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                     Icon(AmmpIcons.Shield, null, tint = gold, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Company-managed device \u00b7 activity is visible to you under Monitoring", color = Ds.Muted, fontSize = 11.sp)
+                    Text("Company-managed device \u00b7 activity is visible to you under Monitoring", color = Ds.Muted, fontSize = 11.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
             }
         }
@@ -392,19 +392,19 @@ fun Dashboard(vm: AppViewModel) {
                     }
                     Spacer(Modifier.height(18.dp))
                     Text("${greeting()},", color = Color(0xFFC8D3E0), fontSize = 15.sp)
-                    Text(name.ifBlank { "there" }.split(" ").first(), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold)
+                    Text(name.ifBlank { "there" }.split(" ").first(), color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(10.dp))
                     val age = status.lastSyncEpochMs?.let { (System.currentTimeMillis() - it) / 60000 }
                     Row(Modifier.background(Color.White.copy(alpha = 0.09f), RoundedCornerShape(50)).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(8.dp).background(if (status.online) Color(0xFF4ADE80) else Color(0xFF94A3B8), CircleShape))
                         Spacer(Modifier.width(8.dp))
                         Text((if (status.online) "Online" else "Offline") + " · synced " + (age?.let { if (it < 1) "just now" else "$it min ago" } ?: "never") +
-                            (if (status.pendingEvents > 0) " · ${status.pendingEvents} waiting" else ""), color = Color.White, fontSize = 12.sp)
+                            (if (status.pendingEvents > 0) " · ${status.pendingEvents} waiting" else ""), color = Color.White, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.height(18.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Portfolio worked", color = Color(0xFFC8D3E0), fontSize = 12.sp, modifier = Modifier.weight(1f))
-                        Text("$worked of ${customers.size}", color = Ds.GoldSoft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("$worked of ${customers.size}", color = Ds.GoldSoft, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                     }
                     Spacer(Modifier.height(6.dp))
                     Box(Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(Color.White.copy(alpha = 0.12f))) {
@@ -430,8 +430,8 @@ fun Dashboard(vm: AppViewModel) {
         item(key = "tiles") {
             Column(Modifier.padding(top = 20.dp)) {
                 Row(Modifier.padding(horizontal = 16.dp, vertical = 0.dp).padding(bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Today's priorities", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f))
-                    Text("Tap to filter", color = Ds.Muted, fontSize = 12.sp)
+                    Text("Today's priorities", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 17.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("Tap to filter", color = Ds.Muted, fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
                 PriorityTiles(cases, filter) { key -> filter = filter.copy(tile = if (filter.tile == key) "" else key) }
             }
@@ -453,7 +453,7 @@ fun Dashboard(vm: AppViewModel) {
         items(shown, key = { it.c.id }) { r ->
             CaseCard(r, outcomeLabel, enabled = !busy && call == null, onOpen = { vm.openProfile(r.c.id) }, onCall = { vm.placeCall(r.c, "primary") })
         }
-        item(key = "foot") { Spacer(Modifier.height(32.dp)) }
+        item(key = "foot") { Spacer(Modifier.navigationBarsPadding().height(32.dp)) }   // last card clears the phone's nav buttons
     }
 
     call?.let { CallPanel(it, vm) }
@@ -637,8 +637,8 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                 Avatar(title, 48)
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text(title, style = MaterialTheme.typography.titleMedium, color = Ds.Ink)
-                    Text(headline, color = if (c.state == "completed") Ds.Green else Ds.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    Text(title, style = MaterialTheme.typography.titleMedium, color = Ds.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(headline, color = if (c.state == "completed") Ds.Green else Ds.Muted, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 if (!ended && c.state != "ask_answered") CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Ds.Navy)
             }
@@ -700,8 +700,8 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                         }
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { cameraPerm.launch(android.Manifest.permission.CAMERA) }) { Text("Take photo") }
-                            OutlinedButton(onClick = { pickFile.launch(arrayOf("image/*", "application/pdf")) }) { Text("Choose file") }
+                            OutlinedButton(onClick = { cameraPerm.launch(android.Manifest.permission.CAMERA) }, modifier = Modifier.weight(1f)) { Text("Take photo", maxLines = 1) }
+                            OutlinedButton(onClick = { pickFile.launch(arrayOf("image/*", "application/pdf")) }, modifier = Modifier.weight(1f)) { Text("Choose file", maxLines = 1) }
                         }
                         Text("Optional, but the office checks payments against the slip.", color = Ds.Muted, fontSize = 12.sp)
                     }
@@ -760,7 +760,7 @@ fun MediaRequestDialog(r: MediaRequest, onAccept: () -> Unit, onDecline: () -> U
 fun MonitoringBanner(sessionId: String, voice: Boolean = false, onStop: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(Ds.Red).statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp).semantics { contentDescription = "Sharing active $sessionId" },
         verticalAlignment = Alignment.CenterVertically) {
-        Text(if (voice) "● On a call with your supervisor" else "● Sharing with your supervisor", color = Color.White, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+        Text(if (voice) "● On a call with your supervisor" else "● Sharing with your supervisor", color = Color.White, modifier = Modifier.weight(1f), fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
         TextButton(onClick = onStop) { Text(if (voice) "HANG UP" else "STOP", color = Color.White, fontWeight = FontWeight.Bold) }
     }
 }

@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -262,7 +263,7 @@ fun CaseCard(r: CaseRow, outcomeLabel: (String) -> String, enabled: Boolean, onO
                 Text(listOfNotNull(
                     r.dueDate?.let { "Due ${it.format(dFmt)}" },
                     r.lastCallAt?.let { "Last call ${fmtWhen(it)}" + (r.lastOutcome?.let { o -> " · ${outcomeLabel(o)}" } ?: "") } ?: "Not called yet",
-                ).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 2)
+                ).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
             val flags = listOfNotNull(
                 r.nextCallback?.let { (if (r.callbackDate?.isAfter(LocalDate.now()) == true) "Callback " else "Callback due ") + fmtWhen(it) to Ds.Amber },
@@ -279,7 +280,7 @@ fun CaseCard(r: CaseRow, outcomeLabel: (String) -> String, enabled: Boolean, onO
 @Composable
 private fun Tag(text: String, c: Color) {
     Box(Modifier.background(c.copy(alpha = 0.10f), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 3.dp)) {
-        Text(text.replace('_', ' ').replaceFirstChar { it.uppercase() }, color = c, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(text.replace('_', ' ').replaceFirstChar { it.uppercase() }, color = c, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
     }
 }
 
@@ -321,13 +322,13 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
     val address = p?.let { addressOf(it) }
     val loc = p?.o("location")
 
-    Column(Modifier.fillMaxSize().background(Ds.Bg)) {
+    Column(Modifier.fillMaxSize().background(Ds.Bg).navigationBarsPadding()) {
         // Header: who, which case, how much and how late.
         Column(Modifier.fillMaxWidth().background(Ds.Hero, RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)).statusBarsPadding().padding(start = 8.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onClose) { Text("‹ Back", color = Color.White) }
                 Spacer(Modifier.weight(1f))
-                if (offline) Text("Offline · saved summary", color = Ds.GoldSoft, fontSize = 12.sp)
+                if (offline) Text("Offline · saved summary", color = Ds.GoldSoft, fontSize = 12.sp, maxLines = 1, softWrap = false)
                 TextButton(onClick = vm::reloadProfile) { Text("Refresh", color = Ds.GoldSoft) }
             }
             Row(Modifier.padding(start = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -335,7 +336,7 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(case.c.name, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(case.c.ref, p?.s("portfolio") ?: case.portfolio).joinToString(" · "), color = Color(0xFFC8D3E0), fontSize = 13.sp)
+                    Text(listOfNotNull(case.c.ref, p?.s("portfolio") ?: case.portfolio).joinToString(" · "), color = Color(0xFFC8D3E0), fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(p?.o("assigned_user")?.s("name")?.let { "Assigned to $it" + (p?.o("team")?.s("name")?.let { t -> " · $t" } ?: "") } ?: (case.team?.let { "Group: $it" } ?: ""),
                         color = Color(0xFFC8D3E0), fontSize = 12.sp)
                 }
@@ -366,9 +367,9 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = { dialog = "promise" }, modifier = Modifier.weight(1f)) { Text("Promise", fontSize = 13.sp) }
-            OutlinedButton(onClick = { dialog = "note" }, modifier = Modifier.weight(1f)) { Text("Note", fontSize = 13.sp) }
-            OutlinedButton(onClick = { dialog = "status" }, modifier = Modifier.weight(1f)) { Text("Status", fontSize = 13.sp) }
+            OutlinedButton(onClick = { dialog = "promise" }, modifier = Modifier.weight(1f)) { Text("Promise", fontSize = 13.sp, maxLines = 1, softWrap = false) }
+            OutlinedButton(onClick = { dialog = "note" }, modifier = Modifier.weight(1f)) { Text("Note", fontSize = 13.sp, maxLines = 1, softWrap = false) }
+            OutlinedButton(onClick = { dialog = "status" }, modifier = Modifier.weight(1f)) { Text("Status", fontSize = 13.sp, maxLines = 1, softWrap = false) }
         }
         err?.let { Text(it, color = Ds.Red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
         ScrollableTabRow(selectedTabIndex = tab, containerColor = Ds.Bg, edgePadding = 12.dp) {
@@ -407,8 +408,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
 @Composable
 private fun HeroMetric(label: String, value: String, modifier: Modifier, alert: Boolean = false) {
     Column(modifier) {
-        Text(value, color = if (alert) Color(0xFFFFB4A8) else Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        Text(label, color = Color(0xFFC8D3E0), fontSize = 11.sp)
+        Text(value, color = if (alert) Color(0xFFFFB4A8) else Color.White, fontSize = fitSp(value, 18), fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+        Text(label, color = Color(0xFFC8D3E0), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -417,7 +418,7 @@ private fun ActionChip(icon: ImageVector, text: String, tint: Color, modifier: M
     Column(modifier.clip(RoundedCornerShape(14.dp)).background(Ds.Surface).border(1.dp, Ds.Line, RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onClick)
         .padding(vertical = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Icon(icon, null, tint = if (enabled) tint else Ds.Muted, modifier = Modifier.size(20.dp))
-        Text(text, fontSize = 12.sp, color = if (enabled) Ds.Ink else Ds.Muted, fontWeight = FontWeight.Medium)
+        Text(text, fontSize = 12.sp, color = if (enabled) Ds.Ink else Ds.Muted, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 4.dp))
     }
 }
 
@@ -627,6 +628,7 @@ private fun FollowUpsTab(p: JsonObject) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddressTab(p: JsonObject, ctx: Context, vm: AppViewModel, case: CaseRow) {
     var update by remember { mutableStateOf(false) }
@@ -637,7 +639,7 @@ private fun AddressTab(p: JsonObject, ctx: Context, vm: AppViewModel, case: Case
             CaseMiniMap(vm, case.c.id, case.c.name, loc.d("lat")!!, loc.d("lng")!!) { OsmMap(loc.d("lat")!!, loc.d("lng")!!) }
             Text("Pin saved on this case. Tap the pin or Distance & route for the road route.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
         } else Text("Location unavailable — no map coordinates are saved for this customer. Directions use the address instead.", style = MaterialTheme.typography.bodySmall)
-        Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {   // wraps on narrow phones
             if (loc != null) Button(onClick = { vm.openFieldMap(case.c.id) }, colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy)) { Text("Distance & route") }
             OutlinedButton(onClick = { update = true }) { Text(if (loc == null) "Add location" else "Update location") }
         }
@@ -673,12 +675,13 @@ private fun AddressHistory(items: List<JsonObject>) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddressBlock(p: JsonObject, ctx: Context) {
     val a = addressOf(p)
     val loc = p.o("location")
     Text(a ?: "Address not available.", color = if (a == null) Ds.Muted else Ds.Ink, fontSize = 14.sp)
-    Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {   // wraps on narrow phones
         Button(onClick = { openDirections(ctx, loc, a) }, enabled = a != null || loc != null, colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy)) { Text("Get directions") }
         OutlinedButton(onClick = { copy(ctx, a ?: "") }, enabled = a != null) { Text("Copy address") }
         if (loc != null) OutlinedButton(onClick = { openMap(ctx, loc, p.s("name") ?: "") }) { Text("Open map") }
@@ -819,8 +822,8 @@ private fun EntryDialog(vm: AppViewModel, case: CaseRow, kind: String, onDismiss
                 }.padding(12.dp)) { Text("Paid on " + paidOn.format(dFmt), color = Ds.Ink) }
                 Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (slip == null) {
-                        OutlinedButton(onClick = { cameraPerm.launch(android.Manifest.permission.CAMERA) }) { Text("Take photo") }
-                        OutlinedButton(onClick = { pickFile.launch(arrayOf("image/*", "application/pdf")) }) { Text("Choose file") }
+                        OutlinedButton(onClick = { cameraPerm.launch(android.Manifest.permission.CAMERA) }, modifier = Modifier.weight(1f)) { Text("Take photo", maxLines = 1) }
+                        OutlinedButton(onClick = { pickFile.launch(arrayOf("image/*", "application/pdf")) }, modifier = Modifier.weight(1f)) { Text("Choose file", maxLines = 1) }
                     } else { Text("Slip attached", color = Ds.Green, modifier = Modifier.weight(1f)); TextButton(onClick = { slip = null }) { Text("Remove", color = Ds.Red) } }
                 }
                 Text("The office checks the payment before it reduces the balance.", style = MaterialTheme.typography.bodySmall)
