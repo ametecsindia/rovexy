@@ -13,8 +13,8 @@ android {
         applicationId = "in.ametecs.rovexy.admin"
         minSdk = 29          // Android 10+: saves files to Downloads without a storage permission
         targetSdk = 36
-        versionCode = 3        // +1 on every Play upload
-        versionName = "1.0.2"
+        versionCode = 4        // +1 on every Play upload
+        versionName = "1.0.3"
         buildConfigField("String", "DEFAULT_SERVER_URL", "\"https://rovexy.app\"")
     }
     buildFeatures { buildConfig = true }
