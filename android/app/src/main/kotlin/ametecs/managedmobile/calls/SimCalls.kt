@@ -40,22 +40,25 @@ object SimCalls {
     private fun defaultDialer(ctx: Context) = (ctx.getSystemService(Context.TELECOM_SERVICE) as TelecomManager).defaultDialerPackage
     fun odialerInstalled(ctx: Context) = runCatching { ctx.packageManager.getPackageInfo(ODIALER, 0) }.isSuccess
 
-    /** ODialer runs only on OPPO/OnePlus/Realme; on other brands Play says "Your device isn't compatible".
-     *  ponytail: brand list, not a Play query — an app can't ask Play about compatibility. Add a brand if ODialer ships there. */
-    fun odialerSupported(ctx: Context) = odialerInstalled(ctx) || Build.MANUFACTURER.lowercase() in setOf("oppo", "oneplus", "realme")
+    /** ODialer is required only where it is already on the phone. Play says "Your device isn't compatible" even on some
+     *  OPPO/OnePlus/Realme models and an app can't ask Play, so a missing ODialer never blocks: the default Phone app is used. */
+    fun odialerSupported(ctx: Context) = odialerInstalled(ctx)
+    /** Offered (never required) on the setup screen. ponytail: brand list; add a brand if ODialer ships there. */
+    fun canTryODialer(ctx: Context) = !odialerInstalled(ctx) && Build.MANUFACTURER.lowercase() in setOf("oppo", "oneplus", "realme")
 
     /** ODialer phones: ODialer must be the default Phone app. Other brands (Samsung, Xiaomi, Vivo, Pixel…): whatever Phone app
      *  is default places the call and ITS recorder's file is uploaded — only "no default Phone app at all" blocks. */
     fun ownDialerBlocking(ctx: Context) = phoneRecorder &&
         if (odialerSupported(ctx)) defaultDialer(ctx) != ODIALER else defaultDialer(ctx).isNullOrEmpty()
 
-    /** Next setup step: Play Store page if ODialer is supported but missing, else Android's default-apps screen.
-     *  ponytail: a normal app can't silently install or set another app as default — needs device-owner (AMAPI) enrolment. */
+    /** ponytail: a normal app can't silently install or set another app as default — needs device-owner (AMAPI) enrolment. */
     fun openDefaultApps(ctx: Context) {
-        val i = if (odialerSupported(ctx) && !odialerInstalled(ctx))
-            Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$ODIALER")).takeIf { it.resolveActivity(ctx.packageManager) != null }
-                ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$ODIALER"))
-        else Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+        ctx.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }
+
+    fun openODialerPage(ctx: Context) {
+        val i = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$ODIALER")).takeIf { it.resolveActivity(ctx.packageManager) != null }
+            ?: Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$ODIALER"))
         ctx.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
@@ -84,7 +87,7 @@ object SimCalls {
             Manifest.permission.RECORD_AUDIO -> "Microphone"; else -> "Music and audio" }
     }.distinct() + when {
         phoneRecorder && !odialerSupported(ctx) -> if (defaultDialer(ctx).isNullOrEmpty()) listOf("Choose a default Phone app") else emptyList()
-        phoneRecorder -> when { !odialerInstalled(ctx) -> listOf("Install ODialer"); defaultDialer(ctx) != ODIALER -> listOf("Set ODialer as default Phone app"); else -> emptyList() }
+        phoneRecorder -> if (defaultDialer(ctx) != ODIALER) listOf("Set ODialer as default Phone app") else emptyList()
         else -> (if (CallSession.isDefaultDialer(ctx)) emptyList() else listOf("Default phone app")) +
             (if (CallRecordService.accessibilityOn(ctx)) emptyList() else listOf("Company call recorder (Accessibility)"))
     }
@@ -233,7 +236,31 @@ object SimCalls {
     /** Google's Phone app keeps recordings inside its own private storage: no other app (or folder pick) can reach them. */
     fun recordingsPrivate(ctx: Context) = defaultDialer(ctx) == "com.google.android.dialer"
 
-    private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "amr", "wav", "3gp", "ogg", "opus", "awb")
+    private val AUDIO_EXT = setOf("mp3", "m4a", "aac", "amr", "wav", "3gp", "3gpp", "ogg", "opus", "awb")
+
+    // ── Recording file selected by hand, for phones whose recordings ROVEXY can't find by itself ───────────────────
+    /** File types the picker shows. Octet-stream: some phones label .amr that way; the extension check below still applies. */
+    val RECORDING_TYPES = arrayOf("audio/*", "video/3gpp", "application/ogg", "application/octet-stream")
+
+    /** True once this phone attaches recordings by hand: the "Turn on call recording" gate no longer blocks SIM calls. */
+    fun manual(ctx: Context) = prefs(ctx).getBoolean("manual", false)
+    fun setManual(ctx: Context) = prefs(ctx).edit().putBoolean("manual", true).apply()
+
+    /** Checks the file the employee selected for call [callId] and copies it into app storage, so the upload survives
+     *  an app restart without keeping a permission per file. RecordingUpload deletes the copy once it is done.
+     *  ponytail: a provider that reports no date (0) is accepted; the server still refuses a file used on another call. */
+    fun copyPicked(ctx: Context, uri: Uri, callId: String, sinceMs: Long): RecorderFile {
+        val (name, modified) = ctx.contentResolver.query(uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME, DocumentsContract.Document.COLUMN_LAST_MODIFIED), null, null, null)
+            ?.use { c -> if (c.moveToFirst()) c.getString(0).orEmpty() to c.getLong(1) else null } ?: ("" to 0L)
+        val ext = name.substringAfterLast('.', "").lowercase()
+        require(ext in AUDIO_EXT) { "Select an audio recording (mp3, m4a, amr, wav…)." }
+        require(modified == 0L || modified >= sinceMs - 60_000) { "This recording is older than the call. Select the recording of this call." }
+        val out = java.io.File(java.io.File(ctx.filesDir, "call-rec").apply { mkdirs() }, "$callId.$ext")
+        ctx.contentResolver.openInputStream(uri)?.use { i -> out.outputStream().use { i.copyTo(it) } }
+        require(out.length() > 0) { "That file could not be read. Select it again." }
+        val local = Uri.fromFile(out)
+        return RecorderFile(local, name, ctx.contentResolver.getType(uri), durationOf(ctx, local), out.length())
+    }
 
     /** Audio files in the chosen folder (and one level of sub-folders) changed at/after [sinceMs], newest first, with their time. */
     fun folderFiles(ctx: Context, sinceMs: Long): List<Pair<RecorderFile, Long>> {
@@ -274,6 +301,7 @@ object SimCalls {
     fun recorderStatus(ctx: Context): String = listOfNotNull(
         "Phone app: ${defaultDialer(ctx) ?: "none"}",
         if (recordingsPrivate(ctx)) "recordings private to Google Phone" else null,
+        if (manual(ctx)) "recordings selected by hand" else null,
         "folder: ${folderLabel(ctx) ?: "not chosen"}",
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) == PackageManager.PERMISSION_GRANTED) null else "audio permission missing",
     ).joinToString(", ")

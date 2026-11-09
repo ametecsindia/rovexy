@@ -36,13 +36,18 @@ object RecordingUpload {
             g.session.workUpload("/api/mobile/v1/calls/$id/recording") {
                 okhttp3.MultipartBody.Builder().setType(okhttp3.MultipartBody.FORM)
                     .apply { f.durationSeconds?.let { addFormDataPart("duration_seconds", it.toString()) } }
+                    .apply { if (p.str("manual") == "true") addFormDataPart("manual", "1") }
                     .addFormDataPart("file", f.name, bytes.toRequestBody((f.mime ?: "audio/mp4").toMediaTypeOrNull())).build()
             }.obj()
         } catch (e: ApiException) {
-            if (e.status in 400..499 && e.status != 401 && e.status != 429) g.store.putString("sim_pending", null)   // refused: don't retry forever
+            if (e.status in 400..499 && e.status != 401 && e.status != 429) {   // refused: don't retry forever
+                g.store.putString("sim_pending", null)
+                if (f.uri.scheme == "file") f.uri.path?.let { java.io.File(it).delete() }
+            }
             throw e
         }
         g.store.putString("sim_pending", null)
+        if (g.store.getString("rec_hunt")?.contains(id) == true) g.store.putString("rec_hunt", null)   // selected by hand: nothing left to look for
         if (f.uri.scheme == "file") f.uri.path?.let { java.io.File(it).delete() }   // in-app recording uploaded: remove the local copy
         r
     }

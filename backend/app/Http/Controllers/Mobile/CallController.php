@@ -49,8 +49,8 @@ final class CallController extends Controller
     /** SIM route: upload of the phone's call-recorder file (max 50 MB). */
     public function recording(Request $r, string $uuid, CallService $svc)
     {
-        $d = $r->validate(['file' => 'required|file|max:51200', 'duration_seconds' => 'nullable|integer|min:0|max:14400']);
-        $call = $svc->storeSimRecording($this->own($r, $uuid), $r->user(), $d['file'], isset($d['duration_seconds']) ? (int) $d['duration_seconds'] : null);
+        $d = $r->validate(['file' => 'required|file|max:51200', 'duration_seconds' => 'nullable|integer|min:0|max:14400', 'manual' => 'nullable|boolean']);
+        $call = $svc->storeSimRecording($this->own($r, $uuid), $r->user(), $d['file'], isset($d['duration_seconds']) ? (int) $d['duration_seconds'] : null, (bool) ($d['manual'] ?? false));
         return response()->json($this->body($call));
     }
 

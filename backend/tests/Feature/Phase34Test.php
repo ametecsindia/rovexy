@@ -241,6 +241,24 @@ final class Phase34Test extends TestCase
         $this->in(fn () => $this->assertNotNull(ManagedDevice::query()->first()->recording_verified_at));
         $this->as('admin')->getJson('/api/admin/devices')->assertOk()->assertJsonPath('data.0.recording_verified_at', fn ($v) => $v !== null);
     }
+    public function test_recording_selected_by_hand_cannot_be_reused_on_another_call(): void
+    {
+        config(['ammp.telephony.routes' => ['sim']]);
+        $m = $this->phone();
+        $emp = $this->u['emp'];
+        $cid = $this->in(fn () => Customer::query()->create(['customer_ref' => 'R2', 'name' => 'R2', 'phone' => '+919800000004', 'status' => 'new', 'assigned_user_id' => $emp->id])->id);
+        $file = fn () => \Illuminate\Http\UploadedFile::fake()->createWithContent('rec.wav', 'RIFF' . str_repeat("\x00", 4000));
+        $call = function () use ($m, $cid) {
+            $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'sim'])->assertCreated()->json('call_id');
+            $m->work('POST', "/api/mobile/v1/calls/{$uuid}/sim-result", ['talk_seconds' => 20, 'recording_found' => false])->assertOk();
+            return $uuid;
+        };
+        $first = $call();
+        $m->upload("/api/mobile/v1/calls/{$first}/recording", ['manual' => '1'], ['file' => $file()])->assertOk()->assertJsonPath('recording_status', 'available');
+        $this->in(fn () => $this->assertNull(ManagedDevice::query()->first()->recording_verified_at));
+        $second = $call();
+        $m->upload("/api/mobile/v1/calls/{$second}/recording", ['manual' => '1'], ['file' => $file()])->assertStatus(422)->assertJsonPath('error', 'recording_reused');
+    }
     public function test_employee_profile_for_the_live_map(): void
     {
         $this->in(fn () => Customer::query()->create(['customer_ref' => 'C9', 'name' => 'Cust', 'phone' => '+919822222222', 'assigned_user_id' => $this->u['emp']->id]));

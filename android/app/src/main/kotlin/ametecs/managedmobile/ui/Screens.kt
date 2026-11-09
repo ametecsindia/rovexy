@@ -418,6 +418,9 @@ fun Dashboard(vm: AppViewModel) {
         }
         item(key = "alerts") {
             Column(Modifier.offset(y = (-24).dp).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val recMissing by vm.recordingMissing.collectAsState()
+                val pickRec = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.recordingFilePicked(u) }
+                if (recMissing != null) Banner(AmmpIcons.Mic, Ds.Amber, "Call recording missing", "Select your last call's recording file from this phone.", "Select", { pickRec.launch(SimCalls.RECORDING_TYPES) })
                 if (missing.isNotEmpty()) Banner(AmmpIcons.Warning, Ds.Amber, "Finish call setup", "Still needed: ${missing.joinToString(", ")}", "Fix", vm::askPermissions)
                 err?.let { Banner(AmmpIcons.Warning, Ds.Red, "Something went wrong", it, null, null) }
                 if (unread) Banner(AmmpIcons.People, Ds.Blue, "New message", "Your supervisor sent you a message.", "Open", vm::openChat)
@@ -532,6 +535,8 @@ private fun RecordingGateDialog(vm: AppViewModel) {
                     Text(if (info.folder != null) "Change recordings folder" else "Choose recordings folder")
                 }
                 OutlinedButton(onClick = vm::checkRecordingNow, modifier = Modifier.fillMaxWidth()) { Text("Check again") }
+                OutlinedButton(onClick = vm::useManualRecording, modifier = Modifier.fillMaxWidth()) { Text("No auto recording? Select the file after each call") }
+                if (info.tryODialer) OutlinedButton(onClick = vm::openODialerPage, modifier = Modifier.fillMaxWidth()) { Text("Try ODialer from Play Store") }
             }
         }, confirmButton = { PrimaryButton("Open call settings", onClick = vm::openCallSettings) },
         dismissButton = { TextButton(onClick = vm::closeRecordingGate) { Text("Not now") } })
@@ -624,6 +629,8 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
     }
     val ctx = LocalContext.current
     val title = c.customer?.name ?: "Call"
+    val recMissing by vm.recordingMissing.collectAsState()
+    val pickRec = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { u -> if (u != null) vm.recordingFilePicked(u) }
     val headline = when (c.state) {
         "dialing" -> "Calling…"; "on_sim_call" -> "On call"; "saving" -> "Saving the call…"; "ask_answered" -> "Did the customer answer?"
         "initiated", "agent_ringing" -> if (c.agentLeg == "pstn_callback") "Your work phone will ring — answer it" else "Connecting…"
@@ -647,7 +654,7 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                 Spacer(Modifier.height(12.dp))
                 val (icon, tint, text) = when (c.recording) {
                     "available" -> Triple(AmmpIcons.Check, Ds.Green, "Recording saved")
-                    "failed" -> Triple(AmmpIcons.Warning, Ds.Red, "Recording not saved — auto call recording is OFF. Calls are blocked until it is switched on.")
+                    "failed" -> Triple(AmmpIcons.Warning, Ds.Red, if (recMissing == c.id) "No recording found for this call. Select its file from this phone." else "Recording not saved — auto call recording is OFF.")
                     else -> Triple(AmmpIcons.Mic, Ds.Amber, "Recording: " + c.recording.replace('_', ' '))
                 }
                 Row(Modifier.fillMaxWidth().background(tint.copy(alpha = 0.08f), RoundedCornerShape(12.dp)).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -655,6 +662,7 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                     Text(text, color = tint, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                 }
             }
+            if (recMissing == c.id) OutlinedButton(onClick = { pickRec.launch(SimCalls.RECORDING_TYPES) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Select recording file") }
             if (ended) {
                 Spacer(Modifier.height(16.dp))
                 Text("CALL FEEDBACK", style = MaterialTheme.typography.labelSmall, color = Ds.Muted)

@@ -56,7 +56,7 @@ data class ChatMsg(val id: Long, val mine: Boolean, val body: String, val at: St
 data class Outcome(val code: String, val label: String, val captures: String = "none", val needsFollowUp: Boolean = false)
 /** Call-recording setup facts for the gate screen. [locked] = Google Phone app (recordings unreachable for other apps). */
 data class RecordingSetup(val brand: String = "", val folder: String? = null, val locked: Boolean = false, val lastSeen: String? = null,
-                          val clickToCall: Boolean = false)
+                          val clickToCall: Boolean = false, val tryODialer: Boolean = false)
 data class Disclosure(val recorded: Boolean, val notice: String, val location: String?, val liveView: Boolean, val camera: Boolean)
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -111,6 +111,38 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val recordingGateInfo = MutableStateFlow(RecordingSetup())
     fun openCallSettings() { SimCalls.openCallSettings(getApplication()) }
     fun closeRecordingGate() { recordingGate.value = false }
+    fun openODialerPage() { SimCalls.openODialerPage(getApplication()) }
+    /** Phone can't auto-record, or ROVEXY can't reach its files: stop blocking; the employee selects each call's file. */
+    fun useManualRecording() { SimCalls.setManual(getApplication()); recordingGate.value = false }
+
+    /** Id of the answered call still without a recording: the call panel and home screen offer "Select recording file".
+     *  ponytail: latest call only (one rec_hunt slot); make it a list if employees need to attach to older calls. */
+    val recordingMissing = MutableStateFlow<String?>(null)
+    private fun refreshRecordingMissing() {
+        recordingMissing.value = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject.str("id") }
+    }
+
+    fun recordingFilePicked(uri: android.net.Uri) { viewModelScope.launch {
+        val ctx = getApplication<Application>()
+        val h = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject } ?: return@launch
+        val id = h.str("id")!!; val since = h.str("since")!!.toLong()
+        val f = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { SimCalls.copyPicked(ctx, uri, id, since) } }
+            .getOrElse { error.value = it.message ?: "Could not read that file."; return@launch }
+        if (finishing || g.store.getString("sim_pending") != null) { error.value = "Another call is still being saved. Try again in a moment."; return@launch }
+        SimCalls.setManual(ctx)
+        g.store.putString("sim_pending", buildJsonObject {
+            put("id", id); put("number", h.str("number")!!); put("since", since.toString()); put("stage", "upload"); put("manual", true)
+            put("uri", f.uri.toString()); put("name", f.name); put("mime", f.mime ?: "audio/mp4"); f.durationSeconds?.let { put("dur", it) }
+        }.toString())
+        val panelOpen = call.value != null
+        finishing = true
+        try { finishSimCall() } finally { finishing = false }
+        refreshRecordingMissing()
+        if (!panelOpen) {   // attached from the home screen: don't pop the feedback form up again
+            if (recordingMissing.value != null) error.value = call.value?.note
+            call.value = null
+        }
+    } }
 
     /** Employee picked the folder the Phone app saves recordings in (Xiaomi/Redmi and anything MediaStore can't see). */
     fun recorderFolderPicked(uri: android.net.Uri) {
@@ -130,14 +162,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         recordingGateInfo.value = RecordingSetup(
             brand = Build.MANUFACTURER.lowercase(), folder = SimCalls.folderLabel(ctx), locked = SimCalls.recordingsPrivate(ctx),
             lastSeen = last?.let { java.text.SimpleDateFormat("d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(it)) },
-            clickToCall = "server" in callingRoutes)
+            clickToCall = "server" in callingRoutes, tryODialer = SimCalls.canTryODialer(ctx))
     }
 
     /** True while calls must stay blocked. A phone unlocks when a call recording is found that was saved after the block
      *  started; the very first time, any recording from the last 24 h counts (a test call made before opening ROVEXY).
      *  An answered call without a recording blocks again, strictly from that moment. */
     private fun recordingBlocked(ctx: Application): Boolean {
-        if (!SimCalls.phoneRecorder || disclosure.value?.recorded != true) return false
+        if (!SimCalls.phoneRecorder || disclosure.value?.recorded != true || SimCalls.manual(ctx)) return false
         val stored = g.store.getString("rec_block_since")?.toLongOrNull()
         if (stored == null && g.store.getString("rec_ok") == "1") return false
         val blockedSince = stored ?: (System.currentTimeMillis() - 24 * 3_600_000L).also { g.store.putString("rec_block_since", it.toString()) }
@@ -459,8 +491,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             SimCalls.openDefaultApps(ctx)
             throw ApiException(0, "dialer", when {
                 !SimCalls.odialerSupported(ctx) -> "Choose a default Phone app in Default apps and turn on its auto call recording, then tap Call again."
-                SimCalls.odialerInstalled(ctx) -> "Set ODialer as the default Phone app (it records the call), then tap Call again."
-                else -> "Install ODialer from Play Store, then tap Call again."
+                else -> "Set ODialer as the default Phone app (it records the call), then tap Call again."
             })
         }
         if (callingRoute == "sim" && !SimCalls.phoneRecorder && !CallSession.isDefaultDialer(ctx)) {
@@ -529,6 +560,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (recorderSetup.value && CallRecordService.accessibilityOn(getApplication())) recorderSetup.value = false
         if (recordingGate.value && !recordingBlocked(getApplication())) recordingGate.value = false
         if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
+        refreshRecordingMissing()
         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
         if (screen.value is Screen.Dashboard && g.store.getString("rec_hunt") != null && g.store.getString("sim_pending") == null) viewModelScope.launch { huntRecording() }
         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
@@ -545,6 +577,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (!RecordingUpload.hunt(g, ctx)) return g.store.getString("rec_hunt") == null   // not found yet (or given up after 24 h)
         finishing = true
         try { finishSimCall() } finally { finishing = false }
+        refreshRecordingMissing()
         return true
     }
 
@@ -640,6 +673,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                     // Answered but no file yet: keep looking for 30 min (OPPO indexed the file only later) and upload it then.
                     if (keepRecording && talk > 0) {
                         g.store.putString("rec_hunt", buildJsonObject { put("id", id); put("number", number); put("since", log?.startedAtMs ?: since) }.toString())
+                        refreshRecordingMissing()
                         viewModelScope.launch { repeat(10) { delay(30_000); if (huntRecording()) return@launch } }
                     }
                     return

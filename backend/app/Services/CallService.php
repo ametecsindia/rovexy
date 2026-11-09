@@ -316,7 +316,7 @@ final class CallService
     }
 
     /** SIM route: the phone uploads the file its built-in call recorder wrote. Stored privately with size + SHA-256. */
-    public function storeSimRecording(Call $call, User $user, \Illuminate\Http\UploadedFile $file, ?int $duration): Call
+    public function storeSimRecording(Call $call, User $user, \Illuminate\Http\UploadedFile $file, ?int $duration, bool $manual = false): Call
     {
         if ($call->provider !== 'sim' || $call->user_id !== $user->id) {
             throw new DomainException('forbidden');
@@ -329,6 +329,10 @@ final class CallService
         $sha = hash('sha256', $bytes);
         if ($rec->status === RecordingState::Available->value) {
             return $call; // idempotent re-upload
+        }
+        // Selected by hand: one recording can't be passed off as several calls. ponytail: unindexed sha256 lookup, add an index if slow.
+        if ($manual && Recording::query()->where('sha256', $sha)->where('call_id', '!=', $call->id)->exists()) {
+            throw new DomainException('recording_reused', 'This file is already attached to another call. Select the recording of this call.');
         }
         $ext = self::SIM_AUDIO[strtolower($file->getClientOriginalExtension())] ?? null;
         $sniffed = (string) $file->getMimeType();
@@ -345,17 +349,17 @@ final class CallService
         $device = ManagedDevice::query()->find($call->device_id);
         $days = $device ? $this->policies->currentSnapshot($device)->values['retention.recording_days'] : \App\Domain\Policy\PolicyResolver::effective([])['values']['retention.recording_days'];
         $rec->forceFill([
-            'status' => RecordingState::Processing->value, 'source_path' => 'phone:' . mb_substr($file->getClientOriginalName(), 0, 200),
+            'status' => RecordingState::Processing->value, 'source_path' => ($manual ? 'manual:' : 'phone:') . mb_substr($file->getClientOriginalName(), 0, 200),
             'object_key' => $key, 'format' => $format, 'mime' => $mime, 'size_bytes' => strlen($bytes), 'sha256' => $sha,
             'duration_seconds' => $duration, 'last_error' => null, 'retention_expires_at' => now()->addDays($days),
         ])->save();
         \App\Jobs\FetchRecording::markAvailable($rec, $call);
         // G22: this phone's call recorder is proved to work (shown on Devices); the first time only.
-        if ($device && $device->recording_verified_at === null) {
+        if ($device && !$manual && $device->recording_verified_at === null) {
             $device->forceFill(['recording_verified_at' => now()])->saveQuietly();
             Audit::record('device.recording_verified', $device, ['call_id' => $call->id]);
         }
-        Audit::record('recording.uploaded_from_phone', $rec, ['call_id' => $call->id, 'sha256' => $sha, 'bytes' => strlen($bytes)]);
+        Audit::record('recording.uploaded_from_phone', $rec, ['call_id' => $call->id, 'sha256' => $sha, 'bytes' => strlen($bytes), 'selected_by_hand' => $manual]);
         return $call->refresh();
     }
 
