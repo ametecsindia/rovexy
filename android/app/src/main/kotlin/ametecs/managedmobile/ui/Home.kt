@@ -106,7 +106,7 @@ fun PriorityTiles(all: List<CaseRow>, f: CaseFilter, onTile: (String) -> Unit) {
 }
 
 private val SORTS = listOf(
-    "dpd" to "Most days overdue", "dpd_asc" to "Least days overdue", "amount" to "Highest overdue", "outstanding" to "Highest outstanding",
+    "dpd" to "Most days overdue", "dpd_asc" to "Least days overdue", "amount" to "Highest overdue / to collect", "outstanding" to "Highest outstanding / value",
     "due" to "Next due date", "callback" to "Next callback", "promise" to "Promise date", "last_call" to "Not called longest",
     "recent_call" to "Called most recently", "paid" to "Latest payment", "nearest" to "Nearest to me", "name" to "Name A–Z")
 private val TILE_LABELS = mapOf("overdue" to "Overdue", "due_today" to "Due today", "upcoming" to "Due in 7 days", "ptp_today" to "Promises today",

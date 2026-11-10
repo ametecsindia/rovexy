@@ -190,6 +190,10 @@ final class CaseService
             'assigned_user' => $assignee, 'team' => $team, 'assigned_at' => $assignments->firstWhere('action', '!=', 'withdrawn')?->created_at?->toAtomString(),
             'notes' => $c->notes, 'created_at' => $c->created_at?->toAtomString(),
             'dues' => $this->dues($c, $verifiedSince),
+            // Portfolio type: its wording and its own fields (console customer page + phone profile).
+            'portfolio_type' => $c->portfolio_type, 'labels' => \App\Domain\Portfolios\PortfolioTypes::labels($c->portfolio_type),
+            'details' => \App\Domain\Portfolios\PortfolioTypes::present($c),
+            'pin' => $c->lat !== null ? ($c->geo_status === 'approx' ? 'approximate' : ($c->geo_status === 'verified' ? 'verified' : 'address')) : null,
             'installments' => null,   // ponytail: the lead file has one row per case, so no instalment schedule exists to show.
             'activity' => $act,
             'payments' => $pay->reverse()->values()->map(fn ($d) => ['call_id' => $d->call_id, 'amount' => (float) $d->amount, 'mode' => $d->payment_mode,

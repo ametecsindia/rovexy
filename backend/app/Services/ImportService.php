@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Domain\Customers\ImportValidator;
 use App\Domain\DomainException;
+use App\Domain\Portfolios\PortfolioTypes;
 use App\Jobs\ProcessImport;
 use App\Models\Customer;
 use App\Models\CustomerAssignment;
@@ -46,7 +47,7 @@ final class ImportService
         return $map;
     }
 
-    public function upload(UploadedFile $file, User $actor, ?string $portfolio = null): ImportJob
+    public function upload(UploadedFile $file, User $actor, ?string $portfolio = null, ?string $type = null): ImportJob
     {
         $ext = strtolower($file->getClientOriginalExtension());
         $mime = (string) $file->getMimeType();
@@ -67,6 +68,7 @@ final class ImportService
             'uploaded_by' => $actor->id, 'original_name' => mb_substr($file->getClientOriginalName(), 0, 255), 'stored_key' => $key,
             'portfolio' => mb_substr(trim((string) $portfolio) ?: pathinfo($file->getClientOriginalName(), PATHINFO_FILENAME), 0, 150),
             'format' => $ext, 'size_bytes' => $file->getSize(), 'sha256' => hash_file('sha256', $file->getRealPath()), 'status' => 'uploaded',
+            'portfolio_type' => PortfolioTypes::exists($type) ? $type : PortfolioTypes::DEFAULT,
         ]);
         try {
             $headers = array_map(fn ($h) => trim((string) $h), $this->readRows($job, 1)[0] ?? []);
@@ -79,7 +81,7 @@ final class ImportService
             $job->delete();
             throw new DomainException('empty_file', $headers === null ? 'We could not read this file. Save it again as .csv or .xlsx and retry.' : 'The file has no header row. The first row must hold the column names.');
         }
-        $job->forceFill(['headers' => $headers, 'mapping' => ImportValidator::suggestMapping($headers)])->save();
+        $job->forceFill(['headers' => $headers, 'mapping' => ImportValidator::suggestMapping($headers, $job->portfolio_type)])->save();
         Audit::record('import.uploaded', $job, ['name' => $job->original_name, 'sha256' => $job->sha256]);
         return $job;
     }
@@ -89,7 +91,7 @@ final class ImportService
         $this->saveMapping($job, $mapping, $options, $actor);
         $rows = array_slice($this->readRows($job, self::PREVIEW_ROWS + 1), 1);
         $callers = User::query()->whereIn('id', $job->options['user_ids'] ?? [])->orderBy('name')->get(['id', 'name', 'employee_code']);
-        return ['mapping' => $job->mapping, 'result' => $this->validateRows($job, $this->mapRows($rows, $job->mapping)), 'callers' => $callers];
+        return ['mapping' => $job->mapping, 'result' => $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job)), 'callers' => $callers];
     }
 
     /**
@@ -103,7 +105,7 @@ final class ImportService
             throw new DomainException('import_locked');
         }
         $clean = [];
-        foreach (ImportValidator::FIELDS as $f) {
+        foreach (ImportValidator::fieldsFor($job->portfolio_type) as $f) {
             $i = $mapping[$f] ?? null;
             $clean[$f] = ($i === null || $i === '') ? null : (int) $i;
             if ($clean[$f] !== null && ($clean[$f] < 0 || $clean[$f] >= count($job->headers ?? []))) {
@@ -142,7 +144,8 @@ final class ImportService
             throw new DomainException('mapping_incomplete', 'Caller ID-wise allocation: map the Caller ID column (Assigned employee), or choose Random allocation.');
         }
         $job->forceFill(['mapping' => $clean, 'options' => ['on_existing' => ($options['on_existing'] ?? 'update') === 'skip' ? 'skip' : 'update',
-            'allocation' => $allocation, 'team_id' => $teamId, 'user_ids' => $userIds, 'scope' => $scope]])->save();
+            'allocation' => $allocation, 'team_id' => $teamId, 'user_ids' => $userIds, 'scope' => $scope,
+            'keep_other_columns' => (bool) ($options['keep_other_columns'] ?? true)]])->save();
     }
 
     /** Background step 1: validate every row and store row errors. */
@@ -151,7 +154,7 @@ final class ImportService
         $job->forceFill(['status' => 'validating', 'started_at' => now()])->save();
         ImportRowError::query()->where('import_job_id', $job->id)->delete();
         $rows = array_slice($this->readRows($job), 1);
-        $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping));
+        $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job));
         foreach (array_chunk($r['errors'], 500) as $chunk) {
             ImportRowError::query()->insert(array_map(fn ($e) => [
                 'company_id' => $job->company_id, 'import_job_id' => $job->id, 'row_number' => $e['row'], 'field' => $e['field'],
@@ -167,7 +170,7 @@ final class ImportService
     {
         $job->forceFill(['status' => 'committing'])->save();
         $rows = array_slice($this->readRows($job), 1);
-        $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping));
+        $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job));
         $users = User::query()->pluck('id', 'employee_code');
         $teams = self::teamLookup();
         $created = $updated = $skipped = 0;
@@ -201,25 +204,22 @@ final class ImportService
                     }
                     $attrs = ['name' => $row['name'], 'phone' => $row['phone'], 'alt_phone' => $row['alt_phone'], 'campaign' => $row['campaign'],
                         'status' => $row['status'], 'notes' => $row['notes'], 'follow_up_on' => $row['follow_up_date'], 'last_import_id' => $job->id,
-                        'city' => $row['city'], 'area' => $row['area'], 'pincode' => $row['pincode']] + self::accountAttrs($row['account'] ?? []);
+                        'city' => $row['city'], 'area' => $row['area'], 'pincode' => $row['pincode'], 'portfolio_type' => $job->portfolio_type] + self::accountAttrs($row['account'] ?? []);
+                    // The type's own fields: values in this file replace the old ones; fields not in the file keep theirs.
+                    $attrs['details'] = array_filter(array_merge($c && $c->portfolio_type === $job->portfolio_type ? (array) $c->details : [], $row['details'] ?? []),
+                        fn ($v) => $v !== null && $v !== '') ?: null;
                     $changedAssignment = !$c || $c->assigned_user_id !== $userId || $c->assigned_team_id !== $teamId || $c->withdrawn_at !== null;
-                    // G5: a pin in the file is used as it is; otherwise a new or changed address is looked up after the upload.
-                    $filePin = array_key_exists('lat', $attrs) && Customer::validCoords($attrs['lat'] ?? null, $attrs['lng'] ?? null);
+                    // G5: pins come only from the address (looked up after the upload), never from the file. A pin
+                    // verified at the door stays while the address is the same; a changed address gets a fresh lookup.
                     if ($c) {
                         $c->fill($attrs + ['assigned_user_id' => $userId, 'assigned_team_id' => $teamId, 'withdrawn_at' => null]);
-                        $sameAddress = !$c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS);
-                        if ($c->geo_status === 'verified' && $sameAddress) {
-                            $c->fill(['lat' => $c->getOriginal('lat'), 'lng' => $c->getOriginal('lng')]);   // G6: the pin verified at the door wins over the file
-                        } elseif ($filePin) {
-                            $c->fill(['geo_status' => 'file', 'geo_precision' => null]);
-                        } elseif ($c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS)) {
+                        if ($c->isDirty(\App\Models\CustomerAddressChange::ADDRESS_FIELDS)) {
                             $c->fill(['lat' => null, 'lng' => null, 'geo_status' => null, 'geo_precision' => null]);   // old pin belongs to the old address
                         }
                         $c->save();
                         $updated++;
                     } else {
-                        $c = Customer::query()->create($attrs + ['customer_ref' => $row['customer_ref'], 'assigned_user_id' => $userId, 'assigned_team_id' => $teamId,
-                            'geo_status' => $filePin ? 'file' : null]);
+                        $c = Customer::query()->create($attrs + ['customer_ref' => $row['customer_ref'], 'assigned_user_id' => $userId, 'assigned_team_id' => $teamId]);
                         $created++;
                     }
                     if ($changedAssignment) {
@@ -270,6 +270,7 @@ final class ImportService
             fn (string $phone) => Customer::query()->where('phone', $phone)->value('customer_ref'),
             fn (string $code) => isset($employees[$code]),
             fn (string $code) => isset($teams[mb_strtolower($code)]),
+            2, $job->portfolio_type,
         );
         $opt = $job->options ?? [];
         $column = ($opt['allocation'] ?? 'file') === 'column';
@@ -297,12 +298,26 @@ final class ImportService
         return $r;
     }
 
-    private function mapRows(array $rows, array $mapping): array
+    /** Mapped fields, plus `__extra` = the file's other columns (header => value), kept under their own names. */
+    private function mapRows(array $rows, array $mapping, ?ImportJob $job = null): array
     {
-        return array_map(function (array $row) use ($mapping) {
+        $used = array_flip(array_filter($mapping, fn ($i) => $i !== null));
+        $extra = [];
+        if ($job && ($job->options['keep_other_columns'] ?? true)) {
+            foreach ((array) $job->headers as $i => $h) {
+                // ponytail: a Latitude / Longitude column is not kept either — pins always come from the address.
+                if (!isset($used[$i]) && trim((string) $h) !== '' && !preg_match('/^(lat|latitude|lng|lon|long|longitude)$/i', trim((string) $h))) {
+                    $extra[$i] = trim((string) $h);
+                }
+            }
+        }
+        return array_map(function (array $row) use ($mapping, $extra) {
             $out = [];
             foreach ($mapping as $field => $idx) {
                 $out[$field] = $idx === null ? null : (isset($row[$idx]) ? trim((string) $row[$idx]) : null);
+            }
+            foreach ($extra as $i => $h) {
+                $out['__extra'][$h] = isset($row[$i]) ? trim((string) $row[$i]) : '';
             }
             return $out;
         }, $rows);

@@ -36,8 +36,7 @@ final class ExportService
     public function table(string $kind): array
     {
         return match ($kind) {
-            'customers' => [['Customer ID', 'Name', 'Phone', 'Portfolio', 'Status', 'Employee code', 'Employee', 'Address', 'Area', 'City', 'Pincode', 'Latitude', 'Longitude',
-                'Pin source', 'Outstanding', 'Overdue', 'Last paid on', 'Last paid amount'], $this->customers()],
+            'customers' => $this->customersTable(),
             'calls' => [['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Destination', 'Outcome', 'Initiated', 'Talk s', 'Recording', 'Disposition', 'Amount'], $this->calls()],
             'visits' => [['Date and time', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Distance from pin m', 'GPS accuracy m', 'Latitude', 'Longitude'], $this->visits()],
             'payments' => [['Submitted', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Amount', 'Mode', 'Reference', 'Paid on', 'Review', 'Reviewed by', 'Reviewed at', 'Slip file'], $this->payments()],
@@ -180,13 +179,35 @@ final class ExportService
             ->when(!empty($this->f['employee']), fn ($w) => $w->where('user_id', (int) $this->f['employee']));
     }
 
-    private function customers(): \Generator
+    /**
+     * Customers with their portfolio type's own columns: one type in the export → each of its fields is a column
+     * (e.g. AWB, COD amount, Delivery date); several types → the shared amounts under neutral names plus a Details column.
+     */
+    private function customersTable(): array
+    {
+        $types = $this->customerQuery()->distinct()->pluck('portfolio_type')->all();
+        $one = count($types) === 1 ? $types[0] : null;
+        $fields = $one ? array_values(array_filter(\App\Domain\Portfolios\PortfolioTypes::fields($one), fn ($f) => $f['key'] !== 'dpd')) : [];
+        $head = ['Customer ID', 'Name', 'Phone', 'Portfolio', 'Type', 'Status', 'Employee code', 'Employee', 'Address', 'Area', 'City', 'Pincode', 'Latitude', 'Longitude', 'Pin'];
+        $head = $one ? [...$head, ...array_column($fields, 'label'), 'Other columns'] : [...$head, 'Amount', 'Amount to collect', 'Scheduled date', 'Details'];
+        return [$head, $this->customers($one, $fields)];
+    }
+
+    private function customers(?string $one, array $fields): \Generator
     {
         $names = ImportJob::query()->get(['id', 'portfolio', 'original_name'])->mapWithKeys(fn ($j) => [$j->id => $j->portfolio ?: pathinfo((string) $j->original_name, PATHINFO_FILENAME)]);
+        $pin = ['google' => 'from address', 'approx' => 'approximate (area)', 'verified' => 'verified at the door', 'phone' => 'from address', 'file' => 'from address'];
         foreach ($this->customerQuery()->with('assignee:id,employee_code,name')->lazyById(1000) as $c) {
-            yield [$c->customer_ref, $c->name, $c->phone, $c->last_import_id ? ($names[$c->last_import_id] ?? "Import #{$c->last_import_id}") : 'Added by hand', $c->status,
-                $c->assignee?->employee_code, $c->assignee?->name, $c->address, $c->area, $c->city, $c->pincode, $c->lat, $c->lng, $c->geo_status,
-                $c->outstanding, $c->overdue_amount, $c->last_paid_on, $c->last_paid_amount];
+            $base = [$c->customer_ref, $c->name, $c->phone, $c->last_import_id ? ($names[$c->last_import_id] ?? "Import #{$c->last_import_id}") : 'Added by hand',
+                \App\Domain\Portfolios\PortfolioTypes::of($c->portfolio_type)['label'], $c->status,
+                $c->assignee?->employee_code, $c->assignee?->name, $c->address, $c->area, $c->city, $c->pincode, $c->lat, $c->lng, $pin[$c->geo_status] ?? $c->geo_status];
+            $extra = collect(\App\Domain\Portfolios\PortfolioTypes::present($c))->filter(fn ($x) => str_starts_with($x['key'], 'x:'))->map(fn ($x) => "{$x['label']}: {$x['text']}")->implode('; ');
+            if ($one) {
+                yield [...$base, ...array_map(fn ($f) => \App\Domain\Portfolios\PortfolioTypes::valueOf($c, $f), $fields), $extra ?: null];
+            } else {
+                $all = collect(\App\Domain\Portfolios\PortfolioTypes::present($c))->map(fn ($x) => "{$x['label']}: {$x['text']}")->implode('; ');
+                yield [...$base, $c->outstanding, $c->overdue_amount, $c->due_date?->format('Y-m-d'), $all ?: null];
+            }
         }
     }
 

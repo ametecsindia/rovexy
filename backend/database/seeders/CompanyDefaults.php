@@ -26,8 +26,9 @@ final class CompanyDefaults
             $role = Role::query()->firstOrCreate(['key' => $key], ['name' => $def['name'], 'system' => true]);
             $role->permissions()->sync(Permission::query()->whereIn('key', Permissions::forRole($key))->pluck('id'));
         }
-        foreach (\App\Support\Outcomes::CODES as [$code, $label, $fu, $captures]) {
-            DispositionCode::query()->firstOrCreate(['code' => $code], ['label' => $label, 'requires_follow_up' => $fu, 'active' => true, 'captures' => $captures]);
+        foreach (\App\Domain\Portfolios\PortfolioTypes::outcomes() as $o) {   // every portfolio type's outcomes (type null = all types)
+            DispositionCode::query()->firstOrCreate(['code' => $o['code']], ['label' => $o['label'], 'requires_follow_up' => $o['follow_up'], 'active' => true,
+                'captures' => $o['captures'], 'portfolio_type' => $o['type'], 'success' => $o['success']]);
         }
         CompanyBranding::query()->firstOrCreate([], ['display_name' => $company->name]); // no logo: apps show a neutral placeholder
         $profile = PolicyProfile::query()->firstOrCreate(['name' => 'Company baseline'], ['description' => 'Default for all devices']);

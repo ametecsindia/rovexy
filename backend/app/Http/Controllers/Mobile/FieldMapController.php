@@ -22,6 +22,7 @@ final class FieldMapController extends Controller
     private const MAX_DISTANCES = 25;   // one Routes API matrix call
     private const MAX_STOPS = 10;       // Google Maps app navigation takes up to 9 waypoints + the destination
     public const ARRIVE_METERS = 100;   // "Check in" shows on the phone within this distance of the pin
+    public const APPROX_ARRIVE_METERS = 3000;   // the same for an area pin (approximate), which the check-in then corrects
     public const VERIFY_ACCURACY_M = 30;  // G6: a check-in this accurate (or better) becomes the case's verified pin
 
     /** GET field/config → the key the phone's map view loads Google Maps with (null = admin has not set one). */
@@ -86,6 +87,9 @@ final class FieldMapController extends Controller
     /** POST customers/{id}/location {lat, lng, source: gps|address, accuracy_m?} → saves the case pin, logged on the timeline. */
     public function setLocation(Request $r, int $id)
     {
+        // Map pins are never set by hand any more (10 Nov 2026): they come from the address, and the GPS check-in at the
+        // door corrects them. Older apps still show "Set pin"; they get this message.
+        abort(410, 'Map pins are set automatically from the address. Check in at the customer\'s door to correct a pin.');
         $c = Customer::query()->visibleTo($r->user())->findOrFail($id);
         $d = $this->origin($r, ['source' => 'required|in:gps,address', 'accuracy_m' => 'nullable|numeric|min:0|max:100000']);
         abort_unless(Customer::validCoords($d['lat'], $d['lng']), 422, 'That is not a usable map location.');
@@ -116,7 +120,10 @@ final class FieldMapController extends Controller
         abort_unless(Customer::validCoords($c->lat, $c->lng), 422, 'This customer has no map location. Set the pin first.');
         $m = (int) round(GoogleMaps::straightMeters([(float) $d['lat'], (float) $d['lng']], [(float) $c->lat, (float) $c->lng]));
         $acc = isset($d['accuracy_m']) ? (int) $d['accuracy_m'] : null;
-        abort_if($m > self::ARRIVE_METERS + min($acc ?? 0, 50), 422, "You are {$m} m from the customer's pin. Check in when you are within " . self::ARRIVE_METERS . ' m.');
+        // An area pin ("approximate": only the locality / pincode was found) is only a rough spot: the door can be a few km
+        // away, so check-in is allowed within APPROX_ARRIVE_METERS and the GPS fix then becomes the exact pin.
+        $limit = $c->geo_status === 'approx' ? self::APPROX_ARRIVE_METERS : self::ARRIVE_METERS;
+        abort_if($m > $limit + min($acc ?? 0, 50), 422, "You are {$m} m from the customer's pin. Check in when you are within {$limit} m.");
         $e = CustomerEvent::query()->create(['customer_id' => $c->id, 'user_id' => $r->user()->id, 'type' => 'visit',
             'body' => "Reached the customer ({$m} m from the pin" . ($acc !== null ? ", ±{$acc} m GPS" : '') . ').',
             'meta' => ['lat' => round((float) $d['lat'], 7), 'lng' => round((float) $d['lng'], 7), 'distance_m' => $m, 'accuracy_m' => $acc]]);

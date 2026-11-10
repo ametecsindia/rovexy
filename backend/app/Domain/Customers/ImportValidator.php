@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Customers;
 
 use App\Domain\DomainException;
+use App\Domain\Portfolios\PortfolioTypes;
 
 /**
  * Validates mapped import rows. Pure: lookups for existing data are injected as closures.
@@ -13,16 +14,19 @@ use App\Domain\DomainException;
  */
 final class ImportValidator
 {
-    public const FIELDS = ['customer_ref', 'name', 'phone', 'alt_phone', 'campaign', 'assigned_employee', 'assigned_team', 'notes', 'status', 'follow_up_date', 'city', 'area', 'pincode',
-        'email', 'address', 'state', 'lat', 'lng', 'preferred_time', 'loan_amount', 'outstanding', 'principal_os', 'interest_os', 'charges', 'overdue_amount',
+    /** Fields every portfolio type has. Map pins are never taken from a file: they come from the address (AutoGeocode). */
+    public const CORE = ['customer_ref', 'name', 'phone', 'alt_phone', 'campaign', 'assigned_employee', 'assigned_team', 'notes', 'status', 'follow_up_date', 'city', 'area', 'pincode',
+        'email', 'address', 'state', 'preferred_time'];
+    /** Collections (the original fields), for callers that don't name a type. */
+    public const FIELDS = [...self::CORE, 'loan_amount', 'outstanding', 'principal_os', 'interest_os', 'charges', 'overdue_amount',
         'emi_amount', 'due_date', 'oldest_due_date', 'dpd', 'overdue_installments', 'last_paid_on', 'last_paid_amount'];
     public const MONEY = ['loan_amount', 'outstanding', 'principal_os', 'interest_os', 'charges', 'overdue_amount', 'emi_amount', 'last_paid_amount'];
     public const DATES = ['due_date', 'oldest_due_date', 'last_paid_on'];
     public const STATUSES = ['new', 'in_progress', 'follow_up', 'closed', 'do_not_call'];
 
     private const SYNONYMS = [
-        'customer_ref' => ['customer id', 'customer_id', 'cust id', 'id', 'account', 'account no', 'loan no', 'ref'],
-        'name' => ['customer name', 'name', 'full name', 'borrower'],
+        'customer_ref' => ['customer id', 'customer_id', 'cust id', 'id', 'account', 'account no', 'loan no', 'ref', 'consignee id', 'lead id', 'contact id', 'patient id', 'case id', 'reference id'],
+        'name' => ['customer name', 'name', 'full name', 'borrower', 'consignee name', 'consignee', 'lead name', 'contact name', 'contact person', 'patient name', 'patient / doctor name', 'doctor / patient name'],
         'phone' => ['phone', 'phone number', 'mobile', 'mobile number', 'contact', 'number'],
         'alt_phone' => ['alternate number', 'alternate', 'alt phone', 'alt mobile', 'phone 2', 'secondary'],
         'campaign' => ['campaign', 'portfolio', 'bucket'],
@@ -36,35 +40,38 @@ final class ImportValidator
         'email' => ['email', 'email id', 'e-mail', 'mail id'],
         'address' => ['address', 'residential address', 'full address', 'customer address', 'current address', 'address line 1'],
         'state' => ['state'],
-        'lat' => ['latitude', 'lat'],
-        'lng' => ['longitude', 'lng', 'long', 'lon'],
         'preferred_time' => ['preferred time', 'preferred contact time', 'best time to call', 'contact time'],
-        'loan_amount' => ['loan amount', 'loan amt', 'sanctioned amount', 'sanction amount', 'disbursed amount', 'finance amount'],
-        'outstanding' => ['total outstanding', 'outstanding', 'tos', 'outstanding amount', 'total due', 'balance'],
-        'principal_os' => ['principal outstanding', 'pos', 'principal os', 'principal'],
-        'interest_os' => ['interest outstanding', 'interest os', 'interest'],
-        'charges' => ['charges', 'late fee', 'late fees', 'penalty', 'other charges', 'bounce charges'],
-        'overdue_amount' => ['overdue amount', 'overdue', 'total overdue', 'amount overdue', 'arrears', 'od amount'],
-        'emi_amount' => ['emi', 'emi amount', 'installment amount', 'instalment amount'],
-        'due_date' => ['due date', 'emi date', 'next due date', 'installment due date', 'instalment due date'],
-        'oldest_due_date' => ['oldest due date', 'oldest unpaid date', 'first unpaid date', 'default date'],
-        'dpd' => ['dpd', 'days past due', 'days overdue', 'overdue days'],
-        'overdue_installments' => ['overdue installments', 'overdue instalments', 'overdue emis', 'emis overdue', 'pending emis'],
-        'last_paid_on' => ['last payment date', 'last paid date', 'last paid on', 'lpd'],
-        'last_paid_amount' => ['last payment amount', 'last paid amount', 'lpa'],
         'follow_up_date' => ['follow-up date', 'follow up date', 'followup', 'follow_up', 'ptp date', 'next action'],
     ];
 
+    /** Field keys of a portfolio type (core + its own). */
+    public static function fieldsFor(?string $type): array
+    {
+        return [...self::CORE, ...array_column(PortfolioTypes::fields($type), 'key')];
+    }
+
+    /** @return array<string, list<string>> field => header names it matches */
+    public static function synonyms(?string $type): array
+    {
+        $out = self::SYNONYMS;
+        foreach (PortfolioTypes::fields($type) as $f) {
+            $out[$f['key']] = array_values(array_unique([...($out[$f['key']] ?? []), ...$f['aliases'], strtolower($f['label'])]));
+        }
+        return $out;
+    }
+
     /** @param list<string> $headers @return array<string,?int> field => header index */
-    public static function suggestMapping(array $headers): array
+    public static function suggestMapping(array $headers, ?string $type = null): array
     {
         $norm = array_map(static fn ($h) => strtolower(trim(preg_replace('/\s+/', ' ', (string) $h) ?? '')), $headers);
         $out = [];
-        foreach (self::SYNONYMS as $field => $syn) {
+        $taken = [];
+        foreach (self::synonyms($type) as $field => $syn) {
             $out[$field] = null;
             foreach ($norm as $i => $h) {
-                if ($h === $field || in_array($h, $syn, true)) {
+                if (!isset($taken[$i]) && ($h === $field || in_array($h, $syn, true))) {   // one column feeds one field
                     $out[$field] = $i;
+                    $taken[$i] = true;
                     break;
                 }
             }
@@ -79,10 +86,11 @@ final class ImportValidator
      * @param callable(string):bool $teamExists
      * @return array{valid: list<array<string,mixed>>, errors: list<array{row:int,field:string,code:string,message:string}>}
      */
-    public static function validate(array $rows, string $defaultCountry, callable $existingRefForPhone, callable $employeeExists, callable $teamExists, int $firstRowNumber = 2): array
+    public static function validate(array $rows, string $defaultCountry, callable $existingRefForPhone, callable $employeeExists, callable $teamExists, int $firstRowNumber = 2, ?string $type = null): array
     {
         $valid = [];
         $errors = [];
+        $typeFields = PortfolioTypes::fields($type);
         $seenRef = [];
         $seenPhone = [];
         foreach ($rows as $i => $raw) {
@@ -135,44 +143,25 @@ final class ImportValidator
             if ($team !== null && !$teamExists($team)) {
                 $err('assigned_team', 'unknown_team', "Group \"{$team}\" does not exist here. Use a group name from Team → Groups & people, or leave it blank.");
             }
-            $acct = [];
-            foreach (self::MONEY as $f) {
-                if ($get($f) !== '') {
-                    $amt = self::parseMoney($get($f));
-                    if ($amt === null) {
-                        $err($f, 'invalid_amount', 'Use a number, e.g. 12500 or 12,500.00.');
-                    } else {
-                        $acct[$f] = $amt;
-                    }
+            $acct = [];        // real columns (role / loan columns)
+            $details = [];     // the type's other fields, typed
+            foreach ($typeFields as $f) {
+                $v = $get($f['key']);
+                if ($v === '') {
+                    continue;
                 }
-            }
-            foreach (self::DATES as $f) {
-                if ($get($f) !== '') {
-                    $d = self::parseDate($get($f));
-                    if ($d === null) {
-                        $err($f, 'invalid_date', 'Use YYYY-MM-DD or DD/MM/YYYY.');
-                    } else {
-                        $acct[$f] = $d;
-                    }
-                }
-            }
-            foreach (['dpd' => 20000, 'overdue_installments' => 1000] as $f => $max) {
-                if ($get($f) !== '') {
-                    if (ctype_digit($get($f)) && (int) $get($f) <= $max) {
-                        $acct[$f] = (int) $get($f);
-                    } else {
-                        $err($f, 'invalid_number', 'Use a whole number.');
-                    }
-                }
-            }
-            if ($get('lat') !== '' || $get('lng') !== '') {
-                $lat = is_numeric($get('lat')) ? (float) $get('lat') : 999;
-                $lng = is_numeric($get('lng')) ? (float) $get('lng') : 999;
-                // 0,0 is a blank export, not a place. Both are needed; an unusable pair is an error, never a guessed pin.
-                if ($lat >= -90 && $lat <= 90 && $lng >= -180 && $lng <= 180 && ($lat != 0.0 || $lng != 0.0)) {
-                    $acct += ['lat' => $lat, 'lng' => $lng];
+                $val = self::typed($f, $v, $defaultCountry);
+                if ($val === null) {
+                    $err($f['key'], 'invalid_' . $f['kind'], self::hint($f));
+                } elseif ($f['col'] !== null) {
+                    $acct[$f['col']] = $val;
                 } else {
-                    $err('lat', 'invalid_location', 'Latitude and longitude must both be valid.');
+                    $details[$f['key']] = $val;
+                }
+            }
+            foreach ((array) ($raw['__extra'] ?? []) as $header => $v) {   // columns that match no field: kept under their own name
+                if (trim((string) $v) !== '') {
+                    $details['x:' . mb_substr($header, 0, 60)] = mb_substr(trim((string) $v), 0, 500);
                 }
             }
             if ($get('email') !== '') {
@@ -207,13 +196,53 @@ final class ImportValidator
                     'campaign' => $get('campaign') ?: null, 'assigned_employee' => $emp, 'assigned_team' => $team,
                     'notes' => mb_substr($get('notes'), 0, 2000) ?: null, 'status' => $status, 'follow_up_date' => $followUp,
                     'city' => mb_substr($get('city'), 0, 100) ?: null, 'area' => mb_substr($get('area'), 0, 100) ?: null, 'pincode' => mb_substr(preg_replace('/\s+/', '', $get('pincode')), 0, 12) ?: null,
-                    'account' => $acct,
+                    'account' => $acct, 'details' => $details,
                 ];
             } else {
                 array_push($errors, ...$rowErrors);
             }
         }
         return ['valid' => $valid, 'errors' => $errors];
+    }
+
+    /** A field's value from the file in its kind, or null when it is not valid. */
+    public static function typed(array $f, string $v, string $country = 'IN'): mixed
+    {
+        return match ($f['kind']) {
+            'money' => self::parseMoney($v),
+            'date' => self::parseDate($v),
+            'int' => ctype_digit(str_replace(',', '', $v)) && (int) str_replace(',', '', $v) <= ($f['max'] ?? PHP_INT_MAX) ? (int) str_replace(',', '', $v) : null,
+            'number' => is_numeric(str_replace(',', '', $v)) ? round((float) str_replace(',', '', $v), 3) : null,
+            'choice' => self::choice($f['options'] ?? [], $v),
+            'phone' => rescue(fn () => PhoneNormaliser::normalise($v, $country), null, false),
+            'email' => filter_var($v, FILTER_VALIDATE_EMAIL) ? mb_substr($v, 0, 150) : null,
+            default => mb_substr($v, 0, 500),
+        };
+    }
+
+    /** Matches a choice whatever its case or spacing ("cod", "C.O.D" → "COD"); anything else is kept as written. */
+    private static function choice(array $options, string $v): string
+    {
+        $n = fn ($s) => strtolower(preg_replace('/[^a-z0-9]+/i', '', $s) ?? '');
+        foreach ($options as $o) {
+            if ($n($o) === $n($v)) {
+                return $o;
+            }
+        }
+        return mb_substr($v, 0, 100);
+    }
+
+    private static function hint(array $f): string
+    {
+        return match ($f['kind']) {
+            'money' => "{$f['label']}: use a number, e.g. 12500 or 12,500.00.",
+            'date' => "{$f['label']}: use YYYY-MM-DD or DD/MM/YYYY.",
+            'int' => "{$f['label']}: use a whole number" . ($f['max'] ? " up to {$f['max']}." : '.'),
+            'number' => "{$f['label']}: use a number, e.g. 2.5.",
+            'phone' => "{$f['label']}: not a valid phone number.",
+            'email' => "{$f['label']}: not a valid e-mail address.",
+            default => "{$f['label']}: not valid.",
+        };
     }
 
     /** "₹ 12,500.50", "Rs.12500", "12500" → 12500.5; negatives and junk → null. */

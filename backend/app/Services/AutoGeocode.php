@@ -14,8 +14,8 @@ use App\Support\CurrentCompany;
 /**
  * G5: address → map pin for every case, automatically. Runs after each upload (GeocodePending job) and every night for
  * anything left. Google's answer is kept per address (geocode_results), so the same address next month costs nothing.
- * Area-only matches (APPROXIMATE) give no pin — a pin in the middle of a locality would make "nearest" wrong; those
- * cases are marked 'approx' and the employee pins them at the door. Stops (and resumes next run) at the monthly limit.
+ * Area-only matches give an area pin marked 'approx' (and an address Google can't find falls back to its pincode /
+ * locality); the GPS check-in at the door then replaces it with the exact spot. Nobody types or drags a pin. Stops (and resumes next run) at the monthly limit.
  */
 final class AutoGeocode
 {
@@ -24,7 +24,8 @@ final class AutoGeocode
     /** Cases of the bound company that need a lookup. */
     public static function pending(): \Illuminate\Database\Eloquent\Builder
     {
-        return Customer::query()->whereNull('withdrawn_at')->whereNull('geo_status')
+        // 'approx' without a pin = looked up before area pins existed (10 Nov 2026): it gets its area pin now.
+        return Customer::query()->whereNull('withdrawn_at')->where(fn ($w) => $w->whereNull('geo_status')->orWhere('geo_status', 'approx'))
             ->where(fn ($w) => $w->whereNull('lat')->orWhereNull('lng')->orWhere(fn ($z) => $z->where('lat', 0)->where('lng', 0)))
             ->where(fn ($w) => $w->whereNotNull('address')->orWhereNotNull('pincode'));
     }
@@ -32,6 +33,12 @@ final class AutoGeocode
     public static function addressOf(Customer $c): string
     {
         return implode(', ', array_unique(array_filter(array_map(fn ($k) => trim((string) $c->{$k}), CustomerAddressChange::ADDRESS_FIELDS))));
+    }
+
+    /** Locality / pincode / city / state only, for an area pin when the full address is not found. */
+    public static function areaOf(Customer $c): string
+    {
+        return implode(', ', array_unique(array_filter(array_map(fn ($k) => trim((string) $c->{$k}), ['area', 'pincode', 'city', 'state']))));
     }
 
     public static function key(string $address, string $country): string
@@ -75,14 +82,33 @@ final class AutoGeocode
                     'lat' => $g['lat'] ?? null, 'lng' => $g['lng'] ?? null, 'precision' => $g['precision'] ?? null,
                     'formatted_address' => isset($g['formatted_address']) ? mb_substr($g['formatted_address'], 0, 300) : null]);
             }
-            if ($hit->status === 'google') {
-                Customer::changedBy('bulk_geocode', null, fn () => $c->forceFill(['lat' => $hit->lat, 'lng' => $hit->lng, 'geo_status' => 'google', 'geo_precision' => $hit->precision])->save(),
-                    'Matched: ' . $hit->formatted_address);
-                $stats['saved']++;
+            if ($hit->status === 'not_found' && ($area = self::areaOf($c)) !== '' && $area !== $address) {
+                // The full address is not on the map: the pincode / locality still gives an area pin.
+                $akey = self::key($area, $country);
+                $areaHit = GeocodeResult::query()->where('address_key', $akey)->first();
+                if (!$areaHit) {
+                    try {
+                        $g = $maps->geocode($area, $country);
+                    } catch (DomainException $e) {
+                        $stats['stopped'] = $e->getMessage();
+                        break;
+                    }
+                    $areaHit = GeocodeResult::query()->create(['address_key' => $akey, 'status' => $g === null ? 'not_found' : 'approx',
+                        'lat' => $g['lat'] ?? null, 'lng' => $g['lng'] ?? null, 'precision' => $g['precision'] ?? null,
+                        'formatted_address' => isset($g['formatted_address']) ? mb_substr($g['formatted_address'], 0, 300) : null]);
+                }
+                $hit = $areaHit->lat !== null ? $areaHit : $hit;
+            }
+            if (in_array($hit->status, ['google', 'approx'], true) && Customer::validCoords($hit->lat, $hit->lng)) {
+                // Exact match, or the area only ("approximate": the GPS check-in at the door then corrects it).
+                Customer::changedBy('bulk_geocode', null, fn () => $c->forceFill(['lat' => $hit->lat, 'lng' => $hit->lng, 'geo_status' => $hit->status,
+                    'geo_precision' => $hit->status === 'approx' ? 'approximate' : $hit->precision])->save(),
+                    ($hit->status === 'approx' ? 'Area only: ' : 'Matched: ') . $hit->formatted_address);
+                $stats[$hit->status === 'approx' ? 'approx' : 'saved']++;
                 if ($c->assigned_user_id) $owners[$c->assigned_user_id] = true;
             } else {
-                $c->forceFill(['geo_status' => $hit->status, 'geo_precision' => $hit->precision])->saveQuietly();
-                $stats[$hit->status === 'approx' ? 'approx' : 'not_found']++;
+                $c->forceFill(['geo_status' => 'not_found', 'geo_precision' => null])->saveQuietly();
+                $stats['not_found']++;
             }
         }
         // Phones holding these cases fetch the new pins now, not at their next sync.

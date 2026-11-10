@@ -112,7 +112,12 @@ data class CaseRow(
     val lat: Double? = null, val lng: Double? = null, val locationIssue: String? = null, val address: String? = null,
     /** Sum of this employee's own payments recorded today (server-computed). */
     val paidToday: Double = 0.0,
+    /** Portfolio type (collections, courier, sales…), its wording (value / due / date / amount labels), its own fields as
+     *  label → text, and the pin's origin: "address" | "approximate" (area only) | "verified" (GPS at the door). */
+    val ptype: String = "collections", val labels: Map<String, String> = emptyMap(), val details: List<Pair<String, String>> = emptyList(), val pin: String? = null,
 ) {
+    val isCollections: Boolean get() = ptype == "collections"
+    fun label(k: String, default: String): String = labels[k]?.takeIf { it.isNotBlank() } ?: default
     /** Days since the oldest unpaid instalment (null = not uploaded or nothing overdue). */
     val dpd: Int? get() = oldestDue?.takeIf { overdue == null || overdue > 0 }?.let { ChronoUnit.DAYS.between(it, LocalDate.now()).toInt().coerceAtLeast(0) }
     val callbackDate: LocalDate? get() = nextCallback?.atZone(ZoneId.systemDefault())?.toLocalDate()
@@ -125,8 +130,14 @@ fun CachedCustomer.toCase(): CaseRow {
         instant(o.s("next_callback_at")), o.d("promise_amount"), date(o.s("promise_date")), o.s("promise_status"), o.d("collected_verified") ?: 0.0,
         o.d("collected_pending") ?: 0.0, date(o.s("last_payment_recorded_on")), o.d("last_payment_recorded_amount"),
         o.d("lat"), o.d("lng"), o.s("location_issue"), listOfNotNull(o.s("address"), o.s("area"), o.s("city"), o.s("pincode")).joinToString(", ").ifBlank { null },
-        o.d("paid_today_amount") ?: 0.0)
+        o.d("paid_today_amount") ?: 0.0,
+        o.s("portfolio_type") ?: "collections", o.o("labels")?.mapValues { (_, v) -> v.toString().trim('"') } ?: emptyMap(),
+        o.a("details").mapNotNull { d -> d.s("label")?.let { l -> l to (d.s("value") ?: "") } }, o.s("pin"))
 }
+
+/** Portfolio type of a cached case (for the call feedback list). */
+fun CachedCustomer.portfolioType(): String =
+    runCatching { json.parseToJsonElement(extra).jsonObject["portfolio_type"]?.toString()?.trim('"') }.getOrNull()?.takeIf { it.isNotBlank() && it != "null" } ?: "collections"
 
 private val inr: NumberFormat = NumberFormat.getCurrencyInstance(Locale("en", "IN")).apply { maximumFractionDigits = 0 }
 fun money(v: Double?): String = v?.let { inr.format(it) } ?: "—"
@@ -252,16 +263,23 @@ fun CaseCard(r: CaseRow, outcomeLabel: (String) -> String, enabled: Boolean, onO
             }
             Spacer(Modifier.height(10.dp))
             Row {
-                Metric("Overdue", money(r.overdue), if ((r.dpd ?: 0) > 0) Ds.Red else Ds.Ink, Modifier.weight(1f))
-                Metric("Days overdue", r.dpd?.toString() ?: "—", if ((r.dpd ?: 0) > 60) Ds.Red else Ds.Ink, Modifier.weight(1f))
-                Metric("Outstanding", money(r.outstanding), Ds.Ink, Modifier.weight(1f))
+                if (r.isCollections) {
+                    Metric("Overdue", money(r.overdue), if ((r.dpd ?: 0) > 0) Ds.Red else Ds.Ink, Modifier.weight(1f))
+                    Metric("Days overdue", r.dpd?.toString() ?: "—", if ((r.dpd ?: 0) > 60) Ds.Red else Ds.Ink, Modifier.weight(1f))
+                    Metric("Outstanding", money(r.outstanding), Ds.Ink, Modifier.weight(1f))
+                } else {   // Courier: COD amount · Delivery date · Declared value; Sales: Order value · Close date · Deal value…
+                    Metric(r.label("due", "To collect"), money(r.overdue), Ds.Ink, Modifier.weight(1f))
+                    Metric(r.label("date", "Date"), r.dueDate?.format(dFmt) ?: "—", if (r.dueDate == LocalDate.now()) Ds.Blue else Ds.Ink, Modifier.weight(1f))
+                    Metric(r.label("value", "Value"), money(r.outstanding), Ds.Ink, Modifier.weight(1f))
+                }
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusTag(r.c.status)
                 Spacer(Modifier.width(8.dp))
                 Text(listOfNotNull(
-                    r.dueDate?.let { "Due ${it.format(dFmt)}" },
+                    r.dueDate?.takeIf { r.isCollections }?.let { "Due ${it.format(dFmt)}" },
+                    r.details.firstOrNull()?.takeIf { !r.isCollections }?.let { (l, v) -> "$l $v" },
                     r.lastCallAt?.let { "Last call ${fmtWhen(it)}" + (r.lastOutcome?.let { o -> " · ${outcomeLabel(o)}" } ?: "") } ?: "Not called yet",
                 ).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
@@ -343,9 +361,15 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
                 StatusTag(p?.s("status") ?: case.c.status)
             }
             Row(Modifier.padding(start = 8.dp, top = 14.dp)) {
-                HeroMetric("Overdue now", money(overdueNow), Modifier.weight(1f), alert = (days ?: 0) > 0)
-                HeroMetric("Days overdue", days?.toString() ?: "—", Modifier.weight(1f), alert = (days ?: 0) > 30)
-                HeroMetric("Outstanding", money(dues?.d("remaining_balance") ?: case.outstanding), Modifier.weight(1f))
+                if (case.isCollections) {
+                    HeroMetric("Overdue now", money(overdueNow), Modifier.weight(1f), alert = (days ?: 0) > 0)
+                    HeroMetric("Days overdue", days?.toString() ?: "—", Modifier.weight(1f), alert = (days ?: 0) > 30)
+                    HeroMetric("Outstanding", money(dues?.d("remaining_balance") ?: case.outstanding), Modifier.weight(1f))
+                } else {
+                    HeroMetric(case.label("due", "To collect"), money(case.overdue), Modifier.weight(1f))
+                    HeroMetric(case.label("date", "Date"), case.dueDate?.let { fmtDate(it) } ?: "—", Modifier.weight(1f))
+                    HeroMetric(case.label("value", "Value"), money(case.outstanding), Modifier.weight(1f))
+                }
             }
             // Dues drop only after the office verifies a payment; say so, or a collected payment looks ignored.
             val pending = p?.o("activity")?.d("collected_pending") ?: 0.0
@@ -373,7 +397,7 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
         }
         err?.let { Text(it, color = Ds.Red, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) }
         ScrollableTabRow(selectedTabIndex = tab, containerColor = Ds.Bg, edgePadding = 12.dp) {
-            TABS.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t, fontSize = 13.sp) }) }
+            TABS.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(if (i == 2 && !case.isCollections) case.label("label", "Details").substringBefore(" /").substringBefore(" &") else t, fontSize = 13.sp) }) }
         }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) {
             if (p == null) {
@@ -384,7 +408,7 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
             } else when (tab) {
                 0 -> OverviewTab(p!!, label)
                 1 -> DetailsTab(p!!, ctx)
-                2 -> DuesTab(p!!)
+                2 -> if (case.isCollections) DuesTab(p!!) else TypeDetailsTab(p!!, case)
                 3 -> PaymentsTab(p!!)
                 4 -> CallsTab(p!!, label)
                 5 -> FollowUpsTab(p!!)
@@ -443,13 +467,25 @@ private fun Kv(label: String, value: String?, strong: Boolean = false, color: Co
     }
 }
 
+/** Courier, Sales, Health care… : the fields of the case's portfolio type, then the file's own extra columns. */
+@Composable
+private fun TypeDetailsTab(p: JsonObject, case: CaseRow) {
+    val rows = p.a("details").mapNotNull { d -> d.s("label")?.let { it to d.s("text") } }.ifEmpty { case.details.map { it.first to it.second } }
+    Section(case.label("label", "Details")) {
+        if (rows.isEmpty()) Text("No details in the uploaded file for this case.", style = MaterialTheme.typography.bodySmall, color = Ds.Muted)
+        rows.forEach { (l, v) -> Kv(l, v) }
+    }
+}
+
 @Composable
 private fun OfflineSummary(r: CaseRow, label: (String) -> String) {
     Section("Saved summary") {
-        Kv("Overdue (as uploaded)", r.overdue?.let(::money), strong = true, color = Ds.Red)
-        Kv("Days overdue", r.dpd?.toString())
-        Kv("Total outstanding (as uploaded)", r.outstanding?.let(::money))
-        Kv("Next instalment", r.emi?.let { money(it) + (r.dueDate?.let { d -> " on ${fmtDate(d)}" } ?: "") })
+        if (r.isCollections) {
+            Kv("Overdue (as uploaded)", r.overdue?.let(::money), strong = true, color = Ds.Red)
+            Kv("Days overdue", r.dpd?.toString())
+            Kv("Total outstanding (as uploaded)", r.outstanding?.let(::money))
+            Kv("Next instalment", r.emi?.let { money(it) + (r.dueDate?.let { d -> " on ${fmtDate(d)}" } ?: "") })
+        } else r.details.forEach { (l, v) -> Kv(l, v) }
         Kv("Last call", r.lastCallAt?.let { fmtWhen(it) + (r.lastOutcome?.let { o -> " · ${label(o)}" } ?: "") } ?: "Not called yet")
         Kv("Next callback", r.nextCallback?.let { fmtWhen(it) } ?: "None")
         Kv("Promise", r.promiseAmount?.let { "${money(it)} on ${fmtDate(r.promiseDate)} · ${r.promiseStatus}" } ?: "None")
@@ -631,21 +667,22 @@ private fun FollowUpsTab(p: JsonObject) {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AddressTab(p: JsonObject, ctx: Context, vm: AppViewModel, case: CaseRow) {
-    var update by remember { mutableStateOf(false) }
     Section("Address") { AddressBlock(p, ctx) }
     val loc = p.o("location")
     Section("Map") {
         if (loc != null) {
             CaseMiniMap(vm, case.c.id, case.c.name, loc.d("lat")!!, loc.d("lng")!!) { OsmMap(loc.d("lat")!!, loc.d("lng")!!) }
-            Text("Pin saved on this case. Tap the pin or Distance & route for the road route.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
-        } else Text("Location unavailable — no map coordinates are saved for this customer. Directions use the address instead.", style = MaterialTheme.typography.bodySmall)
+            Text(when (p.s("pin")) {
+                "approximate" -> "Approximate pin: only the area of this address was found. Check in at the door and the pin moves to the exact spot."
+                "verified" -> "Pin verified at the door. Tap the pin or Distance & route for the road route."
+                else -> "Pin found from the address. Tap the pin or Distance & route for the road route."
+            }, style = MaterialTheme.typography.bodySmall, color = if (p.s("pin") == "approximate") Ds.Amber else Ds.Muted, modifier = Modifier.padding(top = 6.dp))
+        } else Text("No map pin yet — it is found from the address automatically. Directions use the address meanwhile.", style = MaterialTheme.typography.bodySmall)
         FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {   // wraps on narrow phones
             if (loc != null) Button(onClick = { vm.openFieldMap(case.c.id) }, colors = ButtonDefaults.buttonColors(containerColor = Ds.Navy)) { Text("Distance & route") }
-            OutlinedButton(onClick = { update = true }) { Text(if (loc == null) "Add location" else "Update location") }
         }
     }
     Section("Address history") { AddressHistory(p.a("address_history")) }
-    if (update) UpdateLocationDialog(vm, case) { update = false }
 }
 
 /** Every address / pin change on this case, newest first: previous → updated, when, how and by whom. */
@@ -787,7 +824,7 @@ private fun EntryDialog(vm: AppViewModel, case: CaseRow, kind: String, onDismiss
     val busy by vm.busy.collectAsState()
     val err by vm.error.collectAsState()
     LaunchedEffect(Unit) { vm.ensureOutcomes() }
-    val options = codes.filter { it.captures == kind }
+    val options = codes.forType(case.ptype).filter { it.captures == kind }
     var code by remember(options) { mutableStateOf(options.firstOrNull()?.code ?: "") }
     var amount by remember { mutableStateOf("") }
     var mode by remember { mutableStateOf("") }
