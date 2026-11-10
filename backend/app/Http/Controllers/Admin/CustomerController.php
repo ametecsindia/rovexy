@@ -139,16 +139,9 @@ final class CustomerController extends Controller
     public function errorReport(Request $r, int $id)
     {
         $job = $this->job($r, $id);
-        return response()->streamDownload(function () use ($job) {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, ['Row', 'Field', 'Error', 'Message']);
-            ImportRowError::query()->where('import_job_id', $job->id)->orderBy('row_number')->chunk(1000, function ($chunk) use ($out) {
-                foreach ($chunk as $e) {
-                    fputcsv($out, SpreadsheetSanitiser::row([$e->row_number, $e->field, $e->code, $e->message]));
-                }
-            });
-            fclose($out);
-        }, "import-{$job->id}-errors.csv", ['Content-Type' => 'text/csv']);
+        $rows = ImportRowError::query()->where('import_job_id', $job->id)->orderBy('row_number')->lazy(1000)
+            ->map(fn ($e) => [$e->row_number, $e->field, $e->code, $e->message]);
+        return \App\Support\Excel::download("import-{$job->id}-errors", ['Row', 'Field', 'Error', 'Message'], $rows);
     }
 
     /**

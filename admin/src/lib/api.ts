@@ -129,6 +129,7 @@ export function fmtSeconds(s?: number | null): string {
 
 /** Download a file from the API (Excel / CSV) with the session cookie; server errors are thrown as ApiError, not shown as a raw page. */
 export async function download(path: string, body?: unknown): Promise<void> {
+  if (body !== undefined) await ensureCsrf();
   const res = await fetch(`${base}${body === undefined ? withOrg(path, base === '/api/admin') : path}`, body === undefined ? { credentials: 'same-origin', headers: headers() }
     : { method: 'POST', credentials: 'same-origin', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   if (!res.ok) {

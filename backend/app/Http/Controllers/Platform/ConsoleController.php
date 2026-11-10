@@ -423,16 +423,10 @@ final class ConsoleController extends Controller
         $rows = SalesOrder::query()->with('plan:id,name')->where('status', 'paid')->whereBetween('paid_at', [Carbon::parse($d['from'], Ledger::TZ)->startOfDay()->utc(), Carbon::parse($d['to'], Ledger::TZ)->endOfDay()->utc()])
             ->orderBy('paid_at')->get();
         PlatformAudit::record('orders.exported', null, $d + ['rows' => $rows->count()]);
-        $safe = fn ($v) => is_string($v) && preg_match('/^[=+\-@]/', $v) ? "'" . $v : $v;   // no spreadsheet formulas from buyer text
-        return response()->streamDownload(function () use ($rows, $safe) {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, ['Invoice', 'Date', 'Order', 'Buyer', 'GSTIN', 'State', 'Package', 'Pricing', 'Standard price', 'Discount code', 'Discount', 'Taxable value', 'CGST', 'SGST', 'IGST', 'Total', 'Paid by', 'Reference']);
-            foreach ($rows as $o) {
-                fputcsv($out, array_map($safe, [$o->invoice_number, $o->paid_at->copy()->setTimezone(Ledger::TZ)->format('d-m-Y'), $o->number, $o->buyer_company, $o->buyer_gstin, $o->state_code, $o->plan?->name,
-                    $o->pricing === 'custom' ? 'negotiated' : 'standard', $o->list_price, $o->coupon_code, $o->discount, $o->amount, $o->cgst, $o->sgst, $o->igst, $o->total, $o->payment_method, $o->payment_ref]));
-            }
-            fclose($out);
-        }, "rovexy-invoices-{$d['from']}-to-{$d['to']}.csv", ['Content-Type' => 'text/csv']);
+        return \App\Support\Excel::download("rovexy-invoices-{$d['from']}-to-{$d['to']}",
+            ['Invoice', 'Date', 'Order', 'Buyer', 'GSTIN', 'State', 'Package', 'Pricing', 'Standard price', 'Discount code', 'Discount', 'Taxable value', 'CGST', 'SGST', 'IGST', 'Total', 'Paid by', 'Reference'],
+            $rows->map(fn ($o) => [$o->invoice_number, $o->paid_at->copy()->setTimezone(Ledger::TZ)->format('Y-m-d'), $o->number, $o->buyer_company, $o->buyer_gstin, $o->state_code, $o->plan?->name,
+                $o->pricing === 'custom' ? 'negotiated' : 'standard', $o->list_price, $o->coupon_code, $o->discount, $o->amount, $o->cgst, $o->sgst, $o->igst, $o->total, $o->payment_method, $o->payment_ref])->all());
     }
 
     /** Bank transfer / UPI / cheque / cash received outside Razorpay. Same single door as online payments. */

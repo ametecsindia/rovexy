@@ -47,21 +47,11 @@ final class Exporter
         $path = tempnam(sys_get_temp_dir(), 'acc') . '.xlsx';
         $w = new Writer();
         $w->openToFile($path);
-        $w->getCurrentSheet()->setName(mb_substr(preg_replace('/[\\\\\/?*\[\]:]/', ' ', $title), 0, 31));
-        $bold = (new Style())->setFontBold();
+        $intro = [];
         foreach ($meta as $k => $v) {
-            $w->addRow(Row::fromValues([$k, (string) $v]));
+            $intro[] = [$k, (string) $v];
         }
-        if ($meta) {
-            $w->addRow(Row::fromValues([]));
-        }
-        $w->addRow(Row::fromValues($headers, $bold));
-        foreach ($rows as $r) {
-            $w->addRow(Row::fromValues(array_map($safe, array_values($r))));
-        }
-        if ($totals) {
-            $w->addRow(Row::fromValues(array_map($safe, $totals), $bold));
-        }
+        \App\Support\Excel::sheet($w, $title, $headers, $rows, $intro, $totals);
         $w->close();
         return response()->download($path, "{$name}-{$stamp}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend();
     }

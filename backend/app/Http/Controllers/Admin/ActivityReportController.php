@@ -130,20 +130,11 @@ final class ActivityReportController extends Controller
         $path = tempnam(sys_get_temp_dir(), 'act') . '.xlsx';
         $w = new Writer();
         $w->openToFile($path);
-        $bold = (new Style())->setFontBold();
-        $safe = fn ($v) => is_string($v) && preg_match('/^[=+\-@\t\r]/', $v) ? "'" . $v : $v;
         $first = true;
-        foreach ($sheets as $name => $lines) {
+        foreach ($sheets as $name => $lines) {   // first line of each sheet = its header
             $first ? $first = false : $w->addNewSheetAndMakeItCurrent();
-            $w->getCurrentSheet()->setName($name);
-            if ($name === 'Summary' || $name === 'Team') {
-                $w->addRow(Row::fromValues([$title], $bold));
-                $w->addRow(Row::fromValues(["Period: {$period}"]));
-                $w->addRow(Row::fromValues([]));
-            }
-            foreach ($lines as $i => $line) {
-                $w->addRow(Row::fromValues(array_map($safe, $line), $i === 0 ? $bold : null));
-            }
+            $intro = $name === 'Summary' || $name === 'Team' ? [[$title], ["Period: {$period}"]] : [];
+            \App\Support\Excel::sheet($w, $name, array_map('strval', $lines[0] ?? []), array_slice($lines, 1), $intro);
         }
         $w->close();
         return response()->download($path, "{$file}.xlsx", ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend();

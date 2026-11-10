@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { del, get, post, put } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Notice, Page, toast, useAction, useAsync } from '../components/ui';
@@ -21,7 +22,10 @@ export function RecordingFormatsPage() {
   const done = async (msg: string) => { toast(msg); setOpen(null); await d.reload(); };
   return (
     <Page title="Recording file names" subtitle="Name downloaded call recordings the way each bank or lender wants. Pick a format for each portfolio on the Portfolios page; the default covers everything else."
-      actions={edit && x && !open ? <button onClick={() => setOpen({ name: '', ...x.blank })}>New format</button> : undefined}>
+      actions={x && !open ? <div className="row" style={{ gap: 8 }}>
+        {can('recordings.download') && <Link className="button secondary" to="/recording-export">Download recordings</Link>}
+        {edit && <button onClick={() => setOpen({ name: '', ...x.blank })}>New format</button>}
+      </div> : undefined}>
       <ErrorBox error={d.error ?? a.error} />
       {open && x && <Editor meta={x} value={open} onCancel={() => setOpen(null)} onSaved={(m) => void done(m)} />}
       {x && !open && (

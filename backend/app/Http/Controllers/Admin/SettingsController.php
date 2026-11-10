@@ -149,26 +149,24 @@ final class SettingsController extends Controller
         $tz = app(CurrentCompany::class)->get()->timezone;
         $pf = $data['portfolio'] ?? null;
         $names = \App\Models\ImportJob::query()->get(['id', 'portfolio', 'original_name'])->mapWithKeys(fn ($j) => [$j->id => $j->portfolio ?: pathinfo($j->original_name, PATHINFO_FILENAME)]);
-        return response()->streamDownload(function () use ($data, $users, $tz, $pf, $names) {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, ['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Portfolio', 'Destination', 'Outcome', 'Initiated (' . $tz . ')', 'Ring s', 'Talk s', 'Total s', 'Recording', 'Disposition', 'Amount', 'Payment mode']);
-            Call::query()->with(['user:id,employee_code,name', 'customer:id,customer_ref,name,last_import_id', 'disposition:id,call_id,code,amount,payment_mode'])
+        $head = ['Call ID', 'Employee code', 'Employee', 'Customer ID', 'Customer', 'Portfolio', 'Destination', 'Outcome', 'Initiated (' . $tz . ')', 'Ring s', 'Talk s', 'Total s', 'Recording', 'Disposition', 'Amount', 'Payment mode'];
+        $rows = (function () use ($data, $users, $tz, $pf, $names) {
+            $calls = Call::query()->with(['user:id,employee_code,name', 'customer:id,customer_ref,name,last_import_id', 'disposition:id,call_id,code,amount,payment_mode'])
                 ->where('is_test', false)->where('provider', '!=', 'manual')   // field entries are not calls
                 ->whereBetween('initiated_at', [\Illuminate\Support\Carbon::parse($data['from'], \App\Support\CurrentCompany::tz())->utc(), \Illuminate\Support\Carbon::parse($data['to'], \App\Support\CurrentCompany::tz())->utc()])   // company-zone dates
                 ->when($users !== null, fn ($q) => $q->whereIn('user_id', $users))
                 ->when(!empty($data['employee']), fn ($q) => $q->where('user_id', (int) $data['employee']))
                 ->when($pf === 'manual', fn ($q) => $q->whereHas('customer', fn ($c) => $c->whereNull('last_import_id')))
                 ->when(ctype_digit((string) $pf), fn ($q) => $q->whereHas('customer', fn ($c) => $c->where('last_import_id', (int) $pf)))
-                ->orderBy('id')->chunk(1000, function ($calls) use ($out, $tz, $names) {
-                    foreach ($calls as $c) {
-                        $pid = $c->customer?->last_import_id;
-                        fputcsv($out, SpreadsheetSanitiser::row([$c->uuid, $c->user?->employee_code, $c->user?->name, $c->customer?->customer_ref, $c->customer?->name,
-                            $c->customer ? ($pid ? ($names[$pid] ?? "Import #{$pid}") : 'Added by hand') : null, $c->destination, $c->state,
-                            $c->initiated_at->setTimezone($tz)->format('Y-m-d H:i:s'), $c->ring_seconds, $c->talk_seconds, $c->total_seconds, $c->recording_status,
-                            $c->disposition?->code, $c->disposition?->amount, $c->disposition?->payment_mode]));
-                    }
-                });
-            fclose($out);
-        }, 'calls.csv', ['Content-Type' => 'text/csv']);
+                ->orderBy('id')->lazy(1000);
+            foreach ($calls as $c) {
+                $pid = $c->customer?->last_import_id;
+                yield [$c->uuid, $c->user?->employee_code, $c->user?->name, $c->customer?->customer_ref, $c->customer?->name,
+                    $c->customer ? ($pid ? ($names[$pid] ?? "Import #{$pid}") : 'Added by hand') : null, $c->destination, $c->state,
+                    $c->initiated_at->setTimezone($tz)->format('Y-m-d H:i:s'), $c->ring_seconds, $c->talk_seconds, $c->total_seconds, $c->recording_status,
+                    $c->disposition?->code, $c->disposition?->amount, $c->disposition?->payment_mode];
+            }
+        })();
+        return \App\Support\Excel::download("calls-{$data['from']}-to-{$data['to']}", $head, $rows);
     }
 }

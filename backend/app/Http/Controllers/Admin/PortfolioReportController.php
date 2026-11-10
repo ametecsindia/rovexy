@@ -181,13 +181,7 @@ final class PortfolioReportController extends Controller
             }
             if ($only === '' && count($rows) > 1) $rows[] = $line('All portfolios', $this->show($r)->getData(true)['summary']);
         }
-        $name = "{$by}-wise.csv";
-        return response()->streamDownload(function () use ($head, $rows) {
-            $out = fopen('php://output', 'w');
-            fputcsv($out, $head);
-            foreach ($rows as $row) fputcsv($out, \App\Domain\Security\SpreadsheetSanitiser::row($row));
-            fclose($out);
-        }, $name, ['Content-Type' => 'text/csv']);
+        return \App\Support\Excel::download("{$by}-wise", $head, $rows, [[ucfirst($by) . '-wise report'], ['Period: ' . ($r->query('from') ?? '') . ' to ' . ($r->query('to') ?? '')]]);
     }
 
     /** Case-level drill-down (paginated): one row per customer with its calls, last outcome, callback and collection. */
