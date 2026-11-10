@@ -209,6 +209,8 @@ export function CustomersPage() {
   const customers = useAsync(() => get(`/customers${qs(f)}`), [f.q, f.status, f.assigned, f.team_id, f.import_id, f.portfolio_type]);
   const ptypes = useAsync(() => get<any[]>('/imports/types'));
   const oneType = f.portfolio_type ? ptypes.data?.find((t) => t.type === f.portfolio_type) : null;
+  // ponytail: first 6 file columns only, the case page shows all of them.
+  const fileKeys = [...new Set<string>((customers.data?.data ?? []).flatMap((c: any) => Object.keys(c.details ?? {}).filter((k) => k.startsWith('x:'))))].slice(0, 6);
   useLiveReload(customers.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const teams = useAsync(() => (can('employees.view') ? get<any[]>('/teams') : Promise.resolve([])));
@@ -289,6 +291,8 @@ export function CustomersPage() {
             ? [{ key: 'dpd', label: 'DPD', align: 'right' as const, render: (c: any) => { if (c.portfolio_type && c.portfolio_type !== 'collections') return <span className="muted">—</span>; const d = daysOverdue(c); return d === null ? <span className="muted">—</span> : <span className={d > 60 ? 'bad-text' : undefined}>{d}</span>; } }]
             : [{ key: 'due_date', label: oneType.date, render: (c: any) => c.due_date ? fmtDay(c.due_date) : <span className="muted">—</span> }]),
           { key: 'portfolio_type', label: 'Type', render: (c: any) => <span className="small">{c.labels?.label}</span> },
+          // The file's own columns (e.g. "Relative" in a Custom file), when the list is narrowed to one portfolio or type.
+          ...((f.import_id || oneType) ? fileKeys.map((k) => ({ key: k, label: k.slice(2), render: (c: any) => c.details?.[k] ?? <span className="muted">—</span> })) : []),
           { key: 'follow_up_on', label: 'Follow-up', render: (c: any) => c.follow_up_on?.slice(0, 10) ?? '—' },
         ]} />
         {customers.data?.total > (rows?.length ?? 0) && <p className="muted">Showing {rows?.length} of {customers.data.total}. For big batches use <Link to="/allocation">Customers → Allocation</Link> (all or part of the matching cases at once).</p>}
@@ -397,7 +401,7 @@ export function CustomerDetailPage() {
 
           {tab === 'Loan & dues' && !coll && (
             <Card title={`${lb.label} details`}>
-              {typeFields.length ? <div className="kv-grid">{typeFields.map((x: any) => <div key={x.key}><small>{x.label}</small>{x.text}</div>)}</div>
+              {typeFields.length + fileCols.length ? <div className="kv-grid">{[...typeFields, ...fileCols].map((x: any) => <div key={x.key}><small>{x.label}</small>{x.text}</div>)}</div>
                 : <p className="muted">No {lb.label} details in the uploaded file for this case.</p>}
             </Card>
           )}
