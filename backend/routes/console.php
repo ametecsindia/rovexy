@@ -123,3 +123,13 @@ Schedule::call(function () {
         }
     });
 })->dailyAt('00:45')->name('activity:nightly')->withoutOverlapping();
+
+// Demo clients ("Explore Demo"): a realistic working day for the demo team (sign-in/out, breaks, idle, GPS trail) up to now,
+// keeping everything the client added or changed. Hourly, so "today" stays live. By hand: php artisan demo:activity [slug]
+Artisan::command('demo:activity {slug?}', function (?string $slug = null) {
+    Company::query()->whereNotNull('demo')->when($slug, fn ($q) => $q->where('slug', $slug))->each(function (Company $c) {
+        $s = \App\Services\Demo\DemoWorkspace::repairActivity($c);
+        $this->info("{$c->slug}: {$s['employees']} employees, {$s['days']} days, {$s['events']} events, {$s['points']} GPS points");
+    });
+})->purpose('Realistic activity data for demo clients');
+Schedule::command('demo:activity')->hourlyAt(7)->name('demo:activity')->withoutOverlapping(30);
