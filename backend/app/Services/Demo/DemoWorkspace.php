@@ -113,6 +113,118 @@ final class DemoWorkspace
         return $company;
     }
 
+    /**
+     * Keep a demo's data but give its employees a realistic working day: sign-in / sign-out, lunch break, idle spells and
+     * a GPS trail (every 5 minutes, tens of km for field agents), for every working day from the first upload until now.
+     * Only the demo's own phones and sessions are touched; everything the client added or changed stays as it is.
+     * Run again at any time (e.g. a few days later, so "today" has data): it replaces what it made before.
+     */
+    public static function repairActivity(Company $c): array
+    {
+        self::demoOnly($c);
+        set_time_limit(300);
+        $w = new self();
+        $w->city = DemoCities::get($c->demo['city']) ?? throw new DomainException('bad_city', 'Unknown demo city.');
+        $w->cid = $c->id;
+        $w->now = now()->utc()->startOfMinute();
+        $w->rnd = new \Random\Randomizer(new \Random\Engine\Mt19937(crc32('rovexy-activity-' . $c->id . '-' . $w->now->toDateString())));
+        $out = app(CurrentCompany::class)->run($c, fn () => DB::transaction(fn () => $w->repair()));
+        if (Schema::hasTable('daily_activity')) {
+            DB::table('daily_activity')->where('company_id', $c->id)->delete();
+        }
+        for ($d = 0; $d <= 90; $d++) {
+            \Illuminate\Support\Facades\Cache::forget("activity-built:{$c->id}:" . $w->now->copy()->setTimezone($w->tz)->subDays($d)->toDateString());
+        }
+        return $out;
+    }
+
+    private function repair(): array
+    {
+        [, , , , , , $loc] = $this->city;
+        // The demo's own people and phones (made by build(): TC2xx tele-callers, FOS3xx field agents).
+        $users = DB::table('users')->where('company_id', $this->cid)->where(fn ($q) => $q->where('employee_code', 'like', 'TC2%')->orWhere('employee_code', 'like', 'FOS3%'))
+            ->orderBy('employee_code')->get(['id', 'employee_code']);
+        $field = $users->filter(fn ($u) => str_starts_with($u->employee_code, 'FOS'))->values();
+        $circle = [];
+        foreach ($field as $k => $u) {   // same circles as people()
+            $circle[$u->id] = array_slice($loc, 1 + ($k * 3) % (count($loc) - 1), 3) ?: [$loc[1]];
+        }
+        $first = Carbon::parse((string) (DB::table('import_jobs')->where('company_id', $this->cid)->min('created_at') ?? $this->now->copy()->subDays(62)))->setTimezone($this->tz)->startOfDay();
+        $today = $this->now->copy()->setTimezone($this->tz)->startOfDay();
+        $stats = ['employees' => 0, 'days' => 0, 'events' => 0, 'points' => 0];
+        foreach ($users as $u) {
+            $dev = (int) DB::table('managed_devices')->where('company_id', $this->cid)->where('assigned_user_id', $u->id)->orderBy('id')->value('id');
+            if (!$dev) {
+                continue;
+            }
+            $isField = isset($circle[$u->id]);
+            $home = $isField ? $circle[$u->id][0] : $loc[0];
+            // Visits on record (demo and client's), as stops of the day.
+            $stops = [];
+            foreach (DB::table('customer_events')->where('company_id', $this->cid)->where('user_id', $u->id)->where('type', 'visit')->get(['meta', 'created_at']) as $v) {
+                $m = json_decode((string) $v->meta, true) ?: [];
+                if (isset($m['lat'], $m['lng'])) {
+                    $at = Carbon::parse($v->created_at, 'UTC');
+                    $stops[$at->copy()->setTimezone($this->tz)->toDateString()][] = [(float) $m['lat'], (float) $m['lng'], $at];
+                }
+            }
+            // Forget what this repair (or the old demo build) made for this phone; real sessions from the client's own use stay.
+            $mine = DB::table('work_sessions')->where('company_id', $this->cid)->where('device_id', $dev)->where('access_hash', 'like', 'demo%')->pluck('id');
+            $old = DB::table('work_sessions')->where('company_id', $this->cid)->where('device_id', $dev)->where('end_reason', 'signed_out')
+                ->where('created_at', '<', (string) ($this->demoSeededAt() ?? $this->now))->pluck('id');
+            $drop = $mine->merge($old)->unique()->values();
+            foreach ($drop->chunk(500) as $ids) {
+                DB::table('location_events')->whereIn('work_session_id', $ids)->delete();
+            }
+            DB::table('activity_events')->where('company_id', $this->cid)->where('device_id', $dev)->where('meta', 'like', '%"demo":true%')->delete();
+            $realDays = DB::table('activity_events')->where('company_id', $this->cid)->where('user_id', $u->id)->where('type', 'signed_in')->pluck('occurred_at')
+                ->map(fn ($t) => Carbon::parse($t, 'UTC')->setTimezone($this->tz)->toDateString())->flip();
+            foreach ($drop->chunk(500) as $ids) {
+                DB::table('work_sessions')->whereIn('id', $ids)->delete();
+            }
+            [$points, $events, $lastSeen] = [[], [], null];
+            for ($day = $first->copy(); $day->lte($today); $day->addDay()) {
+                if ($day->isSunday() || isset($realDays[$day->toDateString()])) {
+                    continue;   // Monday–Saturday; a day the client really used the phone keeps its real data
+                }
+                $in = $day->copy()->setTime(9, $this->rnd->getInt(10, 59));
+                $outAt = $day->copy()->setTime(18, $this->rnd->getInt(5, 59))->addMinutes($this->rnd->getInt(0, 50));
+                if ($in->copy()->utc()->gte($this->now)) {
+                    continue;
+                }
+                $endUtc = $outAt->copy()->utc()->min($this->now->copy()->subMinutes(5));
+                $ws = (int) DB::table('work_sessions')->insertGetId(['company_id' => $this->cid, 'device_id' => $dev, 'user_id' => $u->id,
+                    'access_hash' => 'demo' . bin2hex(random_bytes(30)), 'refresh_hash' => bin2hex(random_bytes(32)), 'epoch' => 1,
+                    'access_expires_at' => $this->ts($in->copy()->utc()->addMinutes(15)), 'refresh_expires_at' => $this->ts($in->copy()->utc()->addHours(12)),
+                    'lease_expires_at' => $this->ts($endUtc), 'last_validated_at' => $this->ts($endUtc), 'ended_at' => $this->ts($endUtc), 'end_reason' => 'signed_out',
+                    'created_at' => $this->ts($in->copy()->utc())]);
+                $this->dayOfWork($u->id, $dev, $isField, $home, $circle[$u->id] ?? [], $day, $in, $outAt, $endUtc, $ws, $stops[$day->toDateString()] ?? [], $points, $events);
+                $lastSeen = $endUtc;
+                $stats['days']++;
+            }
+            foreach (array_chunk($points, 500) as $chunk) {
+                DB::table('location_events')->insert($chunk);
+            }
+            foreach (array_chunk($events, 500) as $chunk) {
+                DB::table('activity_events')->insert($chunk);
+            }
+            if ($lastSeen) {
+                DB::table('managed_devices')->where('id', $dev)->where(fn ($q) => $q->whereNull('last_contact_at')->orWhere('last_contact_at', '<', $this->ts($lastSeen)))
+                    ->update(['last_contact_at' => $this->ts($lastSeen)]);
+            }
+            $stats['employees']++;
+            $stats['events'] += count($events);
+            $stats['points'] += count($points);
+        }
+        return $stats;
+    }
+
+    private function demoSeededAt(): ?string
+    {
+        $demo = json_decode((string) DB::table('companies')->where('id', $this->cid)->value('demo'), true);
+        return isset($demo['seeded_at']) ? Carbon::parse($demo['seeded_at'])->utc()->toDateTimeString() : null;
+    }
+
     /** "Clear Demo Data": everything goes, the original dataset comes back; the administrator's sign-in is kept. */
     public static function reset(Company $c): void
     {
@@ -213,6 +325,13 @@ final class DemoWorkspace
             $this->portfolios($org);
             $this->copyCalling();
         });
+        // Employee activity report: forget days worked out from the previous data, so they are built again from this one.
+        if (Schema::hasTable('daily_activity')) {
+            DB::table('daily_activity')->where('company_id', $c->id)->delete();
+        }
+        for ($d = 0; $d <= 75; $d++) {
+            \Illuminate\Support\Facades\Cache::forget("activity-built:{$c->id}:" . $this->now->copy()->setTimezone($this->tz)->subDays($d)->toDateString());
+        }
         $c->forceFill(['demo' => ['seeded_at' => now()->addSecond()->toAtomString()] + $c->demo])->save();
     }
 
@@ -530,6 +649,7 @@ final class DemoWorkspace
             $field = in_array($uid, $org['agents']['field'], true);
             $home = $field ? $org['circle'][$uid][0] : $loc[0];
             $points = [];
+            $events = [];
             $lastSeen = null;
             for ($d = 62; $d >= 0; $d--) {
                 $day = $today->copy()->subDays($d);
@@ -542,41 +662,19 @@ final class DemoWorkspace
                     continue;
                 }
                 $endUtc = $out->copy()->utc()->min($this->now->copy()->subMinutes(5));
-                $ws = $this->ins('work_sessions', ['device_id' => $dev, 'user_id' => $uid, 'access_hash' => bin2hex(random_bytes(32)), 'refresh_hash' => bin2hex(random_bytes(32)),
+                $ws = $this->ins('work_sessions', ['device_id' => $dev, 'user_id' => $uid, 'access_hash' => 'demo' . bin2hex(random_bytes(30)), 'refresh_hash' => bin2hex(random_bytes(32)),
                     'epoch' => 1, 'access_expires_at' => $this->ts($in->copy()->utc()->addMinutes(15)), 'refresh_expires_at' => $this->ts($in->copy()->utc()->addHours(12)),
                     'lease_expires_at' => $this->ts($endUtc), 'last_validated_at' => $this->ts($endUtc), 'ended_at' => $this->ts($endUtc), 'end_reason' => 'signed_out',
                     'created_at' => $this->ts($in->copy()->utc())]);
                 $lastSeen = $endUtc;
-                if ($d > 20) {
-                    continue;
-                }
-                // Trail: every 10 minutes (field) / 15 minutes (office), passing each visit at its time.
-                $stops = $days[$uid][$day->toDateString()] ?? [];
-                $step = $field ? 10 : 15;
-                $battery = $this->rnd->getInt(82, 100);
-                for ($p = $in->copy()->utc(); $p->lte($endUtc); $p->addMinutes($step)) {
-                    $near = null;
-                    foreach ($stops as $s) {
-                        if (abs($s[2]->diffInMinutes($p, false)) <= 12) {
-                            $near = $s;
-                        }
-                    }
-                    if ($near) {
-                        [$lat, $lng] = [$near[0], $near[1]];
-                    } elseif ($field) {
-                        $a = $this->pick($org['circle'][$uid]);
-                        [$lat, $lng] = [$a[2] + $this->rnd->getInt(-60, 60) / 10000, $a[3] + $this->rnd->getInt(-60, 60) / 10000];
-                    } else {
-                        [$lat, $lng] = [$home[2] + $this->rnd->getInt(-3, 3) / 10000, $home[3] + $this->rnd->getInt(-3, 3) / 10000];
-                    }
-                    $battery = max(9, $battery - $this->rnd->getInt(0, 2));
-                    $points[] = ['company_id' => $this->cid, 'device_id' => $dev, 'user_id' => $uid, 'work_session_id' => $ws, 'lat' => round($lat, 7), 'lng' => round($lng, 7),
-                        'accuracy_m' => $this->rnd->getInt(4, 28), 'provider' => 'fused', 'battery_pct' => $battery, 'network_type' => $field ? 'cellular' : 'wifi',
-                        'captured_at' => $this->ts($p), 'received_at' => $this->ts($p->copy()->addSeconds($this->rnd->getInt(2, 40))), 'mock' => false];
-                }
+                $this->dayOfWork($uid, $dev, $field, $home, $org['circle'][$uid] ?? [], $day, $in, $out, $endUtc, $ws, $days[$uid][$day->toDateString()] ?? [], $points, $events);
             }
             foreach (array_chunk($points, 500) as $chunk) {
                 DB::table('location_events')->insert($chunk);
+            }
+            usort($events, fn ($a, $b) => strcmp($a['occurred_at'], $b['occurred_at']));
+            foreach (array_chunk($events, 500) as $chunk) {
+                DB::table('activity_events')->insert($chunk);
             }
             DB::table('managed_devices')->where('id', $dev)->update(['last_contact_at' => $lastSeen ? $this->ts($lastSeen) : null, 'last_ip' => '49.36.' . $this->rnd->getInt(1, 250) . '.' . $this->rnd->getInt(1, 250)]);
         }
@@ -707,6 +805,91 @@ final class DemoWorkspace
     }
 
     /** The next working moment (Mon–Sat, 10:00–17:50 IST) on or after $t's date. */
+    /** One working day of a demo employee: what the phone reports (sign-in/out, ROVEXY open or in the background,
+     *  lunch break, idle spells) and the GPS trail, a fix every 5 minutes. */
+    private function dayOfWork(int $uid, int $dev, bool $field, array $home, array $circle, Carbon $day, Carbon $in, Carbon $out, Carbon $endUtc, int $ws,
+        array $stops, array &$points, array &$events): void
+    {
+        // What the phone reports during the day (the Employee activity report is built from these):
+        // sign-in / sign-out, ROVEXY open or in the background, a lunch break and a few idle spells.
+        $ev = function (string $type, Carbon $at) use (&$events, $dev, $uid): void {
+            if ($at->copy()->utc()->lte($this->now)) {   // nothing in the future
+                $events[] = ['company_id' => $this->cid, 'device_id' => $dev, 'user_id' => $uid, 'type' => $type, 'occurred_at' => $this->ts($at->copy()->utc()), 'meta' => '{"demo":true}'];
+            }
+        };
+        $ev('signed_in', $in);
+        $ev('app_foreground', $in->copy()->addMinutes(1));
+        $lunch = $day->copy()->setTime(13, $this->rnd->getInt(5, 45));
+        $back = $lunch->copy()->addMinutes($this->rnd->getInt(28, 45));
+        $ev('app_background', $lunch);
+        $ev('break_start', $lunch);
+        $ev('break_end', $back);
+        $ev('app_foreground', $back);
+        for ($k = $this->rnd->getInt(0, 3); $k > 0; $k--) {   // phone pocketed for a while: idle
+            $from = $day->copy()->setTime($this->pick([10, 11, 15, 16, 17]), $this->rnd->getInt(0, 40));
+            $ev('app_background', $from);
+            $ev('app_foreground', $from->copy()->addMinutes($this->rnd->getInt(12, 30)));
+        }
+        if ($out->copy()->utc()->lte($this->now)) {
+            $ev('app_background', $out->copy()->subMinutes(1));
+            $ev('signed_out', $out);
+        }
+        // Trail: a fix every 5 minutes. Field agents wait at a place and ride (~22 km/h) to the next
+        // visit just in time for it, then back to their base area at sign-out — a real day is tens of km,
+        // not the hundreds a random jump every few minutes adds up to. Office staff stay at the office.
+        $anchors = [[$home[2], $home[3], $in->copy()->utc()]];
+        if ($field) {
+            // Besides the recorded visits, a field agent tours his circle (addresses checked, doors
+            // found locked, follow-ups): 3–6 more stops a day, mostly in one area of it, so a day is ~15–50 km.
+            $a = $this->pick($circle);   // today's area of the circle
+            for ($k = $this->rnd->getInt(3, 6); $k > 0; $k--) {
+                $at = $day->copy()->setTime($this->pick([10, 11, 12, 14, 15, 16, 17]), $this->rnd->getInt(0, 59))->utc();
+                if ($at->lt($endUtc)) {
+                    $stops[] = [$a[2] + $this->rnd->getInt(-80, 80) / 10000, $a[3] + $this->rnd->getInt(-80, 80) / 10000, $at];
+                }
+            }
+            usort($stops, fn ($a, $b) => $a[2] <=> $b[2]);
+            foreach ($stops as $s) {
+                $anchors[] = [$s[0], $s[1], $s[2]->copy()->utc()];
+            }
+            $anchors[] = [$home[2], $home[3], $endUtc->copy()];
+        }
+        $battery = $this->rnd->getInt(82, 100);
+        for ($p = $in->copy()->utc(); $p->lte($endUtc); $p->addMinutes(5)) {
+            [$lat, $lng] = $this->trailAt($anchors, $p);
+            [$lat, $lng] = [$lat + $this->rnd->getInt(-5, 5) / 100000, $lng + $this->rnd->getInt(-5, 5) / 100000];   // GPS wobble, ±5 m
+            $battery = max(9, $battery - $this->rnd->getInt(0, 2));
+            $points[] = ['company_id' => $this->cid, 'device_id' => $dev, 'user_id' => $uid, 'work_session_id' => $ws, 'lat' => round($lat, 7), 'lng' => round($lng, 7),
+                'accuracy_m' => $this->rnd->getInt(4, 28), 'provider' => 'fused', 'battery_pct' => $battery, 'network_type' => $field ? 'cellular' : 'wifi',
+                'captured_at' => $this->ts($p), 'received_at' => $this->ts($p->copy()->addSeconds($this->rnd->getInt(2, 40))), 'mock' => false];
+        }
+    }
+
+    /** Position at time $t on a day of [lat, lng, time] anchors: wait at the last place, leave just in time to reach the next. */
+    private function trailAt(array $anchors, Carbon $t): array
+    {
+        [$a, $b] = [$anchors[0], null];
+        foreach ($anchors as $x) {
+            if ($x[2]->lte($t)) {
+                $a = $x;
+            } else {
+                $b = $x;
+                break;
+            }
+        }
+        if (!$b) {
+            return [$a[0], $a[1]];
+        }
+        $km = 6371 * 2 * asin(sqrt(sin(deg2rad($b[0] - $a[0]) / 2) ** 2 + cos(deg2rad($a[0])) * cos(deg2rad($b[0])) * sin(deg2rad($b[1] - $a[1]) / 2) ** 2));
+        $ride = min(max(1, $a[2]->diffInSeconds($b[2])), (int) ($km * 1.3 / 22 * 3600));   // road ≈ 1.3 × straight line, ~22 km/h
+        $leave = $b[2]->copy()->subSeconds($ride);
+        if ($t->lt($leave) || $ride === 0) {
+            return [$a[0], $a[1]];
+        }
+        $f = $leave->diffInSeconds($t) / max(1, $ride);
+        return [$a[0] + ($b[0] - $a[0]) * $f, $a[1] + ($b[1] - $a[1]) * $f];
+    }
+
     private function workTime(Carbon $t): Carbon
     {
         $t = $t->copy()->setTimezone($this->tz);
