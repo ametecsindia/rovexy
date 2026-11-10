@@ -37,7 +37,7 @@
 .otp-r h1{font-size:clamp(1.7rem,3vw,2.1rem);margin:0 0 8px;color:var(--ink)}
 .otp-r .lead{color:var(--mute);margin:0 0 24px;line-height:1.55}.otp-r .lead b{color:var(--ink)}
 .boxes{display:flex;gap:10px;margin:6px 0 10px}
-.boxes input{width:56px;height:64px;border-radius:14px;border:1.5px solid var(--line);background:var(--paper);text-align:center;font:700 1.6rem var(--display);color:var(--ink);transition:border-color .15s,box-shadow .15s,background .15s;caret-color:var(--brass)}
+.boxes input{width:56px;height:64px;padding:0;margin:0;line-height:1;border-radius:14px;border:1.5px solid var(--line);background:var(--paper);text-align:center;font:700 1.6rem var(--display);color:var(--ink);transition:border-color .15s,box-shadow .15s,background .15s;caret-color:var(--brass)}
 .boxes input:focus{outline:0;border-color:var(--brass);background:#fff;box-shadow:0 0 0 4px rgba(184,137,59,.18)}
 .boxes input.filled{background:#fff;border-color:var(--navy-2)}
 .boxes.bad input{border-color:#E08A6A;background:#FDF3EF}
@@ -93,7 +93,8 @@
         </div>
         <noscript><input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required style="font-size:1.4rem;letter-spacing:.3em;max-width:220px;margin:8px 0"></noscript>
         <p class="expiry" id="expiry"><span class="dot"></span><span id="expiry-t">Code valid for {{ $minutes }} minutes</span></p>
-        <button class="btn gold go" type="submit" id="go" disabled>{{ $buy ? 'Confirm and continue to payment' : ($demo ? 'Open my demo' : 'Create my workspace') }} →</button>
+        <button class="btn gold go" type="submit" id="go" disabled{!! $demo ? ' data-busy="Building your demo…"' : '' !!}>{{ $buy ? 'Confirm and continue to payment' : ($demo ? 'Open my demo' : 'Create my workspace') }} →</button>
+        @if($demo)<p id="busy-note" class="expiry" hidden>Setting up your team, customers, calls and recordings. This can take up to a minute — please keep this page open.</p>@endif
       </form>
 
       <div class="more">
@@ -138,7 +139,11 @@
     b.addEventListener('paste', function (e) { e.preventDefault(); fill((e.clipboardData || window.clipboardData).getData('text'), i); });
     b.addEventListener('focus', function () { b.select(); });
   });
-  form.addEventListener('submit', function () { go.disabled = true; go.textContent = 'Checking…'; });
+  form.addEventListener('submit', function () {
+    go.disabled = true;
+    go.textContent = go.dataset.busy || 'Checking…';
+    var note = document.getElementById('busy-note'); if (note && go.dataset.busy) note.hidden = false;
+  });
   var dev = document.querySelector('[data-fill]'); if (dev) dev.addEventListener('click', function () { fill(dev.dataset.fill, 0); });
 
   // Resend: once a minute (the server checks too).

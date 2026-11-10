@@ -306,6 +306,13 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::put('disposition-codes', [Admin\CallController::class, 'saveCodes'])->middleware('perm:telephony.configure');
 
         Route::get('presence', [Admin\SupervisionController::class, 'presence'])->middleware('perm:employees.view');
+        // Reports → Employee activity (attendance, productivity, idle, travel) — App\Services\Activity\DayBuilder
+        Route::get('activity/day', [Admin\ActivityReportController::class, 'day'])->middleware('perm:employees.view');
+        Route::get('activity/employee', [Admin\ActivityReportController::class, 'employee'])->middleware('perm:employees.view');
+        Route::get('activity/team', [Admin\ActivityReportController::class, 'team'])->middleware('perm:employees.view');
+        Route::get('activity/export', [Admin\ActivityReportController::class, 'export'])->middleware(['perm:reports.export', 'throttle:30,1']);
+        Route::get('activity/settings', [Admin\ActivityReportController::class, 'settings'])->middleware('perm:employees.view');
+        Route::put('activity/settings', [Admin\ActivityReportController::class, 'saveSettings'])->middleware('perm:employees.manage');
         Route::get('locations', [Admin\SupervisionController::class, 'locations'])->middleware('perm:location.view');
         Route::get('live-locations', [Admin\SupervisionController::class, 'live'])->middleware(['perm:location.view', 'feature:live_map']);
         Route::get('day-route', [Admin\SupervisionController::class, 'dayRoute'])->middleware(['perm:location.view', 'feature:live_map']);

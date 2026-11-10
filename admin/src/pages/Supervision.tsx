@@ -582,6 +582,7 @@ function Journey({ j, emp, day, setDay, tz, focus, onFocus, onBack, onFixes }: {
         </div>
         <div className="row" style={{ gap: 6, marginTop: 8 }}>
           {can('employees.view') && <button className="secondary sm" title="View profile" onClick={() => setProfile(true)}><Icon name="eye" size={16} /> Profile</button>}
+          {can('employees.view') && uid && <Link className="button secondary sm" title="Attendance, working hours, idle time and travel" to={`/employee-activity?user=${uid}&from=${day}&to=${day}`}><Icon name="clock" size={16} /> Activity</Link>}
           {can('chat.use') && <button className="secondary sm" title="Chat now" disabled={chat.busy || !uid} onClick={() => void chat.run(async () => { const c = await post('/conversations', { user_id: uid }); nav(`/chat?c=${c.id}`); })}><Icon name="chat" size={16} /> Chat</button>}
         </div>
         {chat.error && <ErrorBox error={chat.error} />}

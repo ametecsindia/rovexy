@@ -43,7 +43,7 @@ describe('api client', () => {
 
 describe('navigation', () => {
   it('lists every module and filters by permission', async () => {
-    expect(NAV).toHaveLength(33);   // menu as of 29 Oct 2026 (+ Field planning, My calls) (portfolios, assignment, address report, payments, calling configuration…)
+    expect(NAV).toHaveLength(34);   // menu as of 10 Nov 2026 (+ Employee activity; 29 Oct: + Field planning, My calls) (portfolios, assignment, address report, payments, calling configuration…)
     mockFetch((u) => {
       if (u.endsWith('/auth/me')) return { status: 200, body: ME };
       if (u.endsWith('/branding')) return { status: 200, body: { display_name: 'Alpha', logo_url: null } };

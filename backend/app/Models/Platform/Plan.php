@@ -13,7 +13,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class Plan extends Model
 {
-    protected $fillable = ['code', 'name', 'tagline', 'price_inr', 'months', 'max_users', 'min_users', 'features', 'is_public', 'active', 'sort'];
+    protected $fillable = ['code', 'name', 'tagline', 'price_inr', 'months', 'max_users', 'min_users', 'features', 'is_public', 'active', 'sort', 'cloud_model'];
 
     public function cloudTiers(): \Illuminate\Database\Eloquent\Relations\HasMany
     {
@@ -28,6 +28,12 @@ class Plan extends Model
     protected function casts(): array
     {
         return ['features' => 'array', 'is_public' => 'boolean', 'active' => 'boolean', 'price_inr' => 'float', 'months' => 'integer', 'max_users' => 'integer', 'min_users' => 'integer'];
+    }
+
+    /** ROVEXY Cloud of 10 Nov 2026 (App\Services\Platform\CloudPlans): cloud only, quarterly only, the tier rate exactly. */
+    public function quarterlyCloud(): bool
+    {
+        return $this->cloud_model === 'quarterly';
     }
 
     /** Can be bought at all (price ladders decide whether a given size is priced or a custom quote). */

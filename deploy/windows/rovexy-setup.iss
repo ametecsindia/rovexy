@@ -429,6 +429,7 @@ begin
     case TlsPage.SelectedValueIndex of
       0: Result := Result + 'Let''s Encrypt';
       1: Result := Result + Trim(CertPage.Values[0]);
+      3: Result := Result + 'Cloudflare Tunnel (Cloudflare provides https; no ports opened, no certificate on this server)';
     else
       Result := Result + 'this computer''s own certificate (no domain name)';
     end;

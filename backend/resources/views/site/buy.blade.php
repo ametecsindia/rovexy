@@ -1,7 +1,5 @@
 @php
   $kind = old('kind', $kind);
-  $cyc = ['quarterly' => ['Quarterly', '3 months'], 'half_yearly' => ['6 months', (int) $halfPct . '% off'], 'annual' => ['12 months', (int) $annualPct . '% off']];
-  $cyc['quarterly'][1] = '0% off';
 @endphp
 <!doctype html>
 <html lang="en">
@@ -80,22 +78,38 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
     <h1 id="title">ROVEXY {{ $plan->name }}</h1>
     <p class="lead" id="lead"></p>
 
-    <span class="lab">Plan</span>
-    <div class="seg" role="radiogroup" aria-label="Plan">
-      @foreach($plans as $p)<label><input type="radio" name="plan" value="{{ $p->code }}" data-name="{{ $p->name }}" data-min="{{ $p->min_users }}" data-tag="{{ $p->tagline }}" {{ old('plan', $plan->code) === $p->code ? 'checked' : '' }}>{{ $p->name }}</label>@endforeach
-    </div>
-
     <span class="lab">How you buy</span>
     <div class="seg" role="radiogroup" aria-label="How you buy">
-      <label><input type="radio" name="kind" value="cloud" {{ $kind === 'cloud' ? 'checked' : '' }}>Rent · Cloud<small>we host it</small></label>
       <label><input type="radio" name="kind" value="perpetual" {{ $kind === 'perpetual' ? 'checked' : '' }}>Own · Perpetual<small>your own server</small></label>
+      <label><input type="radio" name="kind" value="cloud" {{ $kind === 'cloud' ? 'checked' : '' }}>Rent · Cloud<small>we host it</small></label>
     </div>
 
-    <div id="cycles">
-      <span class="lab">Pay in advance</span>
-      <div class="seg" role="radiogroup" aria-label="Billing period">
-        @foreach($cyc as $k => [$label, $off])<label><input type="radio" name="billing" value="{{ $k }}" {{ old('billing', $billing) === $k ? 'checked' : '' }}>{{ $label }}<small>{{ $off }}</small></label>@endforeach
+    {{-- On-premises: the plans as before. ROVEXY Cloud: a Google Maps model + optional calling add-on = one plan (CloudPlans). --}}
+    <div id="ppick">
+      <span class="lab">Plan</span>
+      <div class="seg" role="radiogroup" aria-label="Plan">
+        @foreach($plans->reject(fn ($p) => $p->quarterlyCloud()) as $p)<label><input type="radio" name="plan" value="{{ $p->code }}" data-name="{{ $p->name }}" data-min="{{ $p->min_users }}" data-tag="{{ $p->tagline }}" {{ old('plan', $plan->code) === $p->code ? 'checked' : '' }}>{{ $p->name }}</label>@endforeach
       </div>
+    </div>
+    @php
+      $cp = preg_match('/^cloud-(ametecs|own)(-c2c(-smart31)?)?$/', old('plan', $plan->code), $m) ? $m : [null, 'ametecs', '', ''];
+      $maps = $cp[1]; $tel = ($cp[3] ?? '') !== '' ? 'c2c_smart31' : (($cp[2] ?? '') !== '' ? 'c2c' : 'none');
+    @endphp
+    <div id="cpick">
+      <span class="lab">Google Maps</span>
+      <div class="seg" role="radiogroup" aria-label="Google Maps service">
+        <label><input type="radio" name="maps" value="ametecs" {{ $maps === 'ametecs' ? 'checked' : '' }}>Ametecs Google Maps<small>managed by us</small></label>
+        <label><input type="radio" name="maps" value="own" {{ $maps === 'own' ? 'checked' : '' }}>Your own Google Maps<small>your Google billing</small></label>
+      </div>
+      <span class="lab">Calling add-on</span>
+      <div class="seg" role="radiogroup" aria-label="Calling add-on">
+        <label><input type="radio" name="tel" value="none" {{ $tel === 'none' ? 'checked' : '' }}>None<small>SIM calling</small></label>
+        <label><input type="radio" name="tel" value="c2c" {{ $tel === 'c2c' ? 'checked' : '' }}>Click2Call<small>per user a month</small></label>
+        <label><input type="radio" name="tel" value="c2c_smart31" {{ $tel === 'c2c_smart31' ? 'checked' : '' }}>Click2Call + Smart31<small>per user a month</small></label>
+      </div>
+      @foreach($plans->filter(fn ($p) => $p->quarterlyCloud()) as $p)<input type="radio" name="plan" value="{{ $p->code }}" data-name="{{ $p->name }}" data-min="{{ $p->min_users }}" data-tag="{{ $p->tagline }}" hidden {{ old('plan', $plan->code) === $p->code ? 'checked' : '' }}>@endforeach
+      <input type="hidden" name="billing" value="quarterly">
+      <p class="hint" style="margin:8px 0 0">Billed quarterly in advance at the monthly rate shown. GST extra.</p>
     </div>
 
     <span class="lab" id="ulab">Users</span>
@@ -156,13 +170,20 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
   var inr=function(n){var d=Math.round(n*100)%100?2:0;return '₹'+(+n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});};
   var val=function(n){var x=f.querySelector('input[name='+n+']:checked');return x?x.value:null;};
   var plan=function(){return f.querySelector('input[name=plan]:checked');};
+  function cloudPlan(){   // Google Maps model + calling add-on → the plan that is charged
+    var code='cloud-'+val('maps')+({none:'',c2c:'-c2c',c2c_smart31:'-c2c-smart31'})[val('tel')];
+    var r=f.querySelector('input[name=plan][value="'+code+'"]'); if(r) r.checked=true;
+  }
   function mode(){
-    var own=val('kind')==='perpetual', p=plan();
-    $('cycles').hidden=own;
+    var own=val('kind')==='perpetual';
+    $('ppick').hidden=!own; $('cpick').hidden=own;
+    if(own){ var c=plan(); if(!c||/^cloud-/.test(c.value)){ var first=$('ppick').querySelector('input[name=plan]'); if(first) first.checked=true; } }
+    else cloudPlan();
+    var p=plan();
     [].forEach.call(document.querySelectorAll('.cloud-only'),function(e){e.hidden=own; e.querySelectorAll('input').forEach(function(i){i.required=!own;});});
     $('title').textContent='ROVEXY '+p.dataset.name+(own?' · On-premises':' · Cloud');
     $('lead').textContent=own?'One-time licence for your own server — never expires. First 12 months of updates & support included; optional AMC from year 2 ('+amc+'% a year).'
-      :(p.dataset.tag?p.dataset.tag.replace(/\.?$/,'. '):'')+'Hosted by us — nothing to install. Pay in advance; add users any time.';
+      :'Hosted by us — nothing to install. Every feature included; billed quarterly in advance; add users any time.'+(val('maps')==='own'?' Google Maps API consumption charges are not included in the ROVEXY subscription and are billed separately by Google.':' Google Maps provided through Ametecs\u2019 managed API, under the service terms.');
     $('acclead').innerHTML=own?'Pay securely and your licence key and GST invoice are e-mailed the same minute. Not sure yet? <a href="/#trial">Start a '+trial+'-day free trial →</a>'
       :'Pay securely and your workspace, licence and GST invoice are created the same minute — then you sign straight in. Just exploring? <a href="/#trial">Start a '+trial+'-day free trial →</a>';
     $('maillab').textContent=own?'Work e-mail (your licence key is sent here)':'Work e-mail (this becomes your sign-in)';
@@ -172,7 +193,7 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
   }
   function show(j){
     var body=$('lines'); body.innerHTML=''; $('err').hidden=true;
-    if(!j.ok){ $('err').hidden=false; $('err').innerHTML=(j.message||'This size is priced on quotation.')+(j.error==='custom_quote'?' <a href="/#contact" style="color:#fff;font-weight:700">Ask for a quote →</a>':'');
+    if(!j.ok){ $('err').hidden=false; $('err').innerHTML=(j.message||'This size is priced on quotation.')+(j.error==='custom_quote'?' <a href="/#contact" style="color:#fff;font-weight:700">Contact sales →</a>':'');
       $('tax').textContent='—'; $('total').textContent='—'; $('note').textContent=''; $('go').disabled=j.error==='custom_quote'||j.error==='below_minimum'; return; }
     $('go').disabled=false;
     j.lines.forEach(function(l){var tr=document.createElement('tr'); if(l.amount<0) tr.className='neg';
@@ -181,13 +202,15 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
     $('taxl').textContent=st?(st===seller?'CGST + SGST '+gst+'%':'IGST '+gst+'%'):'GST '+gst+'%';
     $('tax').textContent=inr(j.cgst+j.sgst+j.igst); $('total').textContent=inr(j.total);
     $('totl').textContent=own?'One-time total':'Payable now';
-    $('note').textContent=own?'One-time · you own it · optional AMC '+amc+'%/yr from year 2':'≈ '+inr(j.per_user_month)+' per user a month, before GST';
+    $('note').textContent=own?'One-time · you own it · optional AMC '+amc+'%/yr from year 2'
+      :(j.addon_per_user_month>0?'Subscription '+inr(j.base_quarter)+' + calling add-on '+inr(j.addon_quarter)+' a quarter ('+inr(j.base_per_user_month)+' + '+inr(j.addon_per_user_month)+' per user a month), before GST'
+        :inr(j.per_user_month)+' per user a month, billed quarterly, before GST');
   }
   function quote(){
     mode();
     var p=plan(), users=+f.elements.users.value||0, own=val('kind')==='perpetual', my=++seq, code=f.elements.coupon.value.trim();
     fetch('/price-check',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':tok},
-      body:JSON.stringify({plan:p.value,users:users,deployment:own?'onprem':'cloud',billing:own?null:val('billing'),state_code:f.elements.state_code.value||null,code:code||null,email:f.elements.buyer_email.value||null})})
+      body:JSON.stringify({plan:p.value,users:users,deployment:own?'onprem':'cloud',billing:own?null:'quarterly',state_code:f.elements.state_code.value||null,code:code||null,email:f.elements.buyer_email.value||null})})
       .then(function(r){return r.json();}).then(function(j){ if(my!==seq) return;
         var cm=$('cmsg');
         if(!j.ok&&j.error==='bad_coupon'){ cm.textContent=j.message; cm.style.color='#FFB4A8'; return; }

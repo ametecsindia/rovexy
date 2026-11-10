@@ -69,6 +69,7 @@ final class LicenceController extends Controller
             'cycles' => Pricing::CYCLE_LABEL,
             'billing' => ['state_code' => $company->state_code, 'gstin' => $company->gstin],
             'plans' => Plan::query()->with('cloudTiers')->where('active', true)->where('is_public', true)->orderBy('sort')->get()
+                ->filter(fn (Plan $p) => $p->quarterlyCloud() || $p->id === $licence?->plan_id)->values()   // cloud: ROVEXY Cloud plans + the current plan (to renew it)
                 ->map(fn (Plan $p) => $p->only(['id', 'code', 'name', 'tagline', 'min_users', 'features']) + [
                     'from_rate' => $p->cloudTiers->filter(fn ($t) => $t->max_users !== null && $t->rate_inr > 0)->min('rate_inr'),
                     'negotiated' => CustomPrice::for($p, $licence?->kind === 'trial' ? 'upgrade' : 'renewal', $ctx->id(), null) !== null]),

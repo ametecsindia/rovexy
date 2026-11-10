@@ -132,14 +132,14 @@ final class LicensingTest extends TestCase
         PlatformSettings::set('razorpay_key_id', 'rzp_test_x');
         PlatformSettings::set('razorpay_key_secret', 'shh');
         Http::fake(['api.razorpay.com/v1/orders' => Http::response(['id' => 'order_RZ1'])]);
-        $res = $this->postWithEmailCode('/buy', ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
+        $res = $this->postWithEmailCode('/buy', ['plan' => 'cloud-ametecs', 'users' => 10, 'billing' => 'quarterly', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
             'buyer_phone' => '9822222222', 'state_code' => '29', 'workspace' => 'gamma', 'password' => 'Gamma-pass-123', 'password_confirmation' => 'Gamma-pass-123', 'terms' => '1']);
         $o = SalesOrder::query()->firstOrFail();
         $res->assertRedirect($o->payUrl());
-        $this->assertSame(28178.4, $o->total);
+        $this->assertSame(10620.0, $o->total);   // ROVEXY Cloud, Ametecs Maps: 10 × ₹300 × 3 + 18% GST
         $base = "/pay/{$o->number}/{$o->token()}";
         $this->get("/pay/{$o->number}/wrongtoken")->assertNotFound();
-        $this->postJson("{$base}/razorpay")->assertOk()->assertJsonPath('order_id', 'order_RZ1')->assertJsonPath('amount', 2817840);
+        $this->postJson("{$base}/razorpay")->assertOk()->assertJsonPath('order_id', 'order_RZ1')->assertJsonPath('amount', 1062000);
         $this->postJson("{$base}/verify", ['razorpay_order_id' => 'order_RZ1', 'razorpay_payment_id' => 'pay_1', 'razorpay_signature' => 'forged'])->assertStatus(422);
         $sig = hash_hmac('sha256', 'order_RZ1|pay_1', 'shh');
         $this->postJson("{$base}/verify", ['razorpay_order_id' => 'order_RZ1', 'razorpay_payment_id' => 'pay_1', 'razorpay_signature' => $sig])->assertOk();
@@ -197,10 +197,10 @@ final class LicensingTest extends TestCase
         \App\Models\Platform\Coupon::query()->create(['code' => 'DIWALI20', 'type' => 'percent', 'value' => 20, 'max_uses' => 1, 'active' => true]);
         \App\Models\Platform\Coupon::query()->create(['code' => 'NEWONLY', 'type' => 'flat', 'value' => 5000, 'new_only' => true, 'active' => true]);
         \App\Models\Platform\Coupon::query()->create(['code' => 'OLD', 'type' => 'flat', 'value' => 1000, 'valid_until' => now()->subDay(), 'active' => true]);
-        $this->postJson('/price-check', ['code' => 'diwali20', 'plan' => 'starter', 'users' => 10, 'state_code' => '29'])->assertOk()   // 23,880 − 20%
-            ->assertJsonPath('discount', 4776.0)->assertJsonPath('amount', 19104.0)->assertJsonPath('igst', 3438.72)->assertJsonPath('total', 22542.72);
-        $this->postJson('/price-check', ['code' => 'OLD', 'plan' => 'starter', 'users' => 10])->assertStatus(422)->assertJsonPath('message', 'This code has expired.');
-        $this->postJson('/price-check', ['code' => 'NOPE', 'plan' => 'starter', 'users' => 10])->assertStatus(422);
+        $this->postJson('/price-check', ['code' => 'diwali20', 'plan' => 'cloud-ametecs', 'users' => 10, 'state_code' => '29'])->assertOk()   // ROVEXY Cloud 9,000 − 20%
+            ->assertJsonPath('discount', 1800.0)->assertJsonPath('amount', 7200.0)->assertJsonPath('igst', 1296.0)->assertJsonPath('total', 8496.0);
+        $this->postJson('/price-check', ['code' => 'OLD', 'plan' => 'cloud-ametecs', 'users' => 10])->assertStatus(422)->assertJsonPath('message', 'This code has expired.');
+        $this->postJson('/price-check', ['code' => 'NOPE', 'plan' => 'cloud-ametecs', 'users' => 10])->assertStatus(422);
 
         // renewal from the company console: a new-buyers-only code is refused, a general one applies
         $l = $this->licence(['plan_id' => $plan->id]);
@@ -211,7 +211,7 @@ final class LicensingTest extends TestCase
         $this->assertSame('DIWALI20', $o->coupon_code);
         Sales::markPaid($o, 'bank', 'UTR9');
         $this->assertSame(1, \App\Models\Platform\Coupon::query()->where('code', 'DIWALI20')->value('used_count'));
-        $this->postJson('/price-check', ['code' => 'DIWALI20', 'plan' => 'starter', 'users' => 10])->assertStatus(422)->assertJsonPath('message', 'This code has been fully used.');
+        $this->postJson('/price-check', ['code' => 'DIWALI20', 'plan' => 'cloud-ametecs', 'users' => 10])->assertStatus(422)->assertJsonPath('message', 'This code has been fully used.');
         $this->get("/pay/{$o->number}/{$o->token()}/invoice")->assertOk()->assertSee('DIWALI20')->assertSee('Taxable value');
     }
 

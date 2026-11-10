@@ -238,7 +238,7 @@
 .plan li:before{content:"";position:absolute;left:0;top:.62em;width:16px;height:16px;border-radius:50%;background:rgba(30,142,90,.12)}
 .plan li:after{content:"";position:absolute;left:5px;top:.98em;width:6px;height:3px;border-left:1.6px solid var(--ok);border-bottom:1.6px solid var(--ok);transform:rotate(-45deg)}
 .plan.pick li:before{background:rgba(212,174,106,.18)}.plan.pick li:after{border-color:var(--brass-2)}
-.assure{list-style:none;padding:0;margin:44px 0 0;display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.assure{list-style:none;padding:0;margin:44px 0 0;display:grid;grid-template-columns:repeat(5,1fr);gap:18px}
 .assure li{font-size:.86rem;color:var(--mute);padding-left:16px;border-left:2px solid var(--brass)}.assure b{display:block;color:var(--ink);font-size:.95rem}
 @media (max-width:820px){.assure{grid-template-columns:1fr 1fr}}
 /* free trial: one split card */
@@ -301,7 +301,9 @@
 <script type="application/ld+json">{!! json_encode(['@context' => 'https://schema.org', '@graph' => [
   ['@type' => 'SoftwareApplication', 'name' => 'ROVEXY', 'applicationCategory' => 'BusinessApplication', 'operatingSystem' => 'Android, Web',
    'description' => 'Recorded calls, verified field visits and payment slips for collection teams.', 'publisher' => ['@type' => 'Organization', 'name' => 'Ametecs India Private Limited'],
-   'offers' => $plans->filter(fn ($p) => $p->from_rate)->map(fn ($p) => ['@type' => 'Offer', 'name' => $p->name . ' (per user per month, annual)', 'price' => (string) $p->from_rate, 'priceCurrency' => 'INR'])->values()],
+   'offers' => collect(['cloud-ametecs', 'cloud-own'])->map(fn ($c) => $cloud[$c] ?? null)->filter()->map(fn ($p) => ['@type' => 'Offer',
+     'name' => 'ROVEXY Cloud — ' . $p->name . ' (per user per month, billed quarterly, from ' . $p->min_users . ' users, excluding GST)',
+     'price' => (string) ($p->cloudTiers->first(fn ($t) => $t->max_users !== null && $t->rate_inr > 0)?->rate_inr + 0), 'priceCurrency' => 'INR'])->values()],
 ]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG) !!}</script>
 @endsection
 
@@ -315,6 +317,9 @@ $faqs = [
   ['Can a manager see other teams\' customers or calls?', 'No. Managers see only the people and cases of their own group. Only the company admin sees everything, and every sensitive action is written to the audit log.', 'privacy'],
   ['Where is our data kept and for how long?', 'On ROVEXY\'s cloud servers run by Ametecs India, backed up daily. Each company\'s data is kept separate, and you decide how long recordings are kept from Storage & retention.', 'privacy'],
   ['How do we pay, and do we get a GST invoice?', 'Pay online by UPI, card or net banking through Razorpay, or ask us for a bank-transfer invoice. A GST tax invoice is issued for every payment and stays downloadable from your console.', 'billing'],
+  ['How is ROVEXY Cloud billed?', 'Per user per month, paid quarterly in advance, from 5 users, with GST shown separately. Choose Google Maps managed by Ametecs, or your own Google Maps API project. Every feature is included; Click2Call and Smart31 are optional add-ons.', 'billing'],
+  ['Who pays for Google Maps?', 'With Ametecs Google Maps, maps are provided through our managed API configuration under the service terms (fair-use limits apply; mapping is not unlimited). With your own Google Maps API, you create and maintain the Google project, enable the services, set billing, restrictions and quotas, and Google bills you directly. Google Maps API consumption charges are not included in the ROVEXY subscription and are billed separately by Google.', 'billing'],
+  ['What are the Click2Call terms?', 'Click2Call is ₹350 per user per month; with Smart31 number rotation it is ₹550 per user per month in total. Up to 50 connected calls per user per day, with no per-call duration cap. The calling service provider\'s and operators\' fair-use terms apply.', 'billing'],
   ['What happens when our package ends?', 'You get a few days\' grace to renew from the console. After that, phones can\'t start work until you renew. Your data stays exactly as it was.', 'billing'],
   ['Can we add users during the year?', 'Yes. Move to a bigger package from Administration → Plan & licence; the new user limit applies as soon as it\'s paid. Renewing early never loses days.', 'billing'],
   ['Does it connect to our HR and payroll?', 'Yes, with SmartPRS (attendance and payroll) and SmartEPT (workplace compliance) from Ametecs. Field check-ins and work sessions flow across by employee code.', 'setup'],
@@ -449,16 +454,19 @@ $faqs = [
 </div></section>
 
 <section id="pricing" class="band pricing"><div class="wrap">
-  <div class="p-head"><p class="kicker">Pricing</p><h2>On our cloud, or on your own server</h2><p class="mute">Priced per user. Cloud is a subscription — annual is the best price. On-premises is a one-time licence with yearly updates &amp; support. Prices exclude 18% GST.</p></div>
+  <div class="p-head"><p class="kicker">Pricing</p><h2>On your own server, or on our cloud</h2><p class="mute">On-premises is a one-time licence per plan with yearly updates &amp; support. ROVEXY Cloud is priced per user per month and billed quarterly in advance. Prices exclude {{ rtrim(rtrim(number_format($gstRate, 2), '0'), '.') }}% GST.</p></div>
   <div class="finder" id="finder">
-    <div class="seg-dep" role="radiogroup" aria-label="Where ROVEXY runs">
-      <label><input type="radio" name="dep" value="cloud" checked> Cloud (we host it)</label>
-      <label><input type="radio" name="dep" value="onprem"> On-premises (your server)</label>
+    <div class="seg-dep" role="radiogroup" aria-label="Choose your deployment">
+      <label><input type="radio" name="dep" value="onprem" checked> On-premises (your server)</label>
+      <label><input type="radio" name="dep" value="cloud"> Cloud server (we host it)</label>
     </div>
-    <label for="seats">How many people will use it? <b id="seatn">25</b></label>
-    <input type="range" id="seats" min="5" max="600" value="25" step="1">
-    <output for="seats" id="fitout" aria-live="polite"></output>
+    <div id="op-size">
+      <label for="seats">How many people will use it? <b id="seatn">25</b></label>
+      <input type="range" id="seats" min="5" max="600" value="25" step="1">
+      <output for="seats" id="fitout" aria-live="polite"></output>
+    </div>
   </div>
+  <div id="op-pane">
   <div class="plans">
     @php $pick = $plans->count() > 1 ? 1 : 0; $prev = null; @endphp
     @forelse($plans as $i => $p)
@@ -483,12 +491,14 @@ $faqs = [
       <p>Packages are being updated. <a href="#contact">Ask us for a quotation.</a></p>
     @endforelse
   </div>
+  </div>
+  @include('site.partials.cloud-pricing')
   <ul class="assure">
     <li><b>GST invoice</b>on every payment</li>
     <li><b>UPI, card or net banking</b>or a bank-transfer invoice</li>
     <li><b>Add users any time</b>you pay only for the rest of the term</li>
     <li><b>On-premises</b>one-time licence, first year of updates included</li>
-    <li><b>Discount code?</b>enter it when you buy</li>
+    <li><b>Cloud</b>billed quarterly in advance</li>
   </ul>
 </div></section>
 
@@ -585,7 +595,13 @@ $faqs = [
   var seats = document.getElementById('seats'), out = document.getElementById('fitout'), t = null, seq = 0;
   var tok = (document.querySelector('meta[name=csrf-token]') || {}).content;
   var inr = function (n) { return '₹' + Math.round(n).toLocaleString('en-IN'); };
-  var dep = function () { return (box.querySelector('input[name=dep]:checked') || {}).value || 'cloud'; };
+  var dep = function () { return 'onprem'; };   // the cards below are the on-premises plans; ROVEXY Cloud has its own calculator
+  function pane() {
+    var cloud = (box.querySelector('input[name=dep]:checked') || {}).value === 'cloud';
+    document.getElementById('op-pane').hidden = cloud; document.getElementById('op-size').hidden = cloud;
+    var c = document.getElementById('cloud-pane'); if (c) c.hidden = !cloud;
+  }
+  box.addEventListener('change', pane); pane();
   function price(p, n, d) {   // the server's own price — the same function every order uses
     return fetch('/price-check', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': tok },
       body: JSON.stringify({ plan: p.dataset.code, users: n, billing: 'annual', deployment: d }) }).then(function (r) { return r.json(); });

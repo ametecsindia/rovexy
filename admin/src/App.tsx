@@ -26,6 +26,7 @@ import { AddressReportPage } from './pages/AddressReport';
 import { LicencePage } from './pages/Licence';
 import { FieldPlanningPage } from './pages/FieldPlanning';
 import { MyCallsPage } from './pages/MyCalls';
+import { EmployeeActivityPage } from './pages/EmployeeActivity';
 
 type NavItem = { to: string; icon: string; label: string; perm?: string; group: string };
 /** Sidebar: Dashboard on top, then collapsible sections. Order here = order on screen. */
@@ -49,6 +50,7 @@ export const NAV: NavItem[] = [
   { to: '/recording-formats', icon: 'settings', label: 'Recording file names', perm: 'customers.view', group: 'Customers' },
   { to: '/devices', icon: 'phone', label: 'Devices & approvals', perm: 'devices.view', group: 'Devices' },
   { to: '/policies', icon: 'shield', label: 'Policies', perm: 'policies.view', group: 'Devices' },
+  { to: '/employee-activity', icon: 'clock', label: 'Employee activity', perm: 'employees.view', group: 'Reports' },
   { to: '/portfolio-reports', icon: 'chart', label: 'Portfolio reports', perm: 'calls.view', group: 'Reports' },
   { to: '/reports', icon: 'upload', label: 'Reports & extracts', perm: 'reports.export', group: 'Reports' },
   { to: '/recording-export', icon: 'upload', label: 'Recording export', perm: 'recordings.download', group: 'Reports' },
@@ -283,6 +285,7 @@ export function App() {
         <Routes key={orgKey}>
           <Route path="/" element={<OverviewPage />} />
           <Route path="/portfolio-reports" element={<PortfolioReportsPage />} />
+          <Route path="/employee-activity" element={<EmployeeActivityPage />} />
           <Route path="/employees" element={<EmployeesPage />} />
           <Route path="/devices" element={<DevicesPage />} />
           <Route path="/policies" element={<PoliciesPage />} />

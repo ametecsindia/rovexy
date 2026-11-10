@@ -26,6 +26,10 @@ final class SyncController extends Controller
 {
     private const WORK_STATES = ['idle', 'active', 'updating_customer'];
 
+    /** Phone activity events. Breaks, screen and power events feed the employee activity report (App\Services\Activity\DayBuilder). */
+    private const ACTIVITY_TYPES = ['app_foreground', 'app_background', 'idle_start', 'idle_end', 'customer_opened', 'heartbeat',
+        'break_start', 'break_end', 'screen_on', 'screen_off', 'unlocked', 'power_on', 'power_off', 'location_on', 'location_off'];
+
     public function store(Request $r, CallService $calls)
     {
         $data = $r->validate(['events' => 'required|array|max:200', 'events.*' => 'array']);
@@ -92,9 +96,9 @@ final class SyncController extends Controller
                 return;
             case 'activity':
                 $type = (string) ($p['type'] ?? '');
-                in_array($type, ['app_foreground', 'app_background', 'idle_start', 'idle_end', 'customer_opened', 'heartbeat'], true) || throw new DomainException('invalid_activity');
+                in_array($type, self::ACTIVITY_TYPES, true) || throw new DomainException('invalid_activity');
                 ActivityEvent::query()->create(['device_id' => $device->id, 'user_id' => $user->id, 'type' => $type, 'occurred_at' => $e['occurred_at'],
-                    'meta' => array_intersect_key($p, array_flip(['customer_id', 'battery_pct', 'network_type']))]);
+                    'meta' => array_map(fn ($v) => is_string($v) ? mb_substr($v, 0, 32) : $v, array_intersect_key($p, array_flip(['customer_id', 'battery_pct', 'network_type', 'reason'])))]);
                 $state = match ($type) { 'idle_start' => 'idle', 'customer_opened' => 'updating_customer', 'idle_end', 'app_foreground' => 'active', default => null };
                 $upd = array_filter(['battery_pct' => isset($p['battery_pct']) ? max(0, min(100, (int) $p['battery_pct'])) : null,
                     'network_type' => isset($p['network_type']) ? mb_substr((string) $p['network_type'], 0, 16) : null]);

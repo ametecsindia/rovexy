@@ -38,6 +38,9 @@ final class Pricing
             return null;
         }
         $annual = ($priced->last(fn ($t) => $t->min_users <= $users) ?? $priced->first())->rate_inr;
+        if ($plan->quarterlyCloud()) {
+            return round($annual, 2);   // the listed monthly rate, billed quarterly (build() refuses other cycles)
+        }
         $base = $annual / (1 - (float) PlatformSettings::get('price_annual_discount_pct') / 100);
         return round(match ($billing) {
             'annual' => $annual,
@@ -97,6 +100,12 @@ final class Pricing
         }
         if ($billing !== null && !isset(self::CYCLES[$billing])) {
             throw new DomainException('bad_billing', 'Choose annual, half-yearly or quarterly billing.');
+        }
+        if ($plan->quarterlyCloud() && ($dep !== 'cloud' || $lk !== 'subscription')) {
+            throw new DomainException('bad_order', "{$plan->name} is a ROVEXY Cloud plan. For your own server choose an on-premises plan.");
+        }
+        if ($plan->quarterlyCloud() && $billing !== 'quarterly') {
+            throw new DomainException('bad_billing', 'ROVEXY Cloud is billed quarterly in advance.');
         }
         if (!$plan->sellable()) {
             throw new DomainException('plan_not_sellable', 'This plan is not on sale.');

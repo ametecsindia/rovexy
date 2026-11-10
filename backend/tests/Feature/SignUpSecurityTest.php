@@ -64,7 +64,7 @@ final class SignUpSecurityTest extends TestCase
 
     public function test_buying_needs_the_email_code_before_the_order_exists(): void
     {
-        $form = ['plan' => 'starter', 'users' => 10, 'billing' => 'annual', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
+        $form = ['plan' => 'cloud-ametecs', 'users' => 10, 'billing' => 'quarterly', 'buyer_company' => 'Gamma Ltd', 'buyer_name' => 'Ganesh', 'buyer_email' => 'g@gamma.test',
             'buyer_phone' => '9822222222', 'state_code' => '36', 'workspace' => 'gamma', 'password' => 'Gamma123', 'password_confirmation' => 'Gamma123', 'terms' => '1'];
         $t = $this->token($this->post('/buy', $form)->assertOk()->assertSee('continue to payment')->getContent());
         $this->assertSame(0, SalesOrder::query()->count());

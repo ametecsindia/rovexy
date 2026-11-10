@@ -108,6 +108,9 @@ final class Sales
         $dep = $licence ? ($licence->deployment ?? 'cloud') : ($spec['deployment'] ?? 'cloud');
         $users = (int) ($spec['users'] ?? ($licence?->max_users ?: $plan->min_users));
         $billing = $spec['billing'] ?? ($paid ? $licence->billing : null) ?? 'annual';
+        if ($plan->quarterlyCloud() && $kind !== 'amc') {
+            $billing = 'quarterly';   // ROVEXY Cloud has one cycle
+        }
         $gstin = strtoupper(trim((string) ($buyer['buyer_gstin'] ?? ''))) ?: null;
         if ($gstin !== null && (!preg_match('/^\d{2}[A-Z0-9]{13}$/', $gstin) || substr($gstin, 0, 2) !== ($buyer['state_code'] ?? null))) {
             throw new DomainException('bad_gstin', 'The GSTIN must be 15 characters and start with your state code.');

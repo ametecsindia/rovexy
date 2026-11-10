@@ -489,6 +489,17 @@ function stopServices(string $app, bool $remove): void
                 run([$exe, 'uninstall']);
             }
         }
+        // A service left registered by an earlier install whose services folder is gone (or another install folder):
+        // WinSW can't remove it without its exe, so Windows does. Wait until it is really gone before re-registering.
+        if ($remove && WIN && run(['sc.exe', 'query', $id])[0] === 0) {
+            run(['sc.exe', 'stop', $id]);
+            sleep(2);
+            run(['sc.exe', 'delete', $id]);
+            for ($i = 0; $i < 15 && run(['sc.exe', 'query', $id])[0] === 0; $i++) {
+                sleep(1);
+            }
+            say("Removed the old Windows service {$id} left by an earlier install");
+        }
     }
 }
 

@@ -109,3 +109,17 @@ Schedule::call(function () {
 })->dailyAt('02:30')->name('updates:check')->withoutOverlapping()
     ->when(fn () => \App\Services\Licensing\LicenceClient::isClient() && config('ammp.updates.auto_check')
         && !in_array(app(\App\Services\Updates\UpdateClient::class)->state()['phase'] ?? 'idle', ['downloading', 'downloaded', 'installing'], true));
+
+// Employee activity report: today's rows every 5 minutes; at night yesterday is finalised and the two days before are
+// rebuilt for phones that uploaded late. ponytail: whole-company rebuild; rebuild only changed users if it gets slow.
+Schedule::call(function () {
+    Company::query()->where('status', 'active')->each(fn (Company $c) => \App\Jobs\BuildActivityDays::dispatch($c->id, now($c->timezone ?: 'Asia/Kolkata')->toDateString()));
+})->everyFiveMinutes()->name('activity:today')->withoutOverlapping();
+
+Schedule::call(function () {
+    Company::query()->where('status', 'active')->each(function (Company $c) {
+        foreach ([1, 2, 3] as $d) {
+            \App\Jobs\BuildActivityDays::dispatch($c->id, now($c->timezone ?: 'Asia/Kolkata')->subDays($d)->toDateString());
+        }
+    });
+})->dailyAt('00:45')->name('activity:nightly')->withoutOverlapping();

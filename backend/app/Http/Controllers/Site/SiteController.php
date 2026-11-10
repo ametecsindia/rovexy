@@ -34,7 +34,8 @@ final class SiteController extends Controller
     public function home()
     {
         $site = fn (string $k) => PlatformSettings::get($k) ?: null;
-        return view('site.home', ['plans' => $this->plans(), 'features' => Licensing::FEATURES, 'trialDays' => (int) PlatformSettings::get('trial_days'),
+        return view('site.home', ['plans' => $this->plans()->reject(fn (Plan $p) => $p->quarterlyCloud())->values(), 'cloud' => \App\Services\Platform\CloudPlans::forSite(),
+            'gstRate' => (float) PlatformSettings::get('gst_rate'), 'features' => Licensing::FEATURES, 'trialDays' => (int) PlatformSettings::get('trial_days'),
             'trialUsers' => (int) PlatformSettings::get('trial_users'), 'contact' => ['email' => $site('seller_email'), 'phone' => $site('seller_phone')],
             'site' => ['announcement' => $site('site_announcement'), 'hero_title' => $site('site_hero_title'), 'hero_text' => $site('site_hero_text'),
                 'meta' => $site('site_meta_description')], 'shots' => self::screenshots()]);
@@ -276,10 +277,12 @@ final class SiteController extends Controller
     public function buy(Request $r)
     {
         $plans = $this->plans();
-        $plan = $plans->firstWhere('code', $r->query('plan', $r->query('tier'))) ?? $plans->first();
+        $own = $r->query('kind') === 'perpetual';
+        $pool = $plans->filter(fn (Plan $p) => $own !== $p->quarterlyCloud());   // on-premises: the classic plans; cloud: ROVEXY Cloud
+        $plan = $pool->firstWhere('code', $r->query('plan', $r->query('tier'))) ?? $pool->first();
         abort_if($plan === null, 404);
         return view('site.buy', ['plans' => $plans, 'plan' => $plan, 'states' => self::STATES, 'sellerState' => PlatformSettings::get('seller_state'),
-            'kind' => $r->query('kind') === 'perpetual' ? 'perpetual' : 'cloud',
+            'kind' => $own ? 'perpetual' : 'cloud',
             'users' => max($plan->min_users, (int) $r->query('users', $plan->min_users)), 'billing' => array_key_exists((string) $r->query('billing'), Pricing::CYCLES) ? $r->query('billing') : 'annual',
             'gst' => (float) PlatformSettings::get('gst_rate'), 'payments' => Razorpay::configured(), 'trialDays' => (int) PlatformSettings::get('trial_days'),
             'annualPct' => (float) PlatformSettings::get('price_annual_discount_pct'), 'halfPct' => (float) PlatformSettings::get('price_half_yearly_discount_pct'),
@@ -298,8 +301,11 @@ final class SiteController extends Controller
             'buyer_email' => 'required|email|max:190', 'buyer_phone' => 'required|string|max:20', 'state_code' => ['required', \Illuminate\Validation\Rule::in(array_keys(self::STATES))],
             'buyer_gstin' => 'nullable|string|max:15', 'coupon' => 'nullable|string|max:30', 'workspace' => ($own ? 'nullable' : 'required') . '|string|max:40',
             'password' => $own ? ['nullable', 'string', 'max:200'] : ['required', 'string', 'max:200', 'confirmed', \Illuminate\Validation\Rules\Password::defaults()], 'terms' => 'accepted']);
-        Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->firstOrFail();
+        $chosen = Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->firstOrFail();
         $back = fn (string $msg) => back()->withInput($r->except(['password', 'password_confirmation']))->withErrors(['order' => $msg]);
+        if ($msg = self::offerProblem($chosen, $own)) {
+            return $back($msg);
+        }
         if (!$own) {
             $d['workspace'] = strtolower((string) $d['workspace']);
             if (!preg_match(Workspaces::SLUG, $d['workspace']) || \App\Models\Company::query()->where('slug', $d['workspace'])->exists()) {
@@ -317,6 +323,9 @@ final class SiteController extends Controller
         $plan = Plan::query()->where('code', $d['plan'])->where('active', true)->where('is_public', true)->first();
         if (!$plan) {
             return $fail('This package is no longer on sale. Please choose another.');
+        }
+        if ($msg = self::offerProblem($plan, $own)) {
+            return $fail($msg);
         }
         try {
             $o = Sales::createOrder('new', ['plan_id' => $plan->id, 'users' => $d['users'], 'billing' => $own ? null : $d['billing'], 'coupon' => $d['coupon'] ?? null,
@@ -336,6 +345,9 @@ final class SiteController extends Controller
             'deployment' => 'nullable|in:cloud,onprem', 'state_code' => 'nullable|string|size:2', 'code' => 'nullable|string|max:30', 'email' => 'nullable|email|max:190']);
         $plan = Plan::query()->where('code', $d['plan'])->where('active', true)->firstOrFail();
         $onprem = ($d['deployment'] ?? 'cloud') === 'onprem';
+        if ($msg = self::offerProblem($plan, $onprem)) {
+            return response()->json(['ok' => false, 'error' => 'not_offered', 'message' => $msg], 422);
+        }
         try {
             [, $pr] = Sales::quote('new', ['plan_id' => $plan->id, 'users' => $d['users'], 'billing' => $d['billing'] ?? 'annual', 'coupon' => $d['code'] ?? null,
                 'deployment' => $onprem ? 'onprem' : 'cloud', 'licence_kind' => $onprem ? 'perpetual' : 'subscription'],
@@ -343,7 +355,17 @@ final class SiteController extends Controller
         } catch (DomainException $e) {
             return response()->json(['ok' => false, 'error' => $e->reason, 'message' => $e->getMessage()], 422);
         }
-        return response()->json(['ok' => true] + $pr + ['per_user_month' => !$onprem ? round($pr['list_price'] / $d['users'] / Pricing::CYCLES[$pr['billing']], 2) : null],
+        $split = [];
+        if ($plan->quarterlyCloud()) {   // ROVEXY Cloud: the subscription and the calling add-on shown separately (add-on = this plan − the plan without it)
+            $base = Plan::query()->with('cloudTiers')->where('code', preg_replace('/-c2c(-smart31)?$/', '', $plan->code))->first();
+            $baseRate = $base ? Pricing::cloudRate($base, (int) $d['users'], 'quarterly') : null;
+            $rate = Pricing::cloudRate($plan->loadMissing('cloudTiers'), (int) $d['users'], 'quarterly');
+            if ($baseRate !== null && $rate !== null) {
+                $split = ['base_per_user_month' => $baseRate, 'addon_per_user_month' => round($rate - $baseRate, 2),
+                    'base_quarter' => round($baseRate * $d['users'] * 3, 2), 'addon_quarter' => round(($rate - $baseRate) * $d['users'] * 3, 2)];
+            }
+        }
+        return response()->json(['ok' => true] + $pr + ['per_user_month' => !$onprem ? round($pr['list_price'] / $d['users'] / Pricing::CYCLES[$pr['billing']], 2) : null] + $split,
             200, [], JSON_PRESERVE_ZERO_FRACTION);   // money stays 5000.0, not 5000
     }
 
@@ -466,7 +488,20 @@ final class SiteController extends Controller
         return $o;
     }
 
-    private function plans()
+    /**
+     * What the website sells: ROVEXY Cloud (quarterly cloud plans) and on-premises on the other plans. Existing cloud
+     * licences on the older plans still renew from their console; staff can still quote anything from Super Admin.
+     */
+    private static function offerProblem(Plan $plan, bool $onprem): ?string
+    {
+        return match (true) {
+            $onprem && $plan->quarterlyCloud() => 'This is a ROVEXY Cloud plan. For your own server choose an on-premises plan.',
+            !$onprem && !$plan->quarterlyCloud() => 'ROVEXY Cloud is now sold with a Google Maps option. Choose Cloud on the pricing page.',
+            default => null,
+        };
+    }
+
+        private function plans()
     {
         return Plan::query()->with('cloudTiers', 'perpetualBands')->where('active', true)->where('is_public', true)->orderBy('sort')->orderBy('id')->get()
             ->each(function (Plan $p) {   // "from" prices for the pricing cards
