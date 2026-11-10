@@ -206,6 +206,8 @@ Route::prefix('mobile/v1')->middleware('company')->group(function () {
 /*
 | Admin API — Sanctum stateful cookie session + CSRF, company-resolved, MFA-gated, permission-gated.
 */
+// No workspace in the address: find it from the email + password (rovexy.app/admin, Admin app with the workspace left empty).
+Route::post('admin/auth/find-workspace', [Admin\AuthController::class, 'findWorkspace'])->middleware('throttle:admin-login');
 Route::prefix('admin')->middleware('company')->group(function () {
     Route::post('auth/login', [Admin\AuthController::class, 'login'])->middleware('throttle:admin-login');
     Route::middleware('auth:web')->group(function () {
