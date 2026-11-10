@@ -63,7 +63,8 @@ footer .cols{display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr;gap:32px}@medi
 footer h4{color:#fff;font:700 .95rem var(--display);margin:0 0 12px}footer ul{list-style:none;margin:0;padding:0}footer li{padding:4px 0}
 footer a{color:#DCE4EE;text-decoration:none}footer a:hover{color:#fff;text-decoration:underline}footer .logo{color:#fff;margin-bottom:12px}
 .play-badge{display:inline-flex;align-items:center;gap:10px;padding:8px 18px 8px 14px;border-radius:12px;background:#0B1422;border:1px solid rgba(255,255,255,.22);color:#fff;text-decoration:none;line-height:1.1;white-space:nowrap}.play-badge:hover{background:#000;color:#fff;text-decoration:none}.play-badge svg{color:var(--brass-2)}.play-badge small{display:block;font-size:.66rem;letter-spacing:.06em;opacity:.85}.play-badge b{display:block;font-size:1.15rem;font-weight:600}footer .play-badge{margin-top:18px}
-footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px solid #24364F;margin-top:40px;padding-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between}
+footer .family{border-top:1px solid #24364F;margin-top:40px;padding-top:28px}footer .family ul{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px}footer .family li{padding:0}footer .family a{display:flex;flex-direction:column;gap:8px;height:100%;padding:14px 16px;border:1px solid #24364F;border-radius:12px;color:#93A4B9;font-size:.82rem;line-height:1.35}footer .family a:hover{border-color:var(--brass-2);background:#0E1B2C;text-decoration:none}footer .family img{height:34px;width:auto;max-width:100%;object-fit:contain;object-position:left}footer .family .wm{height:34px;display:flex;align-items:center;font:800 1.3rem var(--display);color:#fff;letter-spacing:-.01em}footer .family .wm i{font-style:normal;color:var(--brass-2)}
+footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px solid #24364F;margin-top:28px;padding-top:20px;display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between}
 @media (prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 @yield('style')
 </style>
@@ -93,6 +94,13 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
     <div><h4>Get started</h4><ul><li><a href="/explore-demo">Explore Demo</a></li><li><a href="/#trial">Free trial</a></li><li><a href="/buy">Buy a package</a></li><li><a href="/admin">Sign in</a></li><li><a href="/#faq">FAQ</a></li></ul></div>
     <div><h4>Company</h4><ul><li><a href="/contact">Contact us</a></li><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms of service</a></li><li><a href="/refund">Refund &amp; cancellation</a></li><li><a href="/delivery">Service delivery</a></li></ul></div>
   </div>
+  <div class="family"><h4>More from Ametecs</h4><ul>
+    <li><a href="https://www.smartdcm.app" target="_blank" rel="noopener"><span class="wm">Smart<i>DCM</i></span>Debt collection CRM and dialer</a></li>
+    <li><a href="https://www.smartprs.com" target="_blank" rel="noopener"><img src="/brand/products/smartprs.png" alt="SmartPRS" width="118" height="34" loading="lazy">HR, payroll and compliance</a></li>
+    <li><a href="https://www.smartept.com" target="_blank" rel="noopener"><img src="/brand/products/smartept.png" alt="SmartEPT" width="139" height="34" loading="lazy">Employee productivity tracking</a></li>
+    <li><a href="https://www.leadger.in" target="_blank" rel="noopener"><span class="wm">Lead<i>GER</i></span>Telecalling CRM and lead management</a></li>
+    <li><a href="https://qronex.app" target="_blank" rel="noopener"><span class="wm">QRO<i>NEX</i></span>QR attendance at office gates</a></li>
+  </ul></div>
   <div class="base"><span>© {{ date('Y') }} {{ $co::get('seller_name') }}{{ $co::get('seller_gstin') ? ' · GSTIN ' . $co::get('seller_gstin') : '' }}</span>
     <span>@if($phone)<a href="tel:{{ preg_replace('/[^\d+]/', '', $phone) }}">{{ $phone }}</a> · @endif @if($co::get('seller_email'))<a href="mailto:{{ $co::get('seller_email') }}">{{ $co::get('seller_email') }}</a>@endif</span></div>
 </div></footer>
