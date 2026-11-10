@@ -53,7 +53,12 @@ data class Today(val calls: Int, val connected: Int, val talkSeconds: Int, val f
 data class ChatConv(val id: Long, val subject: String?, val lastAt: String?)
 data class ChatMsg(val id: Long, val mine: Boolean, val body: String, val at: String, val read: Boolean, val from: String? = null)
 /** Call feedback option. captures: none | promise (amount + date) | payment (amount, mode, reference, date, slip). */
-data class Outcome(val code: String, val label: String, val captures: String = "none", val needsFollowUp: Boolean = false)
+data class Outcome(val code: String, val label: String, val captures: String = "none", val needsFollowUp: Boolean = false,
+                   /** Portfolio type it belongs to (null = every type, e.g. Busy, Wrong number); [success] = a job done. */
+                   val type: String? = null, val success: Boolean = false)
+
+/** The outcomes of one case's portfolio type (Collections, Courier, Sales…) plus the calling results every type shares. */
+fun List<Outcome>.forType(type: String?): List<Outcome> = filter { it.type == null || it.type == (type ?: "collections") }
 /** Call-recording setup facts for the gate screen. [locked] = Google Phone app (recordings unreachable for other apps). */
 data class RecordingSetup(val brand: String = "", val folder: String? = null, val locked: Boolean = false, val lastSeen: String? = null,
                           val clickToCall: Boolean = false, val tryODialer: Boolean = false)
@@ -731,7 +736,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadOutcomes() = runCatching {
         val r = g.session.work("GET", "/api/mobile/v1/dispositions?full=1").obj()
         dispositions.value = r["codes"]!!.jsonArray.map { val o = it.jsonObject
-            Outcome(o.str("code")!!, o.str("label")!!, o.str("captures") ?: "none", o.str("requires_follow_up") == "true") }
+            Outcome(o.str("code")!!, o.str("label")!!, o.str("captures") ?: "none", o.str("requires_follow_up") == "true",
+                o.str("portfolio_type")?.takeIf { it != "null" }, o.str("success") == "true") }
         paymentModes.value = r["payment_modes"]?.jsonObject?.map { (k, v) -> k to (v.toString().trim('"')) } ?: emptyList()
     }
 
@@ -875,18 +881,6 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun refreshMapKey(): String? =
         (fieldConfig()["map_key"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
             .also { g.store.putString("map_key", it?.let { k -> serverUrl + "\n" + k }) }
-
-    /** Suggested pin from the case address (not saved). */
-    suspend fun geocodeCase(id: Long): JsonObject = g.session.work("POST", "/api/mobile/v1/customers/$id/geocode").obj()
-
-    /** Saves the case pin, then refreshes the case list so the map shows it. */
-    suspend fun saveCaseLocation(id: Long, lat: Double, lng: Double, source: String, accuracy: Float?) {
-        g.session.work("POST", "/api/mobile/v1/customers/$id/location", buildJsonObject {
-            put("lat", lat); put("lng", lng); put("source", source); accuracy?.let { put("accuracy_m", it.toDouble()) }
-        })
-        runCatching { g.work.syncAll() }
-        if (profileId.value == id) loadProfile(id)
-    }
 
     /** "Reached the customer": the server checks the GPS is within 100 m (+ drift) of the pin and logs a visit on the timeline. */
     suspend fun checkIn(id: Long, lat: Double, lng: Double, accuracy: Float?, mock: Boolean = false) {

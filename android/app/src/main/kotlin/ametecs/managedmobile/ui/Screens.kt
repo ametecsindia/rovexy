@@ -667,7 +667,7 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
                 Spacer(Modifier.height(16.dp))
                 Text("CALL FEEDBACK", style = MaterialTheme.typography.labelSmall, color = Ds.Muted)
                 Spacer(Modifier.height(8.dp))
-                codes.forEach { (k, label) ->
+                codes.forType(c.customer?.portfolioType()).forEach { (k, label) ->
                     val on = code == k
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))
                         .background(if (on) Ds.Navy.copy(alpha = 0.06f) else Color.Transparent).border(1.dp, if (on) Ds.Navy else Ds.Line, RoundedCornerShape(12.dp))

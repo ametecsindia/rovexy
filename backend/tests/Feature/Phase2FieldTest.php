@@ -108,12 +108,12 @@ final class Phase2FieldTest extends TestCase
         $c = $this->in(fn () => Customer::query()->orderBy('customer_ref')->get()->keyBy('customer_ref'));
         $this->assertSame([17.4612, 'google', 'ROOFTOP'], [$c['A-1']->lat, $c['A-1']->geo_status, $c['A-1']->geo_precision]);
         $this->assertSame(17.4612, $c['A-2']->lat);
-        $this->assertSame([null, 'approx'], [$c['A-3']->lat, $c['A-3']->geo_status]);   // area only: no pin
-        $this->assertSame('not_found', $c['A-4']->geo_status);
-        Http::assertSentCount(3);   // the same address twice = one Google call
-        $this->assertSame(3, $this->in(fn () => MapsUsage::used()['geocode']));
+        $this->assertSame([17.46, 'approx', 'approximate'], [$c['A-3']->lat, $c['A-3']->geo_status, $c['A-3']->geo_precision]);   // area only: an area pin, marked approximate
+        $this->assertSame([17.4612, 'approx'], [$c['A-4']->lat, $c['A-4']->geo_status]);   // address not found: its city / pincode gives an area pin
+        Http::assertSentCount(4);   // the same address twice = one Google call; + one area lookup for A-4
+        $this->assertSame(4, $this->in(fn () => MapsUsage::used()['geocode']));
         $job = $this->in(fn () => \App\Models\ImportJob::query()->latest('id')->value('id'));
-        $this->admin()->getJson("/api/admin/imports/{$job}")->assertJsonPath('geo.pinned', 2)->assertJsonPath('geo.area_only', 1)->assertJsonPath('geo.not_found', 1)->assertJsonPath('geo.waiting', 0);
+        $this->admin()->getJson("/api/admin/imports/{$job}")->assertJsonPath('geo.pinned', 4)->assertJsonPath('geo.area_only', 2)->assertJsonPath('geo.not_found', 0)->assertJsonPath('geo.waiting', 0);
 
         // next month's file, same address for a new case: no new Google call; a changed address drops the old pin and is looked up
         $this->upload("Customer ID,Customer Name,Phone Number,Caller ID,Address,City\nA-5,Uma,9876544445,EMP1,Plot 5 Kondapur,Hyderabad\nA-1,Asha,9876544441,EMP1,Plot 9 Kondapur,Hyderabad\n");
@@ -121,7 +121,7 @@ final class Phase2FieldTest extends TestCase
             $this->assertSame(17.4612, Customer::query()->where('customer_ref', 'A-5')->value('lat'));
             $this->assertSame('google', Customer::query()->where('customer_ref', 'A-1')->value('geo_status'));
         });
-        Http::assertSentCount(4);
+        Http::assertSentCount(5);
     }
 
     // ── G12 ───────────────────────────────────────────────────────────────────────────────────────────────────────

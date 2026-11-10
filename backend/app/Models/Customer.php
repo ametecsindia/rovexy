@@ -15,7 +15,7 @@ class Customer extends Model
 
     protected $fillable = ['customer_ref','name','phone','alt_phone','campaign','status','notes','follow_up_on','assigned_user_id','assigned_team_id','withdrawn_at','last_import_id','city','area','pincode',
         'email','address','state','lat','lng','geo_status','geo_precision','preferred_time','loan_amount','outstanding','principal_os','interest_os','charges','overdue_amount','emi_amount',
-        'due_date','oldest_due_date','overdue_installments','last_paid_on','last_paid_amount','balance_as_of'];
+        'due_date','oldest_due_date','overdue_installments','last_paid_on','last_paid_amount','balance_as_of','portfolio_type','details'];
 
     /** Loan / dues columns that come from the lead file (only the ones present in a file are updated). */
     public const ACCOUNT_FIELDS = ['email','address','state','lat','lng','preferred_time','loan_amount','outstanding','principal_os','interest_os','charges',
@@ -24,7 +24,7 @@ class Customer extends Model
     protected function casts(): array
     {
         return ['follow_up_on' => 'date','withdrawn_at' => 'datetime','due_date' => 'date:Y-m-d','oldest_due_date' => 'date:Y-m-d','last_paid_on' => 'date:Y-m-d','balance_as_of' => 'date:Y-m-d',
-            'lat' => 'float','lng' => 'float','overdue_installments' => 'integer'];
+            'lat' => 'float','lng' => 'float','overdue_installments' => 'integer','details' => 'array'];
     }
 
     /** Every save path (upload, phone, bulk lookup, console) goes through here, so no address change is missed. */

@@ -983,9 +983,9 @@ final class AcceptanceTest extends TestCase
     {
         app(CurrentCompany::class)->withoutScope(fn () => Customer::query()->delete());   // fixture customers would share the sample's phone numbers
         $as = $this->admin('alpha');
-        $sample = $as->get('/api/admin/imports/template')->assertOk()->streamedContent();
-        $this->assertGreaterThanOrEqual(4, substr_count(trim($sample), "\n") + 1);   // header + at least 3 rows
-        $job = $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('customer-import-template.csv', $sample), 'portfolio' => 'Sample'],
+        $res = $as->get('/api/admin/imports/template')->assertOk();   // Collections sample (.xlsx: sample rows + "How to fill")
+        $sample = (string) file_get_contents($res->baseResponse->getFile()->getPathname());
+        $job = $as->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('rovexy-sample-collections.xlsx', $sample), 'portfolio' => 'Sample'],
             ['Accept' => 'application/json'])->assertCreated()->json();
         $prev = $as->postJson("/api/admin/imports/{$job['id']}/preview", ['mapping' => $job['mapping']])->assertOk()->json('result');
         $this->assertSame([], $prev['errors']);
@@ -1347,9 +1347,10 @@ final class AcceptanceTest extends TestCase
         // Address → suggested pin (not saved), then the employee saves it; someone else's case is refused.
         $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/geocode")->assertOk()->assertJsonPath('lat', 17.44)->assertJsonPath('precise', true);
         $this->assertNull($m->work('POST', "/api/mobile/v1/customers/{$ids['other']}/geocode")->assertNotFound()->json('lat'));
-        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/location", ['lat' => 0, 'lng' => 0, 'source' => 'gps'])->assertStatus(422);
-        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/location", ['lat' => 17.4405, 'lng' => 78.3507, 'source' => 'gps', 'accuracy_m' => 8])->assertOk();
-        $m->work('GET', "/api/mobile/v1/customers/{$ids['zero']}")->assertOk()->assertJsonPath('location.lat', 17.4405)->assertJsonPath('timeline.0.type', 'location');
+        // Pins are never set by hand (10 Nov 2026): the address gives the pin, the check-in at the door corrects it.
+        $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/location", ['lat' => 17.4405, 'lng' => 78.3507, 'source' => 'gps', 'accuracy_m' => 8])->assertStatus(410);
+        app(CurrentCompany::class)->run($this->a, fn () => Customer::query()->whereKey($ids['zero'])->update(['lat' => 17.4405, 'lng' => 78.3507, 'geo_status' => 'google']));
+        $m->work('GET', "/api/mobile/v1/customers/{$ids['zero']}")->assertOk()->assertJsonPath('location.lat', 17.4405);
         // Check-in at the customer: only within 100 m (+ GPS drift, max 50 m) of the pin; logged on the timeline.
         $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4505, 'lng' => 78.3507])->assertStatus(422);
         $m->work('POST', "/api/mobile/v1/customers/{$ids['zero']}/visit", ['lat' => 17.4413, 'lng' => 78.3507, 'accuracy_m' => 35])->assertOk();   // ~89 m (±35: not accurate enough to move the pin, G6)
@@ -1369,7 +1370,7 @@ final class AcceptanceTest extends TestCase
         $m->work('POST', '/api/mobile/v1/field/distances', ['lat' => 17.44, 'lng' => 78.35, 'customer_ids' => [$ids['c1']]])->assertStatus(503)->assertJsonPath('error', 'maps_not_configured');
     }
 
-    public function test_bulk_geocode_saves_precise_pins_only(): void
+    public function test_bulk_geocode_saves_precise_pins_and_area_pins(): void
     {
         app(CurrentCompany::class)->run($this->a, function () {
             \App\Models\IntegrationConnection::query()->create(['system' => 'gmaps', 'base_url' => 'https://maps.googleapis.com', 'api_key' => 'test-key', 'enabled' => true]);
@@ -1381,54 +1382,59 @@ final class AcceptanceTest extends TestCase
         $this->artisan('ammp:geocode-customers')->expectsOutputToContain('saved 1 (reused 0) · area-only 1')->assertSuccessful();
         app(CurrentCompany::class)->run($this->a, function () {
             $this->assertEquals(17.4, Customer::query()->where('customer_ref', 'C1')->value('lat'));
-            $this->assertNull(Customer::query()->where('customer_ref', 'C2')->value('lat'));
+            // Area-only match: an area pin marked approximate (the check-in at the door then corrects it).
+            $this->assertSame([17.4, 'approx'], array_values(Customer::query()->where('customer_ref', 'C2')->first(['lat', 'geo_status'])->only(['lat', 'geo_status'])));
         });
     }
 
     public function test_address_changes_history_and_report(): void
     {
         $this->appOnlyMandatory();
-        $upload = function (string $addr, string $lat) {
-            $csv = "Customer ID,Customer Name,Phone Number,Caller ID,Address,City,Latitude,Longitude\nA-1,Asha Rao,9876544444,EMP1,\"{$addr}\",Hyderabad,{$lat},78.4\n";
+        // Pins come only from the address (Google), and an accurate check-in at the door verifies them.
+        app(CurrentCompany::class)->run($this->a, fn () => \App\Models\IntegrationConnection::query()->create(['system' => 'gmaps', 'base_url' => 'https://maps.googleapis.com', 'api_key' => 'test-key', 'enabled' => true]));
+        \Illuminate\Support\Facades\Http::fake(['maps.googleapis.com/*' => fn ($req) => \Illuminate\Support\Facades\Http::response(['status' => 'OK', 'results' => [[
+            'formatted_address' => 'x', 'geometry' => ['location' => ['lat' => str_contains($req['address'], 'Old') ? 17.40 : 17.41, 'lng' => 78.4], 'location_type' => 'ROOFTOP']]]])]);
+        $upload = function (string $addr) {
+            $csv = "Customer ID,Customer Name,Phone Number,Caller ID,Address,City\nA-1,Asha Rao,9876544444,EMP1,\"{$addr}\",Hyderabad\n";
             $job = $this->admin('alpha')->post('/api/admin/imports', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('a.csv', $csv)], ['Accept' => 'application/json'])->assertCreated()->json();
             $this->admin('alpha')->postJson("/api/admin/imports/{$job['id']}/preview", ['mapping' => $job['mapping']])->assertOk();
             $this->admin('alpha')->postJson("/api/admin/imports/{$job['id']}/validate")->assertStatus(202);
             $this->admin('alpha')->postJson("/api/admin/imports/{$job['id']}/commit")->assertStatus(202);
         };
-        $upload('1 Old Street', '17.40');   // new case: its first address is not a "change"
-        $upload('9 New Road', '17.41');     // address + pin changed by the file
-        $upload('9 New Road', '17.41');     // same again: nothing logged
+        $upload('1 Old Street');   // new case: its first address is not a "change"
+        $upload('9 New Road');     // address changed by the file → looked up again → new pin
+        $upload('9 New Road');     // same again: nothing logged
         $id = app(CurrentCompany::class)->run($this->a, fn () => Customer::query()->where('customer_ref', 'A-1')->value('id'));
 
         $m = $this->approvedPhone();
         $this->login($m);
         $this->ackAll($m);
-        $m->work('POST', "/api/mobile/v1/customers/{$id}/location", ['lat' => 17.4101, 'lng' => 78.4, 'source' => 'gps', 'accuracy_m' => 6])->assertOk();
+        $m->work('POST', "/api/mobile/v1/customers/{$id}/visit", ['lat' => 17.4101, 'lng' => 78.4, 'accuracy_m' => 6])->assertOk()->assertJsonPath('pin_verified', true);
         $m->work('POST', "/api/mobile/v1/customers/{$id}/visit", ['lat' => 17.4102, 'lng' => 78.4, 'accuracy_m' => 40])->assertOk();   // ±40: a visit, pin not moved (G6 needs ±30)
 
         // Case profile (phone + console): newest first, before / after, who and how.
         $h = $m->work('GET', "/api/mobile/v1/customers/{$id}")->assertOk()->json('address_history');
-        $this->assertCount(2, $h);
-        $this->assertSame(['phone_gps', 'pin', 11, 'GPS ±6 m.'], [$h[0]['source'], $h[0]['what'], $h[0]['moved_m'], $h[0]['note']]);
-        $this->assertSame(['upload', 'both', '1 Old Street, Hyderabad', '9 New Road, Hyderabad'], [$h[1]['source'], $h[1]['what'], $h[1]['old_address'], $h[1]['new_address']]);
-        $this->assertEqualsWithDelta(1112, $h[1]['moved_m'], 3);
-        $this->assertEquals(['lat' => 17.4, 'lng' => 78.4], $h[1]['old_pin']);
-        $this->admin('alpha')->getJson("/api/admin/customers/{$id}")->assertOk()->assertJsonCount(2, 'address_history');
+        $this->assertSame([['phone_gps', 'pin', 11], ['bulk_geocode', 'pin', null], ['upload', 'both', null], ['bulk_geocode', 'pin', null]],
+            array_map(fn ($x) => [$x['source'], $x['what'], $x['moved_m']], $h));
+        $this->assertSame('Verified at check-in, GPS ±6 m.', $h[0]['note']);
+        $this->assertSame(['1 Old Street, Hyderabad', '9 New Road, Hyderabad'], [$h[2]['old_address'], $h[2]['new_address']]);
+        $this->assertEquals(['lat' => 17.4, 'lng' => 78.4], $h[2]['old_pin']);   // the file changed the address: the old pin is dropped, the new address looked up
+        $this->admin('alpha')->getJson("/api/admin/customers/{$id}")->assertOk()->assertJsonCount(4, 'address_history');
 
         // Admin report: filters, status (verified = checked in at the door after the change; replaced = a newer change exists).
         $r = $this->admin('alpha')->getJson('/api/admin/address-changes')->assertOk();
-        $r->assertJsonPath('summary.changes', 2)->assertJsonPath('summary.verified', 2)->assertJsonPath('summary.pins_moved', 2)->assertJsonPath('summary.big_moves', 1)
+        $r->assertJsonPath('summary.changes', 4)->assertJsonPath('summary.verified', 4)->assertJsonPath('summary.pins_added', 2)->assertJsonPath('summary.pins_moved', 1)
             ->assertJsonPath('page.data.0.status', 'verified')->assertJsonPath('page.data.1.status', 'replaced')->assertJsonPath('page.data.0.customer.customer_ref', 'A-1');
-        $this->admin('alpha')->getJson('/api/admin/address-changes?status=replaced')->assertJsonPath('page.total', 1);
+        $this->admin('alpha')->getJson('/api/admin/address-changes?status=replaced')->assertJsonPath('page.total', 3);
         $this->admin('alpha')->getJson('/api/admin/address-changes?status=pending')->assertJsonPath('page.total', 0);
-        $this->admin('alpha')->getJson('/api/admin/address-changes?q=Old%20Street')->assertJsonPath('page.total', 1);
-        $this->admin('alpha')->getJson('/api/admin/address-changes?q=Asha')->assertJsonPath('page.total', 2);
+        $this->admin('alpha')->getJson('/api/admin/address-changes?q=Old%20Street')->assertJsonPath('page.total', 2);
+        $this->admin('alpha')->getJson('/api/admin/address-changes?q=Asha')->assertJsonPath('page.total', 4);
         $this->admin('alpha')->getJson('/api/admin/address-changes?source=upload&what=both')->assertJsonPath('page.total', 1);
         $this->admin('alpha')->getJson('/api/admin/address-changes?from=' . now()->addDay()->toDateString())->assertJsonPath('page.total', 0);
 
         $rc = $this->admin('alpha')->getJson('/api/admin/reachability?q=New%20Road')->assertOk();
-        $rc->assertJsonPath('page.total', 1)->assertJsonPath('page.data.0.reach', 'visited')->assertJsonPath('page.data.0.visits', 1)
-            ->assertJsonPath('page.data.0.changes', 2)->assertJsonPath('page.data.0.pin_status', 'ok');
+        $rc->assertJsonPath('page.total', 1)->assertJsonPath('page.data.0.reach', 'visited')->assertJsonPath('page.data.0.visits', 2)
+            ->assertJsonPath('page.data.0.changes', 4)->assertJsonPath('page.data.0.pin_status', 'ok');
         $all = $this->admin('alpha')->getJson('/api/admin/reachability')->assertOk()->json('summary');
         $this->assertSame($all['cases'], $all['pin_ok'] + $all['pin_missing'] + $all['pin_invalid']);
         $this->assertSame(1, $all['visited']);
@@ -1515,7 +1521,7 @@ final class AcceptanceTest extends TestCase
         $m->work('GET', "/api/mobile/v1/customers/{$c2}")->assertNotFound();
 
         $p = $m->work('GET', "/api/mobile/v1/customers/{$l1['id']}")->assertOk();
-        $p->assertJsonPath('dues.days_overdue', 40)->assertJsonPath('dues.overdue_installments', 2)->assertJsonPath('location.lat', 17.4612)
+        $p->assertJsonPath('dues.days_overdue', 40)->assertJsonPath('dues.overdue_installments', 2)->assertJsonPath('location', null)   /* latitude / longitude in a file are ignored: pins come from the address */
             ->assertJsonPath('address', '12-3, MG Road')->assertJsonPath('phone', '+919876511111')->assertJsonPath('assigned_user.employee_code', 'EMP1')
             ->assertJsonPath('timeline.0.type', 'assignment')->assertJsonPath('installments', null);
         $m->work('GET', "/api/mobile/v1/customers/{$items['L-2']['id']}")->assertOk()->assertJsonPath('location', null)->assertJsonPath('dues.days_overdue', null);

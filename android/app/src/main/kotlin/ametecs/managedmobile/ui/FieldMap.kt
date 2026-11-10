@@ -132,6 +132,7 @@ private const val ROAD_CANDIDATES = 5       // road distance asked (on tap only)
 private const val FAR_METERS = 300_000f     // a pin this far from the employee is probably wrong (swapped lat/lng, bad file)
 private const val MAX_STOPS = 10            // Google Maps navigation: 9 waypoints + destination
 private const val ARRIVE_METERS = 100f      // "Check in" appears this close to the pin (server allows +50 m GPS drift)
+private const val APPROX_ARRIVE_METERS = 3000f   // same for an approximate (area-only) pin; = FieldMapController::APPROX_ARRIVE_METERS
 
 private data class Road(val meters: Int, val seconds: Int)
 /** A map point (the map itself is Google Maps JavaScript in a WebView: field-map.html on the server). */
@@ -316,7 +317,8 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
     var mapGen by remember { mutableIntStateOf(0) }   // bump = reload the map page (Retry)
     val hero: Near? = sel ?: nearest
     // ── arrival: within ARRIVE_METERS of the customer on the card → Check in (verified again on the server) ──
-    val arrived = hero?.straight?.let { it <= ARRIVE_METERS } == true
+    // An area pin ("approximate") is only a rough spot: Check in shows within 3 km, and the GPS fix then becomes the exact pin.
+    val arrived = hero?.let { h -> h.straight?.let { it <= if (h.r.pin == "approximate") APPROX_ARRIVE_METERS else ARRIVE_METERS } } == true
     var visits by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }   // case id → check-in time (this session)
     var checkBusy by remember { mutableStateOf(false) }
     val haptic = LocalHapticFeedback.current
@@ -403,7 +405,7 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
                 if (unpinned.isNotEmpty() || far.isNotEmpty()) item(key = "missing") {
                     Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                         Text("Location unavailable · ${unpinned.size + far.size}", color = Ds.Ink, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-                        (unpinned.map { it to if (it.locationIssue == "invalid") "Wrong coordinates in the file" else "No map location" } +
+                        (unpinned.map { it to "Map pin not found yet — looked up from the address" } +
                             far.map { it to "Pin is over ${(FAR_METERS / 1000).toInt()} km away — check it" }).forEach { (r, why) ->
                             Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Box(Modifier.size(8.dp).background(Ds.Amber, CircleShape))
@@ -412,7 +414,6 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
                                     Text(r.c.name, color = Ds.Ink, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     Text(listOfNotNull(why, r.address).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }
-                                TextButton(onClick = { fixLocation = r }) { Text("Set pin", color = Ds.Navy) }
                             }
                         }
                     }
@@ -484,7 +485,6 @@ fun FieldMapScreen(vm: AppViewModel, cases: List<CaseRow>, startFilter: CaseFilt
             }
         }
     }
-    fixLocation?.let { r -> UpdateLocationDialog(vm, r) { fixLocation = null; tick++ } }
 }
 
 private val CASE_STATUSES = listOf("new" to "New", "in_progress" to "In progress", "follow_up" to "Follow-up", "closed" to "Closed")
@@ -553,7 +553,7 @@ private fun LocationPrompt(state: String, noPins: Boolean, noCases: Boolean, onA
             state == "denied" -> "Allow location so the app can show where you are and which customers are nearest."
             state == "unavailable" -> "Your current location could not be detected. Turn on GPS and try again."
             noCases -> "Customers appear here once your supervisor assigns them."
-            noPins -> "Open a customer below and use Set pin when you are at their address."
+            noPins -> "Map pins are found from the customers' addresses automatically. Check back shortly."
             else -> "This takes a few seconds outdoors."
         }, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 4.dp))
         if (state == "denied") Button(onClick = onAllow, modifier = Modifier.padding(top = 12.dp).fillMaxWidth(), shape = RoundedCornerShape(14.dp),
@@ -627,9 +627,9 @@ private fun CustomerSheetCard(n: Near, label: String, route: RouteLine?, routeBu
             if (rt == null && n.straight == null) DistChip("Distance needs your location", strong = false)
         }
         Row(Modifier.padding(top = 12.dp)) {
-            MapKv("Overdue", money(r.overdue), Modifier.weight(1f), if ((r.dpd ?: 0) > 0) Ds.Red else Ds.Ink)
-            MapKv("Outstanding", money(r.outstanding), Modifier.weight(1f))
-            MapKv("Collected today", if (r.paidToday > 0) money(r.paidToday) else "—", Modifier.weight(1f))
+            MapKv(if (r.isCollections) "Overdue" else r.label("due", "To collect"), money(r.overdue), Modifier.weight(1f), if ((r.dpd ?: 0) > 0) Ds.Red else Ds.Ink)
+            MapKv(if (r.isCollections) "Outstanding" else r.label("value", "Value"), money(r.outstanding), Modifier.weight(1f))
+            MapKv(if (r.isCollections) "Collected today" else "${r.label("amount", "Received")} today", if (r.paidToday > 0) money(r.paidToday) else "—", Modifier.weight(1f))
         }
         Text(listOfNotNull(
             r.lastCallAt?.let { "Last call " + it.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("d MMM, h:mm a")) } ?: "Not called yet",
@@ -660,7 +660,7 @@ private fun CustomerSheetCard(n: Near, label: String, route: RouteLine?, routeBu
             SheetAction(AmmpIcons.Check, "Collect", Modifier.weight(1f), onClick = onCollect)
             SheetAction(AmmpIcons.People, "Details", Modifier.weight(1f), onClick = onView)
         }
-        Text("Pin in the wrong place? Set pin", color = Ds.Navy, fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp).clickable(onClick = onFixLocation))
+        Text("Pin in the wrong place? Check in at the customer's door — the pin moves to your exact spot.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 10.dp))
     }
 }
 
@@ -739,48 +739,6 @@ private fun RouteSummary(r: RouteLine, pinned: List<CaseRow>) {
         }
         Text("Order chosen by Google for the shortest drive; the farthest customer is last.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
     }
-}
-
-/** Set a case's map pin: GPS at the customer's door, or Google's match for the case address (confirmed before saving). */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-fun UpdateLocationDialog(vm: AppViewModel, case: CaseRow, onDone: () -> Unit) {
-    val scope = rememberCoroutineScope()
-    var busy by remember { mutableStateOf(false) }
-    var msg by remember { mutableStateOf<String?>(null) }
-    var found by remember { mutableStateOf<Triple<Double, Double, String>?>(null) }   // lat, lng, label
-    var source by remember { mutableStateOf("gps") }
-    var accuracy by remember { mutableStateOf<Float?>(null) }
-    fun run(block: suspend () -> Unit) = scope.launch {
-        busy = true; msg = null
-        try { block() } catch (e: Exception) { if (e is kotlinx.coroutines.CancellationException) throw e; msg = friendly(e) } finally { busy = false }
-    }
-    AlertDialog(onDismissRequest = onDone, title = { Text("Update location · ${case.c.name}") }, text = {
-        Column {
-            Text("Use your GPS when you are at the customer's door, or look up the case address.", style = MaterialTheme.typography.bodySmall)
-            FlowRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(enabled = !busy, onClick = { run {
-                    val f = vm.freshLocation() ?: throw ApiException(0, "no_fix", "Your location could not be detected. Turn on GPS and try again.")
-                    source = "gps"; accuracy = if (f.hasAccuracy()) f.accuracy else null
-                    found = Triple(f.latitude, f.longitude, "Your position" + (accuracy?.let { " (±${it.toInt()} m)" } ?: ""))
-                    if ((accuracy ?: 0f) > 100f) msg = "GPS is weak (±${accuracy!!.toInt()} m). Step outside and try again for a better pin."
-                } }) { Text("My location") }
-                OutlinedButton(enabled = !busy && case.address != null, onClick = { run {
-                    val g = vm.geocodeCase(case.c.id)
-                    source = "address"; accuracy = null
-                    found = Triple(g["lat"]!!.jsonPrimitive.double, g["lng"]!!.jsonPrimitive.double, (g["formatted_address"]?.jsonPrimitive?.content ?: "Address match"))
-                    if (g["precise"]?.jsonPrimitive?.booleanOrNull == false) msg = "Google matched only the area, not the building. Prefer your GPS at the door."
-                } }) { Text("From address") }
-            }
-            if (busy) CircularProgressIndicator(Modifier.padding(top = 10.dp).size(18.dp), strokeWidth = 2.dp)
-            found?.let { (la, lo, label) ->
-                Text("$label\n" + String.format(java.util.Locale.US, "%.5f, %.5f", la, lo), fontSize = 13.sp, color = Ds.Ink, modifier = Modifier.padding(top = 10.dp))
-            }
-            msg?.let { Text(it, color = Ds.Amber, fontSize = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
-        }
-    }, confirmButton = {
-        TextButton(enabled = found != null && !busy, onClick = { run { found?.let { (la, lo, _) -> vm.saveCaseLocation(case.c.id, la, lo, source, accuracy) }; onDone() } }) { Text("Save pin") }
-    }, dismissButton = { TextButton(onClick = onDone) { Text("Cancel") } })
 }
 
 /**

@@ -8,7 +8,7 @@ import { Badge, Card, ErrorBox, Kpi, Modal, Notice, Page, Table, useAsync } from
 
 const inr = (v: number) => `₹ ${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
-const EMPTY = { portfolio: '', group: '', employee: '', assigned: '', call_status: '', collection: '', callback: '', case_status: '', from: '', to: '' };
+const EMPTY = { type: '', portfolio: '', group: '', employee: '', assigned: '', call_status: '', collection: '', callback: '', case_status: '', from: '', to: '' };
 /** A table on screen as a formatted Excel file (built on the server: column widths, dates, numbers). */
 function downloadExcel(name: string, head: string[], rows: unknown[][]) {
   return download('/reports/table.xlsx', { name, head, rows });
@@ -69,6 +69,7 @@ const Meter = ({ v, max, text }: { v: number; max: number; text: string }) => (
 export function PortfolioReportsPage() {
   const { me } = useAuth();
   const [f, setF] = useState<Record<string, string>>(EMPTY);
+  const ptypes = useAsync(() => get<any[]>('/imports/types'));
   const [period, setPeriod] = useState('day');
   const [q, setQ] = useState('');
   const [sort, setSort] = useState<{ k: string; d: 1 | -1 }>({ k: 'cases', d: -1 });
@@ -105,8 +106,10 @@ export function PortfolioReportsPage() {
       <ErrorBox error={r.error} />
       <Card>
         <div className="filters filter-bar">
+          <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value, portfolio: '' })} aria-label="Type of portfolio">
+            <option value="">All types</option>{(ptypes.data ?? []).map((t: any) => <option key={t.type} value={t.type}>{t.label}</option>)}</select>
           <select value={f.portfolio} onChange={(e) => set('portfolio', e.target.value)} aria-label="Portfolio" style={{ minWidth: 220 }}>
-            <option value="">All portfolios</option>{(d?.portfolios ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.cases})</option>)}
+            <option value="">All portfolios</option>{(d?.portfolios ?? []).filter((p: any) => !f.type || p.type === f.type).map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.cases})</option>)}
           </select>
           <select value={f.assigned} onChange={(e) => set('assigned', e.target.value)} aria-label="Assignment"><option value="">Assigned + unassigned</option><option value="assigned">Assigned cases</option><option value="unassigned">Unassigned cases</option></select>
           <select value={f.call_status} onChange={(e) => set('call_status', e.target.value)} aria-label="Call status"><option value="">Any call status</option><option value="connected">Connected</option><option value="not_connected">Called, not connected</option><option value="not_called">Not called</option></select>
@@ -137,7 +140,8 @@ export function PortfolioReportsPage() {
         <div className="kpi-grid">
           <Kpi icon="call" tone="blue" label="Total calls" value={s.calls} sub={`${s.cases} cases · ${s.unassigned} unassigned`} />
           <Kpi icon="check" tone="green" label="Connected calls" value={s.connected} sub={`${pct(s.connected, s.calls)}% of calls`} subTone={pct(s.connected, s.calls) >= 50 ? 'up' : 'flat'} />
-          <Kpi icon="chart" tone="gold" label="Collections received" value={inr(s.collected)} sub={`${s.payments} payments · ${inr(s.verified)} verified`} />
+          <Kpi icon="chart" tone="gold" label={d.labels?.type === 'collections' || !d.labels ? 'Collections received' : d.labels.amount} value={inr(s.collected)} sub={`${s.payments} entries · ${inr(s.verified)} verified`} />
+          <Kpi icon="check" tone="green" label={d.labels?.success ?? 'Successful outcomes'} value={s.successes ?? 0} sub={`${pct(s.successes ?? 0, s.connected)}% of connected calls`} />
           <Kpi icon="event" tone="purple" label="Callbacks pending" value={s.callbacks} sub={s.callbacks_overdue ? `${s.callbacks_overdue} overdue` : 'none overdue'} subTone={s.callbacks_overdue ? 'down' : 'flat'} />
           <Kpi icon="warning" tone="gold" label="Cases not called" value={s.not_made} sub={`of ${s.cases - s.unassigned} assigned · ${s.reached_cases} reached · ${s.not_connected_cases} called, not reached`} subTone={s.not_made ? 'down' : 'flat'} />
           <Kpi icon="people" tone="teal" label="Employees on it" value={s.employees} sub={`${s.groups} teams · ${(d?.branches ?? []).filter((b: any) => b.branch_id).length} branches`} />
@@ -167,7 +171,7 @@ export function PortfolioReportsPage() {
             { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
             { key: 'connected', label: 'Connected', align: 'right', render: (g: any) => `${g.connected} (${pct(g.connected, g.calls)}%)` },
             { key: 'callbacks', label: 'Callbacks', align: 'right' },
-            { key: 'collected', label: 'Collected', render: (g: any) => <Meter v={g.collected} max={maxBranchCollected} text={inr(g.collected)} /> }]} />
+            { key: 'collected', label: d?.labels?.amount ?? 'Collected', render: (g: any) => <Meter v={g.collected} max={maxBranchCollected} text={inr(g.collected)} /> }]} />
         </Card>
       )}
 
@@ -178,7 +182,7 @@ export function PortfolioReportsPage() {
             { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
             { key: 'connected', label: 'Connected', align: 'right', render: (g: any) => `${g.connected} (${pct(g.connected, g.calls)}%)` },
             { key: 'callbacks', label: 'Callbacks', align: 'right' },
-            { key: 'collected', label: 'Collected', render: (g: any) => <Meter v={g.collected} max={maxGroupCollected} text={inr(g.collected)} /> }]} />
+            { key: 'collected', label: d?.labels?.amount ?? 'Collected', render: (g: any) => <Meter v={g.collected} max={maxGroupCollected} text={inr(g.collected)} /> }]} />
         </Card>
       )}
 
@@ -196,17 +200,17 @@ export function PortfolioReportsPage() {
               <th className="num" title="Cases with no call yet"><H k="not_made">Not called</H></th>
               <th className="num" title="Calls answered of all calls made (one case can have many calls)"><H k="connected">Calls answered</H></th>
               <th className="num"><H k="callbacks">Callbacks</H></th>
-              <th><H k="collected">Collected</H></th><th><H k="last_activity">Last activity</H></th>
+              <th><H k="successes">{d?.labels?.success ?? 'Successes'}</H></th><th><H k="collected">{d?.labels?.amount ?? 'Collected'}</H></th><th><H k="last_activity">Last activity</H></th>
             </tr></thead>
             <tbody>
-              {employees.length === 0 && <tr><td colSpan={11} className="muted">No employees match.</td></tr>}
+              {employees.length === 0 && <tr><td colSpan={12} className="muted">No employees match.</td></tr>}
               {employees.map((e) => (
                 <tr key={e.user_id} className="clickable" onClick={() => setDrill(e)}>
                   <td><span className="linkish">{e.name}</span> <small className="muted">{e.employee_code}</small><div className="flag-row">{flags(e)}</div></td>
                   <td className="nowrap">{e.groups.join(', ') || '—'}</td><td><small>{e.portfolios.join(', ') || '—'}</small></td>
                   <td className="num">{e.cases}</td><td className="num">{e.reached_cases}</td><td className="num">{e.not_connected_cases}</td><td className="num">{e.not_made}</td>
                   <td className="num">{e.connected} <small className="muted">of {e.calls}</small></td>
-                  <td className="num">{e.callbacks}{e.callbacks_overdue ? <small className="bad-text"> ({e.callbacks_overdue} late)</small> : null}</td><td><Meter v={e.collected} max={maxCollected} text={inr(e.collected)} /></td>
+                  <td className="num">{e.callbacks}{e.callbacks_overdue ? <small className="bad-text"> ({e.callbacks_overdue} late)</small> : null}</td><td className="num">{e.successes ?? 0}</td><td><Meter v={e.collected} max={maxCollected} text={inr(e.collected)} /></td>
                   <td className="nowrap">{e.last_activity ? short(e.last_activity, me?.company.timezone) : <span className="muted">never</span>}</td>
                 </tr>
               ))}

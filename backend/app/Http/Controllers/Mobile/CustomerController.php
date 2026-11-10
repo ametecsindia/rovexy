@@ -19,7 +19,8 @@ final class CustomerController extends Controller
 {
     private const LIST = ['id', 'customer_ref', 'name', 'phone', 'alt_phone', 'campaign', 'status', 'notes', 'follow_up_on', 'updated_at',
         'last_import_id', 'assigned_user_id', 'assigned_team_id', 'city', 'area', 'pincode', 'address', 'state', 'lat', 'lng',
-        'outstanding', 'overdue_amount', 'emi_amount', 'due_date', 'oldest_due_date', 'balance_as_of'];
+        'outstanding', 'overdue_amount', 'emi_amount', 'due_date', 'oldest_due_date', 'balance_as_of', 'portfolio_type', 'details', 'geo_status',
+        'loan_amount', 'principal_os', 'interest_os', 'charges', 'overdue_installments', 'last_paid_on', 'last_paid_amount'];
 
     public function index(Request $r, CaseService $cases)
     {
@@ -49,6 +50,10 @@ final class CustomerController extends Controller
                 'location_issue' => $ok ? null : ($c->lat === null && $c->lng === null ? 'missing' : 'invalid'), 'address' => $c->address, 'state' => $c->state,
                 'outstanding' => $d['outstanding'], 'overdue_amount' => $d['overdue_amount'], 'emi_amount' => $d['emi_amount'], 'due_date' => $d['due_date'],
                 'oldest_due_date' => $d['oldest_due_date'],
+                // Portfolio type: the phone shows its fields and wording (Delivery date, COD amount…) and only its outcomes.
+                'portfolio_type' => $c->portfolio_type, 'labels' => \App\Domain\Portfolios\PortfolioTypes::labels($c->portfolio_type),
+                'details' => array_map(fn ($f) => ['label' => $f['label'], 'value' => $f['text']], \App\Domain\Portfolios\PortfolioTypes::present($c)),
+                'pin' => $ok ? ($c->geo_status === 'approx' ? 'approximate' : ($c->geo_status === 'verified' ? 'verified' : 'address')) : null,
             ] + $act[$c->id];
         });
         return response()->json([
@@ -84,7 +89,11 @@ final class CustomerController extends Controller
     public function dispositions()
     {
         // Older app versions read a plain list; the current app asks ?full=1 to also get the payment modes.
-        $codes = DispositionCode::query()->where('active', true)->orderBy('label')->get(['code', 'label', 'requires_follow_up', 'captures']);
+        // Only the outcomes of the portfolio types this employee works on (plus the calling results every type shares):
+        // a courier agent never sees "Promise to pay", an older app (no per-case filter) never sees another type's codes.
+        $types = Customer::query()->visibleTo(request()->user())->distinct()->pluck('portfolio_type')->push(\App\Domain\Portfolios\PortfolioTypes::DEFAULT)->unique()->values();
+        $codes = DispositionCode::query()->where('active', true)->where(fn ($q) => $q->whereNull('portfolio_type')->orWhereIn('portfolio_type', $types))
+            ->orderBy('label')->get(['code', 'label', 'requires_follow_up', 'captures', 'portfolio_type', 'success']);
         return response()->json(request()->boolean('full') ? ['codes' => $codes, 'payment_modes' => \App\Support\Outcomes::PAYMENT_MODES] : $codes);
     }
 }

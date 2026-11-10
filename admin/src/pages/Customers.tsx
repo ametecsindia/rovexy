@@ -8,20 +8,11 @@ import { api, get, post, fmtDate, fmtSeconds, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Notice, Page, RecordingPlayer, Stat, Table, useAction, useAsync } from '../components/ui';
 
-const FIELDS: [string, string, boolean][] = [
-  ['customer_ref', 'Customer ID', true], ['name', 'Customer name', true], ['phone', 'Phone number', true], ['alt_phone', 'Alternate number', false],
-  ['campaign', 'Campaign', false], ['assigned_employee', 'Caller ID (optional — assigns each lead)', false], ['assigned_team', 'Group (name or code)', false],
-  ['city', 'City', false], ['area', 'Area / branch', false], ['pincode', 'Pincode', false],
-  ['notes', 'Notes', false], ['status', 'Status', false], ['follow_up_date', 'Follow-up date', false],
-  ['address', 'Address', false], ['state', 'State', false], ['email', 'Email', false], ['preferred_time', 'Preferred contact time', false],
-  ['lat', 'Latitude', false], ['lng', 'Longitude', false],
-  ['loan_amount', 'Loan / account amount', false], ['outstanding', 'Total outstanding', false], ['principal_os', 'Principal outstanding', false],
-  ['interest_os', 'Interest outstanding', false], ['charges', 'Late fees / charges', false], ['overdue_amount', 'Overdue amount', false],
-  ['emi_amount', 'EMI / instalment amount', false], ['due_date', 'Next due date', false], ['oldest_due_date', 'Oldest unpaid due date', false],
-  ['dpd', 'DPD (days overdue)', false], ['overdue_installments', 'Overdue instalments (count)', false],
-  ['last_paid_on', 'Last payment date', false], ['last_paid_amount', 'Last payment amount', false],
-];
+type MapField = { key: string; label: string; required: boolean; kind: string };
+type PType = { type: string; label: string; hint: string; case: string; value: string; due: string; date: string; amount: string; success: string; fields: { key: string; label: string; kind: string; options: string[] | null }[] };
 
+/** A calendar date ("2026-11-12") as "12 Nov 2026" — no time, no time-zone shift. */
+const fmtDay = (d?: string | null) => (d ? new Date(`${d.slice(0, 10)}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
 const inr = (v: any) => (v === null || v === undefined ? '—' : Number(v).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }));
 const daysOverdue = (c: any) => {
   if (!c.oldest_due_date || (c.overdue_amount !== null && Number(c.overdue_amount) <= 0)) return null;
@@ -33,6 +24,10 @@ export function ImportsPage() {
   const { can } = useAuth();
   const nav = useNavigate();
   const imports = useAsync(() => get('/imports'));
+  const types = useAsync(() => get<PType[]>('/imports/types'));
+  const [ptype, setPtype] = useState('');
+  const typeOf = (k?: string | null) => types.data?.find((t) => t.type === (k || 'collections'));
+  const [keepOther, setKeepOther] = useState(true);
   const portfolios = useAsync(() => get<any[]>('/portfolios'));
   const formats = useAsync(() => get<any>('/recording-formats'));
   const fmtName = (id: string | null) => { const l = formats.data?.formats ?? []; return (l.find((f: any) => f.id === id) ?? l.find((f: any) => f.is_default))?.name; };
@@ -55,22 +50,28 @@ export function ImportsPage() {
     return () => clearInterval(t);
   }, [job]);
 
-  const open = (j: any) => { setJob(j); setName(j.portfolio ?? ''); setRecFormat(j.recording_format ?? ''); setMapping(j.mapping ?? {}); setPreview(null); };
+  const open = async (j: any) => {
+    const full = j.fields ? j : await get(`/imports/${j.id}`);   // the field list of its portfolio type
+    setJob(full); setName(full.portfolio ?? ''); setRecFormat(full.recording_format ?? ''); setMapping(full.mapping ?? {}); setPreview(null); setPtype(full.portfolio_type ?? 'collections');
+    setKeepOther(full.options?.keep_other_columns ?? true);
+  };
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const MAX_MB = 20;   // = config ammp.uploads.import_max_mb
   const upload = (file: File) => a.run(async () => {
     if (!/\.(csv|xlsx)$/i.test(file.name)) throw new Error('Choose a .csv or .xlsx file. Other formats (e.g. .xls, .pdf) cannot be read — in Excel use File → Save As → CSV or Excel Workbook.');
     if (file.size === 0) throw new Error('The file is empty.');
     if (file.size > MAX_MB * 1024 * 1024) throw new Error(`The file is larger than ${MAX_MB} MB. Split it into smaller files.`);
+    if (!ptype) throw new Error('Choose the type of portfolio first (step 1).');
     const fd = new FormData();
     fd.append('file', file);
+    fd.append('portfolio_type', ptype);
     if (name.trim()) fd.append('portfolio', name.trim());
     if (recFormat) fd.append('recording_format', recFormat);
-    open(await post('/imports', fd));
+    await open(await post('/imports', fd));
   });
   const check = () => a.run(async () => {
     if ((name.trim() && name.trim() !== job.portfolio) || (recFormat || null) !== (job.recording_format ?? null)) await api('PATCH', `/imports/${job.id}`, { ...(name.trim() ? { portfolio: name.trim() } : {}), recording_format: recFormat || null });
-    setPreview((await post(`/imports/${job.id}/preview`, { mapping, on_existing: onExisting })).result);
+    setPreview((await post(`/imports/${job.id}/preview`, { mapping, on_existing: onExisting, keep_other_columns: keepOther })).result);
     await post(`/imports/${job.id}/validate`);
     setJob(await get(`/imports/${job.id}`));
   });
@@ -79,7 +80,8 @@ export function ImportsPage() {
 
   return (
     <Page title="Portfolios" subtitle="Each uploaded lead file is a portfolio. Upload it here, then give its cases to a group and its employees under Assignment."
-      actions={can('customers.import') && <a className="button secondary" href={fileUrl('/api/admin/imports/template')}>Download sample file</a>}>
+      actions={can('customers.import') && <a className="button secondary" href={fileUrl(`/api/admin/imports/template${qs({ type: ptype || 'collections' })}`)}>
+        Download sample file{ptype ? ` (${typeOf(ptype)?.label})` : ''}</a>}>
       <ErrorBox error={a.error ?? imports.error ?? portfolios.error} />
       <Card title="Portfolios">
         <Table rows={portfolios.data} empty="No portfolios yet — upload a lead file below." columns={[
@@ -88,6 +90,7 @@ export function ImportsPage() {
                   <input value={renaming?.name ?? ''} onChange={(e) => setRenaming({ id: p.id, name: e.target.value })} maxLength={150} required aria-label="New portfolio name" autoFocus style={{ maxWidth: 240 }} />
                   <button type="submit" disabled={a.busy}>Save</button><button type="button" className="ghost" onClick={() => setRenaming(null)}>Cancel</button></form>
               : <><strong>{p.name}</strong>{can('customers.import') && <button type="button" className="ghost small" onClick={() => setRenaming({ id: p.id, name: p.name })} aria-label={`Rename ${p.name}`}>Rename</button>}<br /><small className="muted">{p.file} · {fmtDate(p.uploaded_at)}</small></> },
+          { key: 'portfolio_type', label: 'Type', render: (p: any) => <span className="tag">{p.type_label ?? typeOf(p.portfolio_type)?.label}</span> },
           { key: 'recording_format', label: 'Recording file names', render: (p: any) => can('customers.import') && formats.data
               ? <select value={p.recording_format ?? ''} aria-label={`Recording format for ${p.name}`} style={{ minWidth: 200 }} disabled={a.busy}
                   onChange={(e) => void a.run(async () => { await api('PATCH', `/imports/${p.id}`, { recording_format: e.target.value || null }); await portfolios.reload(); })}>
@@ -103,24 +106,37 @@ export function ImportsPage() {
       </Card>
 
       {can('customers.import') && (
-        <Card title={job ? `Upload: ${job.original_name}` : 'Upload a new portfolio'} actions={job && <><Badge value={job.status} /><button className="ghost" onClick={() => { setJob(null); setName(''); setRecFormat(''); }}>New upload</button></>}>
+        <Card title={job ? `Upload: ${job.original_name}` : 'Upload a new portfolio'} actions={job && <><Badge value={job.status} /><button className="ghost" onClick={() => { setJob(null); setName(''); setRecFormat(''); setPtype(''); }}>New upload</button></>}>
           {!job ? (
+            <>
+            <h3 style={{ margin: '0 0 6px' }}>1. Type of portfolio</h3>
+            <div className="type-grid" role="radiogroup" aria-label="Type of portfolio">
+              {(types.data ?? []).map((t) => (
+                <button key={t.type} type="button" role="radio" aria-checked={ptype === t.type} className={`type-card${ptype === t.type ? ' on' : ''}`} onClick={() => setPtype(t.type)}>
+                  <strong>{t.label}</strong><small>{t.hint}</small>
+                </button>))}
+            </div>
+            {ptype && <p className="small" style={{ margin: '8px 0 14px' }}>
+              <a href={fileUrl(`/api/admin/imports/template${qs({ type: ptype })}`)}>Download the {typeOf(ptype)?.label} sample file</a> — its columns: Customer ID, name, phone, address…
+              {' '}{typeOf(ptype)?.fields.map((f) => f.label).join(', ')}. Map pins are found from the address automatically.</p>}
             <div className="form-grid">
-              <Field label="1. Portfolio name" hint="e.g. HDFC Oct-2026 Bucket 1. Leave blank to use the file name."><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
-              <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="2. Recording file names" />
-              <Field label="3. Lead file (.csv or .xlsx)" hint={`Up to ${MAX_MB} MB. Needs Customer ID, Customer name and Phone number columns — see the sample file.`}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
+              <Field label="2. Portfolio name" hint="e.g. HDFC Oct-2026 Bucket 1. Leave blank to use the file name."><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
+              <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="3. Recording file names" />
+              <Field label="4. File (.csv or .xlsx)" hint={ptype ? `Up to ${MAX_MB} MB. Needs Customer ID, name and Phone number columns — see the sample file.` : 'Choose the type of portfolio first.'}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
               {a.busy && <Notice tone="info">Uploading and reading the file…</Notice>}
             </div>
+            </>
           ) : (
             <>
               <div className="form-grid">
                 <Field label="Portfolio name"><input value={name} onChange={(e) => setName(e.target.value)} disabled={job.status === 'completed'} /></Field>
                 <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="Recording file names" disabled={job.status === 'completed'} />
               </div>
+              <p className="small" style={{ margin: '4px 0' }}>Type: <span className="tag">{typeOf(job.portfolio_type)?.label}</span></p>
               <h3 style={{ marginBottom: 4 }}>Match the columns of your file</h3>
               <p className="muted" style={{ marginTop: 0 }}>Most are matched automatically. * = required. A <b>Caller ID</b> column gives a lead straight to that employee; leave it out to assign later.</p>
               <div className="form-grid">
-                {FIELDS.map(([f, label, req]) => (
+                {((job.fields ?? []) as MapField[]).map(({ key: f, label, required: req }) => (
                   <Field key={f} label={`${label}${req ? ' *' : ''}`}>
                     <select value={mapping[f] ?? ''} disabled={job.status === 'completed'} onChange={(e) => { setMapping({ ...mapping, [f]: e.target.value === '' ? null : Number(e.target.value) }); setPreview(null); }}>
                       <option value="">— not in file —</option>{(job.headers as string[]).map((h, i) => <option key={i} value={i}>{h}</option>)}
@@ -128,6 +144,8 @@ export function ImportsPage() {
                   </Field>
                 ))}
                 <Field label="If a Customer ID already exists"><select value={onExisting} onChange={(e) => setOnExisting(e.target.value)}><option value="update">Update it</option><option value="skip">Skip the row</option></select></Field>
+                <Field label="Other columns of the file" hint="Columns not matched above are kept with their own names and shown on the case.">
+                  <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={keepOther} disabled={job.status === 'completed'} onChange={(e) => { setKeepOther(e.target.checked); setPreview(null); }} /> Keep them</label></Field>
               </div>
               <div className="row">
                 <button className={job.status === 'ready' ? 'secondary' : undefined} disabled={a.busy || busyJob || job.status === 'completed'} onClick={check}>Check file</button>
@@ -141,8 +159,8 @@ export function ImportsPage() {
               {job.status === 'completed' && job.geo && (
                 <p className="muted small">Map pins: <b>{job.geo.pinned}</b> of {job.geo.total} placed
                   {job.geo.waiting > 0 && <> · {job.geo.waiting} being looked up…</>}
-                  {job.geo.area_only > 0 && <> · {job.geo.area_only} address too vague (area only — pinned at the door)</>}
-                  {job.geo.not_found > 0 && <> · {job.geo.not_found} not found</>}
+                  {job.geo.area_only > 0 && <> · {job.geo.area_only} pinned at their area (address too vague — corrected at the door check-in)</>}
+                  {job.geo.not_found > 0 && <> · {job.geo.not_found} not found on the map</>}
                   {job.geo.no_address > 0 && <> · {job.geo.no_address} without an address</>}</p>
               )}
               {job.status === 'failed' && <Notice tone="bad">Import failed: {job.failure}</Notice>}
@@ -154,8 +172,9 @@ export function ImportsPage() {
 
       {can('customers.import') && (
         <Card title="Upload history">
-          <Table rows={imports.data?.data} onRow={(j: any) => ['uploaded', 'ready'].includes(j.status) ? open(j) : undefined} columns={[
+          <Table rows={imports.data?.data} onRow={(j: any) => ['uploaded', 'ready'].includes(j.status) ? void open(j) : undefined} columns={[
             { key: 'portfolio', label: 'Portfolio', render: (j: any) => j.portfolio ?? j.original_name },
+            { key: 'portfolio_type', label: 'Type', render: (j: any) => typeOf(j.portfolio_type)?.label ?? '—' },
             { key: 'original_name', label: 'File' },
             { key: 'status', label: 'Status', render: (j: any) => ['uploaded', 'ready'].includes(j.status) ? <><Badge value={j.status} /> <small className="muted">not imported — click to finish</small></> : <Badge value={j.status} /> },
             { key: 'total_rows', label: 'Rows', align: 'right' }, { key: 'created_count', label: 'New', align: 'right' }, { key: 'updated_count', label: 'Updated', align: 'right' },
@@ -186,8 +205,10 @@ export function CustomersPage() {
   const { can } = useAuth();
   const nav = useNavigate();
   const [urlParams] = useSearchParams();
-  const [f, setF] = useState({ q: '', status: '', assigned: '', team_id: '', import_id: urlParams.get('import_id') ?? '' });
-  const customers = useAsync(() => get(`/customers${qs(f)}`), [f.q, f.status, f.assigned, f.team_id, f.import_id]);
+  const [f, setF] = useState({ q: '', status: '', assigned: '', team_id: '', import_id: urlParams.get('import_id') ?? '', portfolio_type: '' });
+  const customers = useAsync(() => get(`/customers${qs(f)}`), [f.q, f.status, f.assigned, f.team_id, f.import_id, f.portfolio_type]);
+  const ptypes = useAsync(() => get<any[]>('/imports/types'));
+  const oneType = f.portfolio_type ? ptypes.data?.find((t) => t.type === f.portfolio_type) : null;
   useLiveReload(customers.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const teams = useAsync(() => (can('employees.view') ? get<any[]>('/teams') : Promise.resolve([])));
@@ -228,8 +249,9 @@ export function CustomersPage() {
           <select value={f.status} onChange={(e) => set('status', e.target.value)} aria-label="Status"><option value="">All statuses</option>{['new', 'in_progress', 'follow_up', 'closed', 'do_not_call'].map((s) => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}</select>
           <select value={f.team_id} onChange={(e) => set('team_id', e.target.value)} aria-label="Group"><option value="">All groups</option>{(teams.data ?? []).map((t: any) => <option key={t.id} value={t.id}>{t.name}</option>)}</select>
           <select value={f.assigned} onChange={(e) => set('assigned', e.target.value)} aria-label="Caller"><option value="">All callers</option><option value="none">Not assigned to a caller</option>{callers.map((e: any) => <option key={e.id} value={e.id}>{e.name} ({e.employee_code})</option>)}</select>
+          <select value={f.portfolio_type} onChange={(e) => set('portfolio_type', e.target.value)} aria-label="Type of portfolio"><option value="">All types</option>{(ptypes.data ?? []).map((t: any) => <option key={t.type} value={t.type}>{t.label}</option>)}</select>
           <select value={f.import_id} onChange={(e) => set('import_id', e.target.value)} aria-label="Portfolio"><option value="">All portfolios</option>{(portfolios.data ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-          {Object.values(f).some(Boolean) && <button className="ghost" onClick={() => { setF({ q: '', status: '', assigned: '', team_id: '', import_id: '' }); setSel([]); }}>Clear</button>}
+          {Object.values(f).some(Boolean) && <button className="ghost" onClick={() => { setF({ q: '', status: '', assigned: '', team_id: '', import_id: '', portfolio_type: '' }); setSel([]); }}>Clear</button>}
         </div>
         {can('customers.assign') && (
           <div className="assign-bar">
@@ -262,8 +284,11 @@ export function CustomersPage() {
           { key: 'assigned_user_id', label: 'Caller', render: (c: any) => people.find((e: any) => e.id === c.assigned_user_id)?.name ?? <span className="muted">not assigned</span> },
           { key: 'city', label: 'City', render: (c: any) => c.city ? <>{c.city}{c.pincode ? <small className="muted"> {c.pincode}</small> : null}</> : <span className="muted">—</span> },
           { key: 'assigned_team_id', label: 'Group', render: (c: any) => teamName(c.assigned_team_id) ?? people.find((e: any) => e.id === c.assigned_user_id)?.teams?.[0]?.name ?? <span className="muted">—</span> },
-          { key: 'overdue_amount', label: 'Overdue', align: 'right', render: (c: any) => c.overdue_amount !== null ? inr(c.overdue_amount) : <span className="muted">—</span> },
-          { key: 'dpd', label: 'DPD', align: 'right', render: (c: any) => { const d = daysOverdue(c); return d === null ? <span className="muted">—</span> : <span className={d > 60 ? 'bad-text' : undefined}>{d}</span>; } },
+          { key: 'overdue_amount', label: oneType ? oneType.due : 'Overdue / to collect', align: 'right', render: (c: any) => c.overdue_amount !== null ? <span title={c.labels?.due}>{inr(c.overdue_amount)}</span> : <span className="muted">—</span> },
+          ...(!oneType || oneType.type === 'collections'
+            ? [{ key: 'dpd', label: 'DPD', align: 'right' as const, render: (c: any) => { if (c.portfolio_type && c.portfolio_type !== 'collections') return <span className="muted">—</span>; const d = daysOverdue(c); return d === null ? <span className="muted">—</span> : <span className={d > 60 ? 'bad-text' : undefined}>{d}</span>; } }]
+            : [{ key: 'due_date', label: oneType.date, render: (c: any) => c.due_date ? fmtDay(c.due_date) : <span className="muted">—</span> }]),
+          { key: 'portfolio_type', label: 'Type', render: (c: any) => <span className="small">{c.labels?.label}</span> },
           { key: 'follow_up_on', label: 'Follow-up', render: (c: any) => c.follow_up_on?.slice(0, 10) ?? '—' },
         ]} />
         {customers.data?.total > (rows?.length ?? 0) && <p className="muted">Showing {rows?.length} of {customers.data.total}. For big batches use <Link to="/allocation">Customers → Allocation</Link> (all or part of the matching cases at once).</p>}
@@ -290,6 +315,11 @@ export function CustomerDetailPage() {
   const d = c.data;
   const tz = me?.company.timezone;
   const du = d?.dues ?? {};
+  const lb = d?.labels ?? { label: 'Collections & Recovery', value: 'Outstanding', due: 'Overdue', amount: 'Collected' };
+  const coll = !d?.portfolio_type || d.portfolio_type === 'collections';
+  const typeFields = (d?.details ?? []).filter((x: any) => !String(x.key).startsWith('x:'));
+  const fileCols = (d?.details ?? []).filter((x: any) => String(x.key).startsWith('x:'));
+  const tabName = (t: string) => (t === 'Loan & dues' && !coll ? `${lb.label} details` : t);
   const address = d ? [d.address, d.area, d.city, d.state, d.pincode].filter(Boolean).join(', ') : '';
   const dest = d?.location ? `${d.location.lat},${d.location.lng}` : address;
   const directions = dest ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}` : null;
@@ -305,20 +335,21 @@ export function CustomerDetailPage() {
           {d.withdrawn_at && <Notice tone="warn">Withdrawn on {fmtDate(d.withdrawn_at, tz)} — not visible on any phone.</Notice>}
           <div className="kpis">
             <Stat label="Status" value={<StatusBadge s={d.status} />} />
-            <Stat label="Overdue now" value={inr(du.overdue_now)} tone={du.days_overdue ? 'bad' : undefined} />
-            <Stat label="Days overdue" value={du.days_overdue ?? '—'} />
-            <Stat label="Outstanding" value={inr(du.remaining_balance)} />
-            <Stat label="Collected (verified)" value={inr(d.activity.collected_verified)} />
+            <Stat label={coll ? 'Overdue now' : lb.due} value={inr(coll ? du.overdue_now : du.overdue_amount)} tone={du.days_overdue ? 'bad' : undefined} />
+            {coll ? <Stat label="Days overdue" value={du.days_overdue ?? '—'} /> : <Stat label={lb.date} value={fmtDay(du.due_date)} />}
+            <Stat label={coll ? 'Outstanding' : lb.value} value={inr(coll ? du.remaining_balance : du.outstanding)} />
+            <Stat label={`${lb.amount} (verified)`} value={inr(d.activity.collected_verified)} />
             <Stat label="Next action" value={d.next_action ? fmtDate(d.next_action.due_at, tz) : '—'} />
           </div>
-          <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" className={`tab${tab === t ? ' on' : ''}`} onClick={() => setTab(t)}>{t}</button>)}</div>
+          <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" className={`tab${tab === t ? ' on' : ''}`} onClick={() => setTab(t)}>{tabName(t)}</button>)}</div>
 
           {tab === 'Overview' && (
             <div className="grid2">
-              <Card title="Collection status">
-                {du.outstanding === null && du.overdue_amount === null && <Notice tone="info">Loan and due amounts were not in the uploaded file for this case.</Notice>}
-                {kv([['Overdue now', inr(du.overdue_now)], ['Days overdue', du.days_overdue], ['Next instalment', du.emi_amount !== null ? `${inr(du.emi_amount)}${du.due_date ? ` on ${du.due_date}` : ''}` : null],
-                  ['Outstanding', inr(du.remaining_balance)], ['Waiting for payment check', d.activity.collected_pending ? inr(d.activity.collected_pending) : '—'],
+              <Card title={coll ? 'Collection status' : 'Status'}>
+                {coll && du.outstanding === null && du.overdue_amount === null && <Notice tone="info">Loan and due amounts were not in the uploaded file for this case.</Notice>}
+                {kv([...(coll ? [['Overdue now', inr(du.overdue_now)], ['Days overdue', du.days_overdue], ['Next instalment', du.emi_amount !== null ? `${inr(du.emi_amount)}${du.due_date ? ` on ${du.due_date}` : ''}` : null],
+                  ['Outstanding', inr(du.remaining_balance)]] as [string, any][] : [[lb.due, du.overdue_amount !== null ? inr(du.overdue_amount) : null], [lb.date, du.due_date ? fmtDay(du.due_date) : null],
+                  [lb.value, du.outstanding !== null ? inr(du.outstanding) : null], ...typeFields.slice(0, 3).map((x: any) => [x.label, x.text])] as [string, any][]), ['Waiting for payment check', d.activity.collected_pending ? inr(d.activity.collected_pending) : '—'],
                   ['Last call', d.activity.last_call_at ? `${fmtDate(d.activity.last_call_at, tz)}${d.activity.last_outcome_label ? ` · ${d.activity.last_outcome_label}` : ''}` : 'Not called yet'],
                   ['Latest promise', d.promises[0] ? <>{inr(d.promises[0].amount)} by {d.promises[0].date} <Badge value={PROMISE_TONE[d.promises[0].status]} label={d.promises[0].status} /></> : 'None']])}
                 {can('customers.assign') && !d.withdrawn_at && (
@@ -355,6 +386,7 @@ export function CustomerDetailPage() {
           {tab === 'Customer details' && (
             <div className="grid2">
               <Card title="Customer">{kv([['Name', d.name], ['Case ID', d.customer_ref], ['Phone', d.phone], ['Alternate', d.alt_phone], ['Email', d.email], ['Preferred contact time', d.preferred_time], ['Added', fmtDate(d.created_at, tz)]])}</Card>
+              {fileCols.length > 0 && <Card title="More from the uploaded file"><div className="kv-grid">{fileCols.map((x: any) => <div key={x.key}><small>{x.label}</small>{x.text}</div>)}</div></Card>}
               <Card title="Assignment">
                 {kv([['Portfolio', d.portfolio ?? 'Added by hand'], ['Campaign', d.campaign], ['Employee', d.assigned_user ? `${d.assigned_user.name} (${d.assigned_user.employee_code})` : 'Group pool / not assigned'], ['Group', d.team?.name], ['Assigned on', d.assigned_at ? fmtDate(d.assigned_at, tz) : null]])}
                 <h4>Assignment history</h4>
@@ -363,7 +395,13 @@ export function CustomerDetailPage() {
             </div>
           )}
 
-          {tab === 'Loan & dues' && (
+          {tab === 'Loan & dues' && !coll && (
+            <Card title={`${lb.label} details`}>
+              {typeFields.length ? <div className="kv-grid">{typeFields.map((x: any) => <div key={x.key}><small>{x.label}</small>{x.text}</div>)}</div>
+                : <p className="muted">No {lb.label} details in the uploaded file for this case.</p>}
+            </Card>
+          )}
+          {tab === 'Loan & dues' && coll && (
             <>
               <Notice tone="info">Amounts as uploaded on {du.balance_as_of ?? '—'}. Only payments the office has verified are taken off; promises and unchecked payments are not.</Notice>
               <div className="grid2">
@@ -421,9 +459,11 @@ export function CustomerDetailPage() {
             <>
               <Card title="Current address" actions={<>{address && <button className="secondary" onClick={() => navigator.clipboard?.writeText(address)}>Copy address</button>}{directions && <a className="button" href={directions} target="_blank" rel="noreferrer">Get directions</a>}</>}>
                 <p>{address || <span className="muted">Address not available.</span>}</p>
+                {d.pin === 'approximate' && <Notice tone="warn">Approximate pin: only the area / pincode of this address was found on the map. The employee's GPS check-in at the door sets the exact spot.</Notice>}
+                {d.pin === 'verified' && <p className="small"><Badge value="verified" label="pin verified at the door" /></p>}
                 {d.address_history?.[0] ? <ChangeDetail c={d.address_history[0]} tz={tz} />
                   : d.location ? <CaseMap lat={d.location.lat} lng={d.location.lng} label={d.name} />
-                  : <Notice tone="info">Location unavailable — no map coordinates were recorded for this customer.{address ? ' Directions use the address.' : ''}</Notice>}
+                  : <Notice tone="info">No map pin yet — it is found from the address automatically{address ? '; directions use the address meanwhile' : ' (this case has no address)'}.</Notice>}
               </Card>
               <Card title={`Address history${d.address_history?.length ? ` · ${d.address_history.length}` : ''}`} actions={<Link className="button secondary" to="/address-report">All address changes →</Link>}>
                 <AddressHistory rows={d.address_history ?? []} tz={tz} />

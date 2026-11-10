@@ -16,38 +16,59 @@ use Illuminate\Http\Request;
 
 final class CustomerController extends Controller
 {
-    public function template()
+    /**
+     * Sample file of a portfolio type (?type=courier…): sheet 1 = the columns with five rows that import as they are;
+     * sheet 2 = how to fill each column (required, format, allowed values). No latitude / longitude: pins come from the address.
+     */
+    public function template(Request $r)
     {
-        // Sample lead file: imports cleanly as downloaded (no Caller ID / group, so nothing depends on this company's people).
-        // Dates are relative to today so they never look stale. Amounts add up: total = principal + interest + charges; overdue = EMI × overdue EMIs.
-        $d = fn (int $days) => now()->addDays($days)->format('Y-m-d');
-        $rows = [
-            ['Customer ID', 'Customer Name', 'Phone Number', 'Alternate Number', 'Email', 'Address', 'Area', 'City', 'State', 'Pincode', 'Latitude', 'Longitude',
-                'Preferred Time', 'Campaign', 'Caller ID', 'Assigned Team', 'Loan Amount', 'Total Outstanding', 'Principal Outstanding', 'Interest Outstanding',
-                'Charges', 'Overdue Amount', 'EMI Amount', 'Due Date', 'DPD', 'Overdue EMIs', 'Last Payment Date', 'Last Payment Amount', 'Notes', 'Status', 'Follow-up Date'],
-            ['LN-100001', 'Ravi Kumar', '9876543210', '9876501234', 'ravi.kumar@example.com', 'Flat 304, Sai Residency, Road No 2', 'Kondapur', 'Hyderabad', 'Telangana', '500084', '17.4600', '78.3570',
-                'After 6 pm', 'Personal Loan', '', '', '300000', '224500', '210000', '12000', '2500', '19000', '9500', $d(9), '38', '2', $d(-38), '9500',
-                'Promised to pay by month end', 'new', $d(1)],
-            ['LN-100002', 'Lakshmi Devi', '9876543211', '', 'lakshmi.devi@example.com', 'Plot 21, Ayyappa Society', 'Madhapur', 'Hyderabad', 'Telangana', '500081', '17.4483', '78.3915',
-                '10 am - 1 pm', 'Personal Loan', '', '', '150000', '98300', '92000', '4800', '1500', '12400', '6200', $d(14), '22', '2', $d(-22), '6200',
-                'Asked for EMI restructuring', 'new', $d(2)],
-            ['LN-100003', 'Mohammed Imran', '9876543212', '', '', 'H.No 8-2-120, Lane 4', 'Gachibowli', 'Hyderabad', 'Telangana', '500032', '17.4401', '78.3489',
-                '2 pm - 5 pm', 'Two-wheeler Loan', '', '', '85000', '61500', '58000', '2500', '1000', '9000', '3000', $d(5), '65', '3', $d(-65), '3000',
-                'Not reachable on first attempt', 'follow_up', $d(1)],
-            ['LN-100004', 'Sunita Reddy', '9876543213', '', 'sunita.reddy@example.com', '7-1-55, Lal Bungalow Road', 'Ameerpet', 'Hyderabad', 'Telangana', '500016', '17.4375', '78.4483',
-                'Anytime', 'Consumer Durable', '', '', '40000', '18600', '17800', '600', '200', '4700', '4700', $d(20), '12', '1', $d(-12), '4700',
-                'Partial payment made', 'in_progress', $d(3)],
-            ['LN-100005', 'Venkatesh Rao', '9876543214', '', '', '2-3-410, Main Road', 'Secunderabad', 'Hyderabad', 'Telangana', '500003', '', '',
-                'After 7 pm', 'Credit Card', '', '', '120000', '54000', '50000', '3000', '1000', '0', '5000', $d(25), '0', '0', $d(-5), '5000',
-                'Paying on time — reminder call only', 'new', ''],
+        $type = \App\Domain\Portfolios\PortfolioTypes::exists($r->query('type')) ? (string) $r->query('type') : \App\Domain\Portfolios\PortfolioTypes::DEFAULT;
+        [$head, $rows] = \App\Domain\Portfolios\SampleFiles::table($type);
+        $label = \App\Domain\Portfolios\PortfolioTypes::of($type)['label'];
+        $kinds = ['money' => 'Amount in ₹, e.g. 12500', 'date' => 'Date: YYYY-MM-DD or DD/MM/YYYY', 'int' => 'Whole number', 'number' => 'Number, e.g. 2.5',
+            'phone' => '10-digit mobile number', 'email' => 'E-mail address', 'text' => 'Text', 'choice' => 'One of the values on the right'];
+        $help = [
+            ['Customer ID', 'Yes', 'Your unique ID for the case (an existing ID updates that case)', ''],
+            [$head[1], 'Yes', 'Text', ''],
+            ['Phone Number', 'Yes', '10-digit mobile number', ''],
+            ['Alternate Number', '', '10-digit mobile number', ''],
+            ['Address, Area, City, State, Pincode', '', 'The full address. The map pin is found from it automatically — no latitude / longitude needed', ''],
+            ['Caller ID', '', 'User ID of the employee who gets this case (leave blank to assign later)', ''],
+            ['Assigned Team', '', 'Team name or code', ''],
+            ['Status', '', 'One of the values on the right', implode(', ', \App\Domain\Customers\ImportValidator::STATUSES)],
+            ['Follow-up Date', '', $kinds['date'], ''],
         ];
-        return response()->streamDownload(function () use ($rows) {
-            $out = fopen('php://output', 'w');
-            foreach ($rows as $row) {
-                fputcsv($out, $row);
-            }
-            fclose($out);
-        }, 'customer-import-template.csv', ['Content-Type' => 'text/csv']);
+        foreach (\App\Domain\Portfolios\PortfolioTypes::fields($type) as $f) {
+            $help[] = [$f['label'], '', $kinds[$f['kind']] ?? 'Text', $f['options'] ? implode(', ', $f['options']) : ''];
+        }
+        $help[] = ['Any other column', '', 'Kept with its own name and shown on the case', ''];
+        $path = tempnam(sys_get_temp_dir(), 'tpl') . '.xlsx';
+        $w = new \OpenSpout\Writer\XLSX\Writer();
+        $w->openToFile($path);
+        \App\Support\Excel::sheet($w, 'Sample', $head, $rows);
+        $w->addNewSheetAndMakeItCurrent();
+        \App\Support\Excel::sheet($w, 'How to fill', ['Column', 'Required', 'What to put', 'Allowed values'], $help, [["{$label} — sample upload file"]]);
+        $w->close();
+        $name = 'rovexy-sample-' . $type . '.xlsx';
+        return response()->download($path, $name, ['Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'])->deleteFileAfterSend();
+    }
+
+    /** Fields to match the file's columns to (Portfolios page): core fields, then the portfolio type's own. */
+    public static function mappingFields(?string $type): array
+    {
+        $core = [['customer_ref', 'Customer ID', true], ['name', \App\Domain\Portfolios\PortfolioTypes::of($type)['case'] . ' name', true], ['phone', 'Phone number', true],
+            ['alt_phone', 'Alternate number', false], ['email', 'Email', false], ['address', 'Address (map pin is found from it)', false], ['area', 'Area / locality', false],
+            ['city', 'City', false], ['state', 'State', false], ['pincode', 'Pincode', false], ['preferred_time', 'Preferred contact time', false], ['campaign', 'Campaign', false],
+            ['assigned_employee', 'Caller ID (optional — assigns each row)', false], ['assigned_team', 'Group (name or code)', false], ['notes', 'Notes', false],
+            ['status', 'Status', false], ['follow_up_date', 'Follow-up date', false]];
+        return [...array_map(fn ($f) => ['key' => $f[0], 'label' => $f[1], 'required' => $f[2], 'kind' => 'core'], $core),
+            ...array_map(fn ($f) => ['key' => $f['key'], 'label' => $f['label'], 'required' => false, 'kind' => $f['kind']], \App\Domain\Portfolios\PortfolioTypes::fields($type))];
+    }
+
+    /** GET imports/types — the portfolio types with their fields (Portfolios page). */
+    public function types()
+    {
+        return response()->json(\App\Domain\Portfolios\PortfolioTypes::list());
     }
 
     /** Managers see and work only on their own uploads; admins see all. */
@@ -63,18 +84,19 @@ final class CustomerController extends Controller
 
     public function upload(Request $r, ImportService $svc)
     {
-        $r->validate(['file' => 'required|file|max:' . (config('ammp.uploads.import_max_mb') * 1024), 'portfolio' => 'nullable|string|max:150', 'recording_format' => 'nullable|string|max:16']);
-        $job = $svc->upload($r->file('file'), $r->user(), $r->input('portfolio'));
+        $r->validate(['file' => 'required|file|max:' . (config('ammp.uploads.import_max_mb') * 1024), 'portfolio' => 'nullable|string|max:150', 'recording_format' => 'nullable|string|max:16',
+            'portfolio_type' => ['nullable', \Illuminate\Validation\Rule::in(array_keys(\App\Domain\Portfolios\PortfolioTypes::TYPES))]]);
+        $job = $svc->upload($r->file('file'), $r->user(), $r->input('portfolio'), $r->input('portfolio_type'));
         if ($r->filled('recording_format') && \App\Services\RecordingName::find($r->input('recording_format'))) {
             $job->forceFill(['recording_format' => $r->input('recording_format')])->save();
         }
-        return response()->json($job, 201);
+        return response()->json($job->toArray() + ['fields' => self::mappingFields($job->portfolio_type)], 201);
     }
 
     public function preview(Request $r, int $id, ImportService $svc)
     {
         $data = $r->validate(['mapping' => 'required|array', 'on_existing' => 'in:update,skip', 'allocation' => 'in:column,random',
-            'team_id' => 'nullable|integer', 'user_ids' => 'array|max:500', 'user_ids.*' => 'integer']);
+            'team_id' => 'nullable|integer', 'user_ids' => 'array|max:500', 'user_ids.*' => 'integer', 'keep_other_columns' => 'boolean']);
         return response()->json($svc->preview($this->job($r, $id), $data['mapping'], $data, $r->user()));
     }
 
@@ -123,6 +145,7 @@ final class CustomerController extends Controller
         return response()->json($rows->groupBy('last_import_id')->map(function ($g, $id) use ($jobs, $teams) {
             $j = $jobs[$id] ?? null;
             return ['id' => (int) $id, 'name' => $j?->portfolio ?: ($j ? pathinfo($j->original_name, PATHINFO_FILENAME) : "Import #{$id}"), 'file' => $j?->original_name, 'recording_format' => $j?->recording_format,
+                'portfolio_type' => $j?->portfolio_type ?? \App\Domain\Portfolios\PortfolioTypes::DEFAULT, 'type_label' => \App\Domain\Portfolios\PortfolioTypes::of($j?->portfolio_type)['label'],
                 'uploaded_at' => $j?->created_at, 'total' => (int) $g->sum('total'), 'unassigned' => (int) $g->sum('unassigned'),
                 'groups' => $g->map(fn ($x) => ['team_id' => $x->assigned_team_id, 'name' => $x->assigned_team_id ? ($teams[$x->assigned_team_id] ?? '?') : null,
                     'total' => (int) $x->total, 'unassigned' => (int) $x->unassigned])->values()];
@@ -132,7 +155,7 @@ final class CustomerController extends Controller
     public function importStatus(Request $r, int $id)
     {
         $job = $this->job($r, $id);
-        return response()->json($job->toArray() + ['sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get(),
+        return response()->json($job->toArray() + ['fields' => self::mappingFields($job->portfolio_type), 'sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get(),
             'geo' => $job->status === 'completed' ? \App\Services\AutoGeocode::progress($job->id) : null]);
     }
 
@@ -165,6 +188,7 @@ final class CustomerController extends Controller
             ->when($v('team_id') === 'none', fn ($q) => $q->whereNull('assigned_team_id'))
             ->when(ctype_digit((string) $v('team_id')), fn ($q) => $q->where('assigned_team_id', (int) $v('team_id')))
             ->when($v('import_id'), fn ($q, $i) => $q->where('last_import_id', $i))
+            ->when($v('portfolio_type'), fn ($q, $t) => $q->where('portfolio_type', $t))
             ->when($v('campaign'), fn ($q, $c) => $q->where('campaign', $c))
             ->when($v('city'), fn ($q, $c) => $q->where('city', $c))
             ->when($v('area'), fn ($q, $c) => $q->where('area', $c))
@@ -176,7 +200,7 @@ final class CustomerController extends Controller
     {
         return response()->json(self::filtered($r->query(), $r->user())
             ->orderByDesc('id')->paginate(100)
-            ->through(fn (Customer $c) => $c->toArray() + ['phone_masked' => PhoneNormaliser::mask($c->phone)]));
+            ->through(fn (Customer $c) => $c->toArray() + ['phone_masked' => PhoneNormaliser::mask($c->phone), 'labels' => \App\Domain\Portfolios\PortfolioTypes::labels($c->portfolio_type)]));
     }
 
     /** Same team scoping as the list: managers reach only their groups' cases. */

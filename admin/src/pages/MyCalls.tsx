@@ -43,7 +43,7 @@ export function MyCallsPage() {
           { key: 'name', label: 'Customer', render: (c: any) => <span>{c.name}<br /><small className="muted">{c.customer_ref} · {c.phone}{c.city ? ` · ${c.city}` : ''}</small></span> },
           { key: 'status', label: 'Status', render: (c: any) => <Badge value="info" label={String(c.status).replace(/_/g, ' ')} /> },
           { key: 'follow_up_on', label: 'Follow-up', render: (c: any) => c.follow_up_on?.slice(0, 10) ?? '' },
-          { key: 'overdue_amount', label: 'Overdue ₹', align: 'right', render: (c: any) => (c.overdue_amount ? Number(c.overdue_amount).toLocaleString('en-IN') : '') },
+          { key: 'overdue_amount', label: 'Overdue / to collect ₹', align: 'right', render: (c: any) => (c.overdue_amount ? Number(c.overdue_amount).toLocaleString('en-IN') : '') },
           { key: 'call', label: '', render: (c: any) => <span className="row">
             <button disabled={a.busy || !d?.can_call || (call && !call.terminal)} onClick={() => void start(c, 'primary')}>Call</button>
             {c.has_alternate && <button className="secondary" disabled={a.busy || !d?.can_call || (call && !call.terminal)} onClick={() => void start(c, 'alternate')}>Alternate</button>}

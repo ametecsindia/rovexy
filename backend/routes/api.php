@@ -261,6 +261,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('devices/{id}/effective-policy', [Admin\PolicyController::class, 'effective'])->middleware('perm:policies.view');
 
         Route::get('imports/template', [Admin\CustomerController::class, 'template'])->middleware('perm:customers.import');
+        Route::get('imports/types', [Admin\CustomerController::class, 'types'])->middleware('perm:customers.view');
         Route::get('imports', [Admin\CustomerController::class, 'imports'])->middleware('perm:customers.import');
         Route::post('imports', [Admin\CustomerController::class, 'upload'])->middleware(['perm:customers.import', 'throttle:uploads']);
         Route::post('imports/{id}/preview', [Admin\CustomerController::class, 'preview'])->middleware('perm:customers.import');

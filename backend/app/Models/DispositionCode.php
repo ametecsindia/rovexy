@@ -15,10 +15,10 @@ class DispositionCode extends Model
 
     public $timestamps = false;
 
-    protected $fillable = ['code','label','requires_follow_up','active','captures'];
+    protected $fillable = ['code','label','requires_follow_up','active','captures','portfolio_type','success'];
 
     protected function casts(): array
     {
-        return ['requires_follow_up' => 'bool','active' => 'bool'];
+        return ['requires_follow_up' => 'bool','active' => 'bool','success' => 'bool'];
     }
 }

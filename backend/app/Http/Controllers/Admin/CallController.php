@@ -128,9 +128,10 @@ final class CallController extends Controller
     {
         $data = $r->validate(['codes' => 'required|array|max:100', 'codes.*.code' => 'required|string|max:32|regex:/^[A-Z0-9_]+$/',
             'codes.*.label' => 'required|string|max:100', 'codes.*.requires_follow_up' => 'boolean', 'codes.*.active' => 'boolean',
-            'codes.*.captures' => 'nullable|in:none,promise,payment']);
+            'codes.*.captures' => 'nullable|in:none,promise,payment', 'codes.*.success' => 'boolean',
+            'codes.*.portfolio_type' => ['nullable', \Illuminate\Validation\Rule::in(array_keys(\App\Domain\Portfolios\PortfolioTypes::TYPES))]]);
         foreach ($data['codes'] as $c) {
-            DispositionCode::query()->updateOrCreate(['code' => $c['code']], ['label' => $c['label'], 'requires_follow_up' => $c['requires_follow_up'] ?? false, 'active' => $c['active'] ?? true, 'captures' => $c['captures'] ?? 'none']);
+            DispositionCode::query()->updateOrCreate(['code' => $c['code']], ['label' => $c['label'], 'requires_follow_up' => $c['requires_follow_up'] ?? false, 'active' => $c['active'] ?? true, 'captures' => $c['captures'] ?? 'none'] + (array_key_exists('portfolio_type', $c) ? ['portfolio_type' => $c['portfolio_type']] : []) + (array_key_exists('success', $c) ? ['success' => (bool) $c['success']] : []));
         }
         Audit::record('dispositions.updated', null, ['count' => count($data['codes'])]);
         return response()->json(['ok' => true]);

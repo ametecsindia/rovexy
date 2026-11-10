@@ -55,13 +55,17 @@ final class PortfolioReportController extends Controller
             ->groupBy('calls.user_id')->get()->keyBy('uid');
         $byUserPay = (clone $pay)->selectRaw('call_dispositions.user_id AS uid, SUM(call_dispositions.amount) AS amount, SUM(CASE WHEN call_dispositions.review_status = \'verified\' THEN call_dispositions.amount ELSE 0 END) AS verified, COUNT(*) AS n')
             ->groupBy('call_dispositions.user_id')->get()->keyBy('uid');
+        // Successful outcomes (delivered, order won, visit done, paid…): the type's own measure of a job done.
+        $success = CallDisposition::query()->whereIn('call_dispositions.call_id', (clone $calls)->select('calls.id'))
+            ->whereIn('call_dispositions.code', \App\Models\DispositionCode::query()->where('success', true)->select('code'));
+        $byUserSuccess = (clone $success)->selectRaw('call_dispositions.user_id AS uid, COUNT(*) AS n')->groupBy('call_dispositions.user_id')->pluck('n', 'uid');
         $byUserFu = (clone $fu)->selectRaw('follow_ups.user_id AS uid, COUNT(*) AS n, SUM(CASE WHEN follow_ups.due_at < ? THEN 1 ELSE 0 END) AS overdue', [now()])
             ->groupBy('follow_ups.user_id')->get()->keyBy('uid');
         $uids = collect([$owned->keys(), $byUserCalls->keys(), $byUserPay->keys()])->flatten()->filter()->unique();
         $users = User::query()->whereIn('id', $uids)->with('teams:id,name')->get(['id', 'name', 'employee_code'])->keyBy('id');
         $pfNames = $this->portfolioNames();
         $pfByUser = (clone $cases)->whereNotNull('assigned_user_id')->selectRaw('assigned_user_id AS uid, last_import_id AS pid')->distinct()->get()->groupBy('uid');
-        $employees = $uids->map(function ($uid) use ($users, $owned, $notMade, $notConnected, $reached, $lastWork, $byUserCalls, $byUserPay, $byUserFu, $pfByUser, $pfNames) {
+        $employees = $uids->map(function ($uid) use ($users, $owned, $notMade, $notConnected, $reached, $lastWork, $byUserCalls, $byUserPay, $byUserFu, $pfByUser, $pfNames, $byUserSuccess) {
             $u = $users[$uid] ?? null;
             $c = $byUserCalls[$uid] ?? null;
             return ['user_id' => (int) $uid, 'name' => $u?->name ?? "#{$uid}", 'employee_code' => $u?->employee_code,
@@ -70,6 +74,7 @@ final class PortfolioReportController extends Controller
                 'calls' => (int) ($c->calls ?? 0), 'connected' => (int) ($c->connected ?? 0), 'reached_cases' => (int) ($reached[$uid] ?? 0), 'not_connected_cases' => (int) ($notConnected[$uid] ?? 0),
                 'not_made' => (int) ($notMade[$uid] ?? 0), 'callbacks' => (int) ($byUserFu[$uid]->n ?? 0), 'callbacks_overdue' => (int) ($byUserFu[$uid]->overdue ?? 0),
                 'collected' => round((float) ($byUserPay[$uid]->amount ?? 0), 2), 'verified' => round((float) ($byUserPay[$uid]->verified ?? 0), 2),
+                'successes' => (int) ($byUserSuccess[$uid] ?? 0),
                 'last_activity' => isset($lastWork[$uid]) ? \Illuminate\Support\Carbon::parse($lastWork[$uid], 'UTC')->toAtomString() : null];
         })->sortByDesc('cases')->values();
 
@@ -104,6 +109,7 @@ final class PortfolioReportController extends Controller
             'collected' => round((float) (clone $pay)->sum('amount'), 2),
             'verified' => round((float) (clone $pay)->where('review_status', 'verified')->sum('amount'), 2),
             'payments' => (clone $pay)->count(),
+            'successes' => (clone $success)->count(),
             'employees' => (clone $cases)->whereNotNull('assigned_user_id')->distinct()->count('assigned_user_id'),
             'groups' => (clone $cases)->whereNotNull('assigned_team_id')->distinct()->count('assigned_team_id'),
         ];
@@ -133,7 +139,12 @@ final class PortfolioReportController extends Controller
         $pf = $r->query('portfolio');
         $job = is_numeric($pf) ? ImportJob::query()->find((int) $pf) : null;
 
-        return response()->json(['summary' => $summary, 'employees' => $employees, 'groups' => $groups, 'branches' => $branches, 'trend' => array_values($trend), 'period' => $period,
+        // Wording of the report: the portfolio's type, the chosen type, or the only type in the result; else neutral words.
+        $types = (clone $cases)->distinct()->pluck('portfolio_type');
+        $one = $job?->portfolio_type ?? ($r->query('type') ?: ($types->count() === 1 ? $types->first() : null));
+        $labels = $one ? \App\Domain\Portfolios\PortfolioTypes::labels($one)
+            : ['type' => null, 'label' => 'All types', 'case' => 'Case', 'value' => 'Amount', 'due' => 'Amount to collect', 'date' => 'Scheduled date', 'amount' => 'Amount received', 'success' => 'Successful outcomes'];
+        return response()->json(['summary' => $summary, 'labels' => $labels, 'types' => $types->values(), 'employees' => $employees, 'groups' => $groups, 'branches' => $branches, 'trend' => array_values($trend), 'period' => $period,
             'outcomes' => $outcomes, 'portfolio' => $job ? ['id' => $job->id, 'name' => $job->portfolio ?: $job->original_name, 'file' => $job->original_name,
                 'uploaded_at' => $job->created_at, 'rows' => $job->total_rows] : ($pf === 'manual' ? ['id' => 'manual', 'name' => 'Added by hand'] : null),
             'portfolios' => $this->portfolioList($r)]);
@@ -157,27 +168,28 @@ final class PortfolioReportController extends Controller
                 $pct($g['connected'], $g['calls']), $g['callbacks'], $g['collected']], $by === 'team' ? $data['groups'] : $data['branches']);
         } elseif ($by === 'company') {
             $s = $this->show($r)->getData(true)['summary'];
-            $head = ['Scope', 'Cases', 'Unassigned', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected', 'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams'];
+            $head = ['Scope', 'Cases', 'Unassigned', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected', 'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams', 'Successful outcomes'];
             $rows = [['Company total', $s['cases'], $s['unassigned'], $s['pending_cases'], $s['calls'], $s['connected'], $pct($s['connected'], $s['calls']), $s['not_made'], $s['not_connected_cases'],
-                $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups']]];
+                $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups'], $s['successes']]];
         } elseif ($by === 'employee') {
             $head = ['Employee', 'Employee code', 'Teams', 'Portfolios', 'Cases', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected',
-                'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last call'];
+                'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last call', 'Successful outcomes'];
             $rows = array_map(fn ($e) => [$e['name'], $e['employee_code'], implode(', ', $e['groups']), implode(', ', $e['portfolios']), $e['cases'], $e['pending_cases'],
                 $e['calls'], $e['connected'], $pct($e['connected'], $e['calls']), $e['not_made'], $e['not_connected_cases'], $e['callbacks'], $e['callbacks_overdue'],
-                $e['collected'], $e['verified'], $e['last_activity']], $this->show($r)->getData(true)['employees']);
+                $e['collected'], $e['verified'], $e['last_activity'], $e['successes']], $this->show($r)->getData(true)['employees']);
         } else {
             $head = ['Portfolio', 'Cases', 'Unassigned', 'Pending cases', 'Calls', 'Connected', 'Connect rate', 'Cases not called', 'Called, not connected',
-                'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams'];
-            $line = fn (string $name, array $s) => [$name, $s['cases'], $s['unassigned'], $s['pending_cases'], $s['calls'], $s['connected'], $pct($s['connected'], $s['calls']),
-                $s['not_made'], $s['not_connected_cases'], $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups']];
+                'Callbacks pending', 'Callbacks overdue', 'Payments', 'Collected', 'Verified', 'Employees', 'Teams', 'Successful outcomes', 'Type'];
+            $line = fn (string $name, array $s, string $type = '') => [$name, $s['cases'], $s['unassigned'], $s['pending_cases'], $s['calls'], $s['connected'], $pct($s['connected'], $s['calls']),
+                $s['not_made'], $s['not_connected_cases'], $s['callbacks'], $s['callbacks_overdue'], $s['payments'], $s['collected'], $s['verified'], $s['employees'], $s['groups'], $s['successes'], $type];
             $only = (string) $r->query('portfolio', '');
             $rows = [];
             foreach ($this->portfolioList($r) as $p) {
                 if ($only !== '' && (string) $p['id'] !== $only) continue;
                 $sub = $r->duplicate(['portfolio' => (string) $p['id']] + $r->query());
                 $sub->setUserResolver($r->getUserResolver());
-                $rows[] = $line($p['name'], $this->show($sub)->getData(true)['summary']);
+                $d = $this->show($sub)->getData(true);
+                $rows[] = $line($p['name'], $d['summary'], (string) ($d['labels']['label'] ?? ''));
             }
             if ($only === '' && count($rows) > 1) $rows[] = $line('All portfolios', $this->show($r)->getData(true)['summary']);
         }
@@ -220,6 +232,7 @@ final class PortfolioReportController extends Controller
             $q('from') ? \Illuminate\Support\Carbon::parse($q('from'))->toDateString() : null, $q('to') ? \Illuminate\Support\Carbon::parse($q('to'))->addDay()->toDateString() : null];
         $userId = ctype_digit((string) $q('employee')) ? (int) $q('employee') : null;
         $f = ['team_id' => $q('group'), 'status' => $q('case_status'), 'assigned' => match ($q('assigned')) { 'assigned' => 'any', 'unassigned' => 'none', default => $userId && $ownerFilter ? (string) $userId : null }];
+        $f['portfolio_type'] = $q('type');   // Collections, Courier, Sales…
         $cases = CustomerController::filtered(array_filter($f, fn ($v) => $v !== null), $r->user());
         $pf = $q('portfolio');
         $cases->when($pf === 'manual', fn ($w) => $w->whereNull('last_import_id'))->when(ctype_digit((string) $pf), fn ($w) => $w->where('last_import_id', (int) $pf));
@@ -293,8 +306,10 @@ final class PortfolioReportController extends Controller
     private function portfolioList(Request $r): array
     {
         $names = $this->portfolioNames();
+        $types = ImportJob::query()->pluck('portfolio_type', 'id');
         return CustomerController::filtered([], $r->user())->selectRaw('last_import_id AS pid, COUNT(*) AS n')->groupBy('last_import_id')->get()
-            ->map(fn ($x) => ['id' => $x->pid ?? 'manual', 'name' => $x->pid ? ($names[$x->pid] ?? "Import #{$x->pid}") : 'Added by hand', 'cases' => (int) $x->n])
+            ->map(fn ($x) => ['id' => $x->pid ?? 'manual', 'name' => $x->pid ? ($names[$x->pid] ?? "Import #{$x->pid}") : 'Added by hand', 'cases' => (int) $x->n,
+                'type' => $x->pid ? ($types[$x->pid] ?? \App\Domain\Portfolios\PortfolioTypes::DEFAULT) : \App\Domain\Portfolios\PortfolioTypes::DEFAULT])
             ->sortByDesc(fn ($x) => is_int($x['id']) ? $x['id'] : -1)->values()->all();
     }
 }

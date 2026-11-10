@@ -108,7 +108,7 @@ function Planner({ userId, date, onChanged }: { userId: number; date: string; on
             { key: 'inside', label: 'Circle', render: (c: any) => (c.inside == null ? '—' : <Badge value={c.inside ? 'ok' : 'muted'} label={c.inside ? 'inside' : 'outside'} />) },
             { key: 'due', label: 'Follow-up', render: (c: any) => (c.follow_up_due ? <Badge value="warn" label="due" /> : '') },
             { key: 'visit', label: 'Last visit', render: (c: any) => c.last_visit ?? 'never' },
-            { key: 'od', label: 'Overdue ₹', align: 'right', render: (c: any) => (c.overdue_amount ? Number(c.overdue_amount).toLocaleString('en-IN') : '') },
+            { key: 'od', label: 'Overdue / to collect ₹', align: 'right', render: (c: any) => (c.overdue_amount ? Number(c.overdue_amount).toLocaleString('en-IN') : '') },
             { key: 'from', label: 'From start', align: 'right', render: (c: any) => km(c.from_start_m) },
           ]} />
       </Card>

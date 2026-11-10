@@ -116,18 +116,28 @@ export function CallingConfigPage() {
   const [rows, setRows] = useState<any[] | null>(null);
   const a = useAction();
   const list = rows ?? codes.data ?? [];
+  const types = useAsync(() => get<any[]>('/imports/types'));
+  const [view, setView] = useState('');   // '' = all; 'common' = every type; else one type
+  const shown = list.map((r, i) => ({ ...r, id: i })).filter((r) => !view || (view === 'common' ? !r.portfolio_type : r.portfolio_type === view));
   return (
     <Page title="Call outcome codes" subtitle="The outcomes employees pick after each call. Calling hours, prefixes and recording mode are policy settings (Policy profiles).">
       <ErrorBox error={codes.error ?? a.error} />
-      <Card title="Outcome codes" actions={<button className="secondary" onClick={() => setRows([...list, { code: '', label: '', requires_follow_up: false, active: true, captures: 'none' }])}>Add code</button>}>
-        <Table rows={list.map((r, i) => ({ ...r, id: i }))} columns={[
+      <Card title="Outcome codes" actions={<>
+        <select value={view} onChange={(e) => setView(e.target.value)} aria-label="Show outcomes of"><option value="">All types</option><option value="common">Every type (calling results)</option>
+          {(types.data ?? []).map((t: any) => <option key={t.type} value={t.type}>{t.label}</option>)}</select>
+        <button className="secondary" onClick={() => setRows([...list, { code: '', label: '', requires_follow_up: false, active: true, captures: 'none', success: false, portfolio_type: view && view !== 'common' ? view : null }])}>Add code</button></>}>
+        <p className="muted small" style={{ marginTop: 0 }}>Each portfolio type has its own outcomes (a courier agent sees Delivered, Rescheduled…); calling results such as Busy or Wrong number are for every type. <b>Success</b> outcomes count as a job done in reports.</p>
+        <Table rows={shown} columns={[
           { key: 'code', label: 'Code', render: (r: any) => <input value={r.code} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, code: e.target.value.toUpperCase() } : x))} /> },
           { key: 'label', label: 'Label', render: (r: any) => <input value={r.label} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, label: e.target.value } : x))} /> },
           { key: 'cap', label: 'Asks for', render: (r: any) => <select value={r.captures ?? 'none'} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, captures: e.target.value } : x))}><option value="none">Nothing extra</option><option value="promise">Promised amount</option><option value="payment">Payment + slip</option></select> },
           { key: 'f', label: 'Needs follow-up', render: (r: any) => <input type="checkbox" style={{ width: 'auto' }} checked={!!r.requires_follow_up} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, requires_follow_up: e.target.checked } : x))} /> },
+          { key: 't', label: 'Type', render: (r: any) => <select value={r.portfolio_type ?? ''} aria-label={`Type of ${r.code}`} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, portfolio_type: e.target.value || null } : x))}>
+            <option value="">Every type</option>{(types.data ?? []).map((t: any) => <option key={t.type} value={t.type}>{t.label}</option>)}</select> },
+          { key: 's', label: 'Success', render: (r: any) => <input type="checkbox" style={{ width: 'auto' }} checked={!!r.success} aria-label={`${r.code} counts as success`} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, success: e.target.checked } : x))} /> },
           { key: 'a', label: 'Active', render: (r: any) => <input type="checkbox" style={{ width: 'auto' }} checked={!!r.active} onChange={(e) => setRows(list.map((x, i) => i === r.id ? { ...x, active: e.target.checked } : x))} /> },
         ]} />
-        <button disabled={a.busy || !rows} onClick={() => a.run(async () => { await put('/disposition-codes', { codes: list.map(({ code, label, requires_follow_up, active, captures }) => ({ code, label, requires_follow_up: !!requires_follow_up, active: !!active, captures: captures ?? 'none' })) }); setRows(null); await codes.reload(); })}>Save codes</button>
+        <button disabled={a.busy || !rows} onClick={() => a.run(async () => { await put('/disposition-codes', { codes: list.map(({ code, label, requires_follow_up, active, captures, portfolio_type, success }) => ({ code, label, portfolio_type: portfolio_type ?? null, success: !!success, requires_follow_up: !!requires_follow_up, active: !!active, captures: captures ?? 'none' })) }); setRows(null); await codes.reload(); })}>Save codes</button>
       </Card>
     </Page>
   );
