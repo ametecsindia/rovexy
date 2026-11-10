@@ -113,10 +113,10 @@ final class HierarchyTest extends TestCase
         $this->assertSame(1, $br['Vijayawada']['calls']);
         $this->assertSame('Hyderabad', collect($r->json('groups'))->firstWhere('name', 'H2')['branch']);
         foreach (['branch' => 'Hyderabad', 'team' => 'H2', 'company' => 'Company total', 'employee' => 'E1'] as $by => $needle) {
-            $csv = $this->as('admin')->get("/api/admin/reports/portfolio.csv?by={$by}")->assertOk()->streamedContent();
+            $csv = $this->as('admin')->get("/api/admin/reports/portfolio.csv?format=csv&by={$by}")->assertOk()->streamedContent();
             $this->assertStringContainsString($needle, $csv, $by);
         }
-        $vij = $this->as('admin')->get("/api/admin/reports/portfolio.csv?by=branch&org_team={$this->t['v1']->id}")->streamedContent();
+        $vij = $this->as('admin')->get("/api/admin/reports/portfolio.csv?format=csv&by=branch&org_team={$this->t['v1']->id}")->streamedContent();
         $this->assertStringNotContainsString('Hyderabad', $vij);
     }
 

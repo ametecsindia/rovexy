@@ -1203,20 +1203,20 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(['PAID', 1000.0, 1, 'Axis Q3'], [$p1['last_outcome'], (float) $p1['collected'], $p1['calls'], $p1['portfolio']]);
         $this->admin('bravo')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}")->assertJsonPath('summary.cases', 0);   // other company
         // Exports: portfolio-wise (one row per portfolio + total), employee-wise, call-by-call with portfolio / employee filters.
-        $pw = array_map('str_getcsv', explode("\n", trim($this->admin('alpha')->get('/api/admin/reports/portfolio.csv?by=portfolio')->assertOk()->streamedContent())));
+        $pw = array_map('str_getcsv', explode("\n", trim($this->admin('alpha')->get('/api/admin/reports/portfolio.csv?format=csv&by=portfolio')->assertOk()->streamedContent())));
         $axis = collect($pw)->firstWhere(0, 'Axis Q3');
         $this->assertSame(['Axis Q3', '4', '1', '4', '3', '1', '33%'], array_slice($axis, 0, 7));
         $this->assertSame('All portfolios', end($pw)[0]);
         $this->assertSame((int) end($pw)[1], collect($pw)->slice(1, -1)->sum(fn ($x) => (int) $x[1]));   // total = sum of portfolios
-        $only = $this->admin('alpha')->get("/api/admin/reports/portfolio.csv?by=portfolio&portfolio={$job['id']}")->streamedContent();
+        $only = $this->admin('alpha')->get("/api/admin/reports/portfolio.csv?format=csv&by=portfolio&portfolio={$job['id']}")->streamedContent();
         $this->assertSame(2, count(explode("\n", trim($only))));
-        $ew = $this->admin('alpha')->get("/api/admin/reports/portfolio.csv?by=employee&portfolio={$job['id']}")->assertOk()->streamedContent();
+        $ew = $this->admin('alpha')->get("/api/admin/reports/portfolio.csv?format=csv&by=employee&portfolio={$job['id']}")->assertOk()->streamedContent();
         $this->assertStringContainsString(',EMP1,', $ew);
-        $calls = fn (string $extra) => count(explode("\n", trim($this->admin('alpha')->get('/api/admin/reports/calls.csv?from=2020-01-01&to=' . now()->addDay()->toDateString() . $extra)->assertOk()->streamedContent()))) - 1;
+        $calls = fn (string $extra) => count(explode("\n", trim($this->admin('alpha')->get('/api/admin/reports/calls.csv?format=csv&from=2020-01-01&to=' . now()->addDay()->toDateString() . $extra)->assertOk()->streamedContent()))) - 1;
         $this->assertSame(3, $calls("&portfolio={$job['id']}"));
         $this->assertSame(0, $calls('&portfolio=manual'));
         $this->assertSame(3, $calls("&portfolio={$job['id']}&employee=" . $this->users['alpha']['emp']->id));
-        $this->assertStringContainsString('Axis Q3', $this->admin('alpha')->get("/api/admin/reports/calls.csv?from=2020-01-01&to=" . now()->addDay()->toDateString() . "&portfolio={$job['id']}")->streamedContent());
+        $this->assertStringContainsString('Axis Q3', $this->admin('alpha')->get("/api/admin/reports/calls.csv?format=csv&from=2020-01-01&to=" . now()->addDay()->toDateString() . "&portfolio={$job['id']}")->streamedContent());
         // A promise (amount, no payment mode) is not a payment in the payments export.
         $m->work('POST', "/api/mobile/v1/calls/{$call('P3', 30)}/disposition", ['code' => 'CONNECTED_PTP', 'amount' => 500, 'follow_up_at' => now()->addDay()->toAtomString()])->assertOk();
         $this->assertSame(1000.0, (float) $this->admin('alpha')->getJson("/api/admin/reports/portfolio?portfolio={$job['id']}")->json('summary.collected'));

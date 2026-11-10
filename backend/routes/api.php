@@ -402,6 +402,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::post('integrations/flush', [Admin\IntegrationController::class, 'flush'])->middleware('perm:telephony.configure');
         Route::get('reports/calls.csv', [Admin\SettingsController::class, 'exportCalls'])->middleware('perm:reports.export');
         // G21: more exports + the audit pack (ZIP with recordings, slips and SHA-256 manifest)
+        Route::post('reports/table.xlsx', [Admin\ExportController::class, 'table'])->middleware(['perm:reports.export', 'throttle:30,1']);
         Route::get('reports/export/{kind}.csv', [Admin\ExportController::class, 'csv'])->whereIn('kind', \App\Services\ExportService::KINDS)->middleware(['perm:reports.export', 'throttle:30,1']);
         Route::get('reports/audit-pack.zip', [Admin\ExportController::class, 'pack'])->middleware(['perm:reports.export', 'throttle:6,1']);
         // Reports → Recording export (bulk ZIP); Customers → Recording file names (named formats; each portfolio picks one).

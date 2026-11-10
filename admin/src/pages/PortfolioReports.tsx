@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveReload } from '../lib/live';
 import { Link } from 'react-router-dom';
-import { get, fileUrl, fmtDate, qs, saveBlob } from '../lib/api';
+import { get, fileUrl, fmtDate, qs, download } from '../lib/api';
 import { RANGES, rangeName } from '../lib/periods';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Kpi, Modal, Notice, Page, Table, useAsync } from '../components/ui';
@@ -9,9 +9,9 @@ import { Badge, Card, ErrorBox, Kpi, Modal, Notice, Page, Table, useAsync } from
 const inr = (v: number) => `₹ ${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 const pct = (a: number, b: number) => (b ? Math.round((a / b) * 100) : 0);
 const EMPTY = { portfolio: '', group: '', employee: '', assigned: '', call_status: '', collection: '', callback: '', case_status: '', from: '', to: '' };
-const csvCell = (v: unknown) => /[",\n]/.test(String(v ?? '')) ? `"${String(v).replace(/"/g, '""')}"` : String(v ?? '');
-function downloadCsv(name: string, header: string[], rows: unknown[][]) {
-  void saveBlob(new Blob(['\uFEFF' + [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\n') + '\n'], { type: 'text/csv' }), name);
+/** A table on screen as a formatted Excel file (built on the server: column widths, dates, numbers). */
+function downloadExcel(name: string, head: string[], rows: unknown[][]) {
+  return download('/reports/table.xlsx', { name, head, rows });
 }
 const short = (iso: string | null | undefined, tz?: string) => iso ? new Date(iso).toLocaleString('en-IN', { timeZone: tz, day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '—';
 
@@ -161,7 +161,7 @@ export function PortfolioReportsPage() {
       )}
 
       {d && (d.branches ?? []).some((b: any) => b.branch_id) && (
-        <Card title="By branch" actions={<a className="button ghost" href={csv('branch')}>Export CSV</a>}>
+        <Card title="By branch" actions={<a className="button ghost" href={csv('branch')}>Export Excel</a>}>
           <Table rows={d.branches.map((g: any, i: number) => ({ ...g, id: i }))} empty="No cases." columns={[
             { key: 'name', label: 'Branch' }, { key: 'teams', label: 'Teams', align: 'right' }, { key: 'cases', label: 'Cases', align: 'right' }, { key: 'unassigned', label: 'Unassigned', align: 'right' },
             { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
@@ -172,7 +172,7 @@ export function PortfolioReportsPage() {
       )}
 
       {d && (
-        <Card title="By team" actions={<a className="button ghost" href={csv('team')}>Export CSV</a>}>
+        <Card title="By team" actions={<a className="button ghost" href={csv('team')}>Export Excel</a>}>
           <Table rows={d.groups.map((g: any, i: number) => ({ ...g, id: i }))} empty="No cases." columns={[
             { key: 'name', label: 'Team' }, { key: 'branch', label: 'Branch', render: (g: any) => g.branch ?? '—' }, { key: 'cases', label: 'Cases', align: 'right' }, { key: 'unassigned', label: 'Unassigned', align: 'right' },
             { key: 'employees', label: 'Employees', align: 'right' }, { key: 'calls', label: 'Calls', align: 'right' },
@@ -185,7 +185,7 @@ export function PortfolioReportsPage() {
       {d && (
         <Card title={`Employees (${employees.length})`} actions={<>
           <input placeholder="Search employee" value={q} onChange={(e) => setQ(e.target.value)} style={{ maxWidth: 200 }} />
-          <button className="ghost" onClick={() => downloadCsv('employee-performance.csv', ['Employee', 'User ID', 'Team', 'Portfolio', 'Assigned cases', 'Reached', 'Called not reached', 'Not called', 'Calls', 'Calls answered', 'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last activity'],
+          <button className="ghost" onClick={() => void downloadExcel('employee-performance', ['Employee', 'User ID', 'Team', 'Portfolio', 'Assigned cases', 'Reached', 'Called not reached', 'Not called', 'Calls', 'Calls answered', 'Callbacks pending', 'Callbacks overdue', 'Collected', 'Verified', 'Last activity'],
             employees.map((e) => [e.name, e.employee_code, e.groups.join(' / '), e.portfolios.join(' / '), e.cases, e.reached_cases, e.not_connected_cases, e.not_made, e.calls, e.connected, e.callbacks, e.callbacks_overdue, e.collected, e.verified, e.last_activity ?? '']))}>Export CSV</button></>}>
           <p className="muted" style={{ marginTop: 0 }}>Case columns add up: <strong>Assigned = Reached + Called, not reached + Not called</strong>. "Calls answered" counts calls, not cases (one case can be called many times). Collected = payments recorded, excluding rejected slips. Click an employee for their cases.</p>
           <div className="table-wrap"><table>
@@ -253,7 +253,7 @@ function CasesCard({ filter, title }: { filter: Record<string, string>; title: s
     try {
       const rows: any[] = [];
       for (let p = 1; p <= 200; p++) { const r = await get(`/reports/portfolio/cases${qs({ ...filter, page: p, sort })}`); rows.push(...r.data); if (p >= r.last_page) break; }
-      downloadCsv('cases.csv', ['Customer ID', 'Name', 'Portfolio', 'Group', 'Employee', 'Status', 'City', 'Calls', 'Connected', 'Last call', 'Last outcome', 'Callback due', 'Collected'],
+      await downloadExcel('cases', ['Customer ID', 'Name', 'Portfolio', 'Group', 'Employee', 'Status', 'City', 'Calls', 'Connected', 'Last call', 'Last outcome', 'Callback due', 'Collected'],
         rows.map((x) => [x.customer_ref, x.name, x.portfolio, x.group, x.employee, x.status, x.city, x.calls, x.connected, x.last_call_at, x.last_outcome, x.callback_due, x.collected]));
     } finally { setExporting(false); }
   };
@@ -261,7 +261,7 @@ function CasesCard({ filter, title }: { filter: Record<string, string>; title: s
   return (
     <Card title={`${title}${d ? ` (${d.total})` : ''}`} actions={<>
       <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort"><option value="id">Sort: oldest first</option><option value="name">Name</option><option value="calls_count">Most calls</option><option value="last_call_at">Last call</option><option value="collected">Most collected</option></select>
-      <button className="ghost" disabled={exporting || !d?.total} onClick={exportAll}>{exporting ? 'Exporting…' : 'Export CSV'}</button></>}>
+      <button className="ghost" disabled={exporting || !d?.total} onClick={exportAll}>{exporting ? 'Exporting…' : 'Export Excel'}</button></>}>
       <ErrorBox error={c.error} />
       <Table rows={d?.data} empty="No cases match." columns={[
         { key: 'customer_ref', label: 'Customer', render: (x: any) => <><Link to={`/customers/${x.id}`} className="nowrap">{x.name}</Link><br /><small className="muted">{x.customer_ref}</small></> },

@@ -71,11 +71,8 @@ final class ExportService
             $manifest[] = [$name, strlen($data), hash('sha256', $data)];
         };
         foreach (self::KINDS as $kind) {
-            $h = fopen('php://temp', 'w+');
-            $this->csv($kind, $h);
-            rewind($h);
-            $add("{$kind}.csv", (string) stream_get_contents($h));
-            fclose($h);
+            [$head, $rows] = $this->table($kind);
+            $add("{$kind}.xlsx", \App\Support\Excel::bytes($kind, $head, $rows));
         }
         $files = 0;
         $skipped = 0;

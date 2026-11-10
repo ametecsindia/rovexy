@@ -649,10 +649,10 @@ function Orders({ can }: { can: boolean }) {
   const [csv, setCsv] = useState(() => { const t = new Date(); const fy = t.getMonth() >= 3 ? t.getFullYear() : t.getFullYear() - 1; return { from: `${fy}-04-01`, to: t.toISOString().slice(0, 10) }; });
   return (
     <Page title="Orders & payments" subtitle="Website purchases, renewals, more users, AMC and on-premises licences. Orders on an existing licence are raised from Licences → the licence."
-      actions={<form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); void csvA.run(async () => { await download(`/orders.csv${qs(csv)}`); toast('Invoices CSV downloaded'); }); }}>
+      actions={<form className="row" style={{ gap: 6 }} onSubmit={(e) => { e.preventDefault(); void csvA.run(async () => { await download(`/orders.csv${qs(csv)}`); toast('Invoices downloaded (Excel)'); }); }}>
         <input type="date" value={csv.from} onChange={(e) => setCsv({ ...csv, from: e.target.value })} aria-label="From" required />
         <input type="date" value={csv.to} onChange={(e) => setCsv({ ...csv, to: e.target.value })} aria-label="To" required />
-        <button className="secondary" type="submit" disabled={csvA.busy}>Invoices CSV</button></form>}>
+        <button className="secondary" type="submit" disabled={csvA.busy}>Invoices (Excel)</button></form>}>
       <ErrorBox error={list.error ?? a.error ?? csvA.error} />
       <Card>
         <div className="filters filter-bar">

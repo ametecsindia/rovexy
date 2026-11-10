@@ -143,12 +143,13 @@ final class Phase34Test extends TestCase
             \App\Models\CallDisposition::query()->create(['call_id' => $call->id, 'user_id' => $emp->id, 'code' => 'PAID', 'submitted_at' => now(), 'amount' => 5000, 'payment_mode' => 'upi', 'paid_on' => now()->toDateString()]);
         });
         $q = '?from=' . now()->subDay()->toDateString() . '&to=' . now()->toDateString();
-        $visits = $this->as('admin')->get("/api/admin/reports/export/visits.csv{$q}")->assertOk()->streamedContent();
+        $visits = $this->as('admin')->get("/api/admin/reports/export/visits.csv{$q}&format=csv")->assertOk()->streamedContent();
         $this->assertStringContainsString('E1', $visits);
         $this->assertStringContainsString(',12,5,', $visits);
-        $cust = $this->as('admin')->get("/api/admin/reports/export/customers.csv{$q}")->assertOk()->streamedContent();
+        $cust = $this->as('admin')->get("/api/admin/reports/export/customers.csv{$q}&format=csv")->assertOk()->streamedContent();
         $this->assertStringContainsString("'=HYPERLINK", $cust);   // spreadsheet formula injection neutralised
-        $this->as('admin')->get("/api/admin/reports/export/payments.csv{$q}")->assertOk();
+        $xlsx = $this->as('admin')->get("/api/admin/reports/export/payments.csv{$q}")->assertOk();   // Excel by default
+        $this->assertStringEndsWith('.xlsx', $xlsx->baseResponse->getFile()->getFilename() ? $xlsx->headers->get('content-disposition') : '');
         $this->as('admin')->get("/api/admin/reports/export/nope.csv{$q}")->assertNotFound();
 
         $res = $this->as('admin')->get("/api/admin/reports/audit-pack.zip{$q}")->assertOk();
@@ -156,7 +157,7 @@ final class Phase34Test extends TestCase
         $zip = new \ZipArchive();
         $this->assertTrue($zip->open($file));
         $names = array_map(fn ($i) => $zip->getNameIndex($i), range(0, $zip->numFiles - 1));
-        foreach (['customers.csv', 'calls.csv', 'visits.csv', 'payments.csv', 'follow-ups.csv', 'audit.csv', 'README.txt', 'MANIFEST.csv'] as $n) {
+        foreach (['customers.xlsx', 'calls.xlsx', 'visits.xlsx', 'payments.xlsx', 'follow-ups.xlsx', 'audit.xlsx', 'README.txt', 'MANIFEST.csv'] as $n) {
             $this->assertContains($n, $names);
         }
         $rec = collect($names)->first(fn ($n) => str_starts_with($n, 'recordings/'));

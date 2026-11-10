@@ -17,11 +17,18 @@ final class ExportController extends Controller
         $f = $this->filters($r);
         Audit::record('report.exported', null, ['kind' => $kind] + $f);
         $svc = new ExportService($r->user(), $f);
-        return response()->streamDownload(function () use ($svc, $kind) {
-            $out = fopen('php://output', 'w');
-            $svc->csv($kind, $out);
-            fclose($out);
-        }, "{$kind}-{$f['from']}-to-{$f['to']}.csv", ['Content-Type' => 'text/csv']);
+        [$head, $rows] = $svc->table($kind);
+        return \App\Support\Excel::download("{$kind}-{$f['from']}-to-{$f['to']}", $head, $rows);
+    }
+
+    /** POST reports/table.xlsx — a table already on screen (employee performance, cases) as the same formatted Excel file. */
+    public function table(Request $r)
+    {
+        $d = $r->validate(['name' => 'required|string|max:80', 'head' => 'required|array|max:60', 'head.*' => 'nullable|string|max:120',
+            'rows' => 'present|array|max:20000', 'rows.*' => 'array|max:60']);
+        Audit::record('report.exported', null, ['kind' => 'table', 'name' => $d['name'], 'rows' => count($d['rows'])]);
+        $rows = array_map(fn ($row) => array_map(fn ($v) => is_scalar($v) || $v === null ? $v : null, $row), $d['rows']);
+        return \App\Support\Excel::download(preg_replace('/[^A-Za-z0-9._-]+/', '-', $d['name']), array_map('strval', $d['head']), $rows);
     }
 
     public function pack(Request $r)
