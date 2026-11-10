@@ -9,8 +9,10 @@ export class ApiError extends Error {
 
 // The company's workspace: from the address /w/<slug>/admin, else the build setting (on-premises builds).
 const pathWorkspace = /^\/w\/([a-z0-9][a-z0-9-]{1,38}[a-z0-9])\/admin(?:\/|$)/.exec(location.pathname)?.[1];
-const workspace = pathWorkspace ?? (import.meta.env.VITE_WORKSPACE as string | undefined) ?? undefined;
+let workspace = pathWorkspace ?? (import.meta.env.VITE_WORKSPACE as string | undefined) ?? undefined;
 export const currentWorkspace = (): string | undefined => workspace;
+/** Sign-in found the workspace from the email (address had none). */
+export const setWorkspace = (slug: string): void => { workspace = slug; };
 /** A download link (<a href>) for an API path: adds ?workspace= because links can't send the X-Workspace header. */
 export const fileUrl = (path: string): string => { const p = withOrg(path, path.startsWith('/api/admin')); return workspace ? `${p}${p.includes('?') ? '&' : '?'}workspace=${encodeURIComponent(workspace)}` : p; };
 

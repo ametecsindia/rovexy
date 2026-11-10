@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
 import QRCode from 'qrcode';
-import { currentWorkspace, nativeApp, post } from '../lib/api';
+import { ApiError, currentWorkspace, nativeApp, post, setWorkspace } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { ErrorBox, Field, useAction } from '../components/ui';
 
@@ -103,8 +103,17 @@ export function LoginPage() {
   const submitPassword = (e: FormEvent) => {
     e.preventDefault();
     void a.run(async () => {
-      const r = await post<{ mfa: 'verify' | 'enrol' | 'none' }>('/auth/login', { email, password });
+      let found: string | null = null;
+      const login = () => post<{ mfa: 'verify' | 'enrol' | 'none' }>('/auth/login', { email, password });
+      const r = await login().catch(async (err) => {
+        // No workspace in the address (rovexy.app/admin, or the Admin app with the workspace box empty): find it from the account.
+        if (currentWorkspace() || !(err instanceof ApiError) || err.code !== 'company_unresolved') throw err;
+        found = (await post<{ workspace: string }>('/auth/find-workspace', { email, password })).workspace;
+        setWorkspace(found);
+        return login();
+      });
       setPassword('');
+      if (found && r.mfa === 'none') { location.replace(`/w/${found}/admin/`); return; } // reopen at the workspace's own address
       if (r.mfa === 'none') return refresh(); // authenticator step switched off on the server
       if (r.mfa === 'enrol') {
         const s = await post<{ secret: string; otpauth_uri: string }>('/auth/mfa/setup');

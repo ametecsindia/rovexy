@@ -40,6 +40,33 @@ final class AuthController extends Controller
         return response()->json(['mfa' => $user->mfa_enabled_at ? 'verify' : 'enrol']);
     }
 
+    /**
+     * Sign-in on rovexy.app with no workspace in the address (e.g. the Admin app with the workspace box left empty):
+     * the right email + password tells which workspace it is. Only answers for a correct password, so it never
+     * reveals which emails exist. Signs nobody in — the console then signs in normally inside that workspace.
+     */
+    public function findWorkspace(Request $r)
+    {
+        $data = $r->validate(['email' => 'required|email|max:190', 'password' => 'required|string|max:200']);
+        $ctx = app(\App\Support\CurrentCompany::class);
+        $users = $ctx->withoutScope(fn () => User::query()->where('email', strtolower($data['email']))->get());
+        $slugs = [];
+        foreach ($users as $u) {
+            $c = \App\Models\Company::query()->whereKey($u->company_id)->where('status', 'active')->first();
+            if ($c && Hash::check($data['password'], (string) $u->password) && $ctx->run($c, fn () => $u->isActive() && $u->isAdminUser())) {
+                $slugs[] = $c->slug;
+            }
+        }
+        if (count($slugs) !== 1) {
+            Hash::check($data['password'], '$2y$12$toXeR8UVhISFlgJi7YZfQ.yBvmaMJCYf2mhgfvO19HZEYqRmZ4dWm');   // same timing either way
+            Audit::record('admin.login_failed', null, ['email' => $data['email'], 'workspace' => 'none'], ['type' => 'system', 'id' => null]);
+            return $slugs
+                ? response()->json(['error' => 'workspace_needed', 'message' => 'This email works in more than one company. Enter the company workspace.'], 422)
+                : response()->json(['error' => 'invalid_credentials'], 422);
+        }
+        return response()->json(['workspace' => $slugs[0]]);
+    }
+
     public function mfaSetup(Request $r)
     {
         $user = $r->user();
