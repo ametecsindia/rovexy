@@ -154,6 +154,11 @@ final class EmployeeActivityTest extends TestCase
         $x = $this->as($this->u['admin'])->get("/api/admin/activity/export?kind=employee&format=xlsx&user_id={$emp->id}&from=2026-11-09&to=2026-11-09")->assertOk();
         $this->assertStringContainsString('spreadsheetml', (string) $x->headers->get('Content-Type'));
         $this->as($this->u['admin'])->get("/api/admin/activity/export?kind=team&format=xlsx&from=2026-11-01&to=2026-11-09")->assertOk();
+        // Login / logout sit next to the employee ID and name (team sheet) and lead the employee summary.
+        $teamPdf = $this->as($this->u['admin'])->get('/api/admin/activity/export?kind=team&format=pdf&from=2026-11-09&to=2026-11-09')->assertOk();
+        $teamPdf->assertSeeInOrder(['Code', 'Employee', 'Login', 'Logout', 'Days worked'])->assertSeeInOrder(['FOS1', '09:12', '17:48']);
+        $this->as($this->u['admin'])->get("/api/admin/activity/export?kind=employee&format=pdf&user_id={$emp->id}&from=2026-11-09&to=2026-11-09")
+            ->assertSeeInOrder(['Employee ID', 'FOS1', 'Employee name', 'Login time', '09:12', 'Logout time', '17:48', 'Scheduled working days']);
         $this->as($this->u['admin'])->get("/api/admin/activity/export?kind=employee&format=pdf&user_id={$emp->id}&from=2026-11-09&to=2026-11-09")
             ->assertOk()->assertSee('Employee activity — FOS1')->assertSee('Timeline')->assertSee('Save as PDF');
 

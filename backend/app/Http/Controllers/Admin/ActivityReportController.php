@@ -94,7 +94,7 @@ final class ActivityReportController extends Controller
             $rows = $this->ensure($u, $from, $to);
             $t = $this->totals($r, $rows, $from, $to);
             $title = "Employee activity — {$u->name} ({$u->employee_code})";
-            $sheets['Summary'] = [['Measure', 'Value'], ...$this->summaryLines($t, $hms)];
+            $sheets['Summary'] = [['Measure', 'Value'], ['Employee ID', $u->employee_code], ['Employee name', $u->name], ...$this->summaryLines($t, $hms)];
             $sheets['Daily'] = [self::DAILY_HEAD, ...$rows->map(fn ($a) => $this->dailyLine($r, $a, $hms, $time))->all()];
             if ($from === $to) {
                 $day = $this->builder->build($u, $from);
@@ -109,10 +109,10 @@ final class ActivityReportController extends Controller
             $rows = DailyActivity::query()->whereIn('user_id', $users->pluck('id'))->whereBetween('work_date', [$from, $to])->orderBy('work_date')->get()->groupBy('user_id');
             $title = 'Team activity';
             $avg = $from === $to ? '' : 'Avg ';
-            $sheets['Team'] = [['Code', 'Employee', 'Days worked', 'Attendance %', 'Late days', "{$avg}Login", "{$avg}Logout", 'Worked', 'Productive', 'Productivity %', 'Idle', 'Break', 'Travel', 'Offline', 'Distance km', 'Calls', 'Connected', 'Visits'],
+            $sheets['Team'] = [['Code', 'Employee', "{$avg}Login", "{$avg}Logout", 'Days worked', 'Attendance %', 'Late days', 'Worked', 'Productive', 'Productivity %', 'Idle', 'Break', 'Travel', 'Offline', 'Distance km', 'Calls', 'Connected', 'Visits'],
                 ...$users->map(function (User $u) use ($r, $rows, $from, $to, $hms) {
                     $t = $this->totals($r, $rows[$u->id] ?? collect(), $from, $to);
-                    return [$u->employee_code, $u->name, $t['days_worked'], $t['attendance_pct'], $t['late_days'], $t['login'] ?? '', $t['logout'] ?? '', $hms($t['worked_s']), $hms($t['productive_s']),
+                    return [$u->employee_code, $u->name, $t['login'] ?? '', $t['logout'] ?? '', $t['days_worked'], $t['attendance_pct'], $t['late_days'], $hms($t['worked_s']), $hms($t['productive_s']),
                         $t['productivity_pct'], $hms($t['idle_s']), $hms($t['break_s']), $hms($t['travel_s']), $hms($t['offline_s']),
                         $t['distance_m'] === null ? '' : round($t['distance_m'] / 1000, 1), $t['calls'], $t['connected'], $t['visits']];
                 })->all()];
@@ -197,9 +197,9 @@ final class ActivityReportController extends Controller
     private function summaryLines(array $t, callable $hms): array
     {
         return [
+            [$t['login_avg'] ? 'Average login time' : 'Login time', $t['login'] ?? ''], [$t['login_avg'] ? 'Average logout time' : 'Logout time', $t['logout'] ?? ''],
             ['Scheduled working days', $t['scheduled_days']], ['Days worked', $t['days_worked']], ['Attendance %', $t['attendance_pct']],
             ['Present / half day / short / absent', "{$t['present']} / {$t['half_day']} / {$t['short']} / {$t['absent']}"],
-            [$t['login_avg'] ? 'Average login time' : 'Login time', $t['login'] ?? ''], [$t['login_avg'] ? 'Average logout time' : 'Logout time', $t['logout'] ?? ''],
             ['Late arrivals (days)', $t['late_days']], ['Early departures (days)', $t['early_days']],
             ['Signed in', $hms($t['signed_in_s'])], ['Worked (signed in − break − offline)', $hms($t['worked_s'])], ['Productive', $hms($t['productive_s'])],
             ['Productivity %', $t['productivity_pct']], ['Active work', $hms($t['active_s'])], ['At customers', $hms($t['customer_s'])],
