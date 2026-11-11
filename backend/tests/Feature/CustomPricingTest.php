@@ -29,6 +29,7 @@ final class CustomPricingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        \App\Services\Platform\PlatformSettings::set('cloud_setup_base', '0'); \App\Services\Platform\PlatformSettings::set('cloud_setup_per_extra', '0');   // these check subscription prices; the Cloud setup fee is tested in CloudPricingTest / OnPremLicensingTest
         foreach (['alpha', 'beta'] as $slug) {
             $c = Company::query()->create(['slug' => $slug, 'name' => ucfirst($slug), 'timezone' => 'UTC', 'default_country' => 'IN']);
             app(CurrentCompany::class)->run($c, function () use ($c, $slug) {

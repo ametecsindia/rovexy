@@ -10,6 +10,9 @@
   $addon = fn (string $sfx) => ($cloud['cloud-ametecs' . $sfx] ?? null) && $am ? $first($cloud['cloud-ametecs' . $sfx]) - $first($am) : null;
   $c2c = $addon('-c2c'); $s31 = $addon('-c2c-smart31');
   $inr = fn ($v) => '₹' . number_format((float) $v);
+  $ps = fn ($k) => \App\Services\Platform\PlatformSettings::get($k);
+  $setupNote = (float) $ps('cloud_setup_base') > 0 ? 'One-time setup & onboarding on the first order: ' . $inr($ps('cloud_setup_base')) . ' for up to ' . (int) $ps('cloud_setup_included_users') . ' users'
+      . ((float) $ps('cloud_setup_per_extra') > 0 ? ', plus ' . $inr($ps('cloud_setup_per_extra')) . ' for each user above that' : '') . '; GST extra.' : null;
 @endphp
 @if($am && $ow)
 <style>
@@ -54,6 +57,7 @@
         </tbody>
       </table>
       <p class="fine">Minimum {{ $am->min_users }} users. Monthly rates, paid quarterly in advance; GST extra; no automatic annual discount. Google Maps use is under the approved service terms and fair-use limits — not unlimited.</p>
+      @if($setupNote)<p class="fine">{{ $setupNote }}</p>@endif
     </label>
     <label class="cp-card">
       <input type="radio" name="cmaps" value="own">
@@ -68,6 +72,7 @@
         <li>You pay Google Maps consumption charges directly to Google</li>
       </ul>
       <p class="fine"><b>Google Maps API consumption charges are not included in the ROVEXY subscription and are billed separately by Google.</b></p>
+      @if($setupNote)<p class="fine">{{ $setupNote }}</p>@endif
     </label>
   </div>
 
@@ -96,7 +101,7 @@
         <tr><td id="cs-addl">Calling add-on (quarterly)</td><td id="cs-addon">—</td></tr>
         <tr id="cs-setup-row" hidden><td>Setup &amp; onboarding (first order)</td><td id="cs-setup">—</td></tr>
         <tr><td>GST <span id="cs-gstp">{{ rtrim(rtrim(number_format($gstRate, 2), '0'), '.') }}%</span></td><td id="cs-gst">—</td></tr>
-        <tr class="tot"><td>Total payable each quarter</td><td id="cs-total">—</td></tr>
+        <tr class="tot"><td id="cs-totl">Total payable each quarter</td><td id="cs-total">—</td></tr>
       </table>
       <p class="muted" id="cs-msg" style="margin:10px 0 0"></p>
       <a class="btn gold cta" id="cs-go" href="/buy">Get started</a>
@@ -113,7 +118,7 @@
   var min = +users.min;
   function blank(msg, contact) {
     ['cs-rate', 'cs-month', 'cs-quarter', 'cs-addon', 'cs-gst', 'cs-total'].forEach(function (id) { $(id).textContent = '—'; });
-    $('cs-setup-row').hidden = true; $('cs-msg').textContent = msg;
+    $('cs-setup-row').hidden = true; $('cs-totl').textContent = 'Total payable each quarter'; $('cs-msg').textContent = msg;
     $('cs-go').textContent = contact ? 'Contact sales' : 'Get started'; $('cs-go').href = contact ? '#contact' : '/buy';
   }
   function calc() {
@@ -135,7 +140,8 @@
         $('cs-addon').textContent = add ? inr(j.addon_quarter) : '—';
         $('cs-setup-row').hidden = !setup; $('cs-setup').textContent = inr(setup);
         $('cs-gst').textContent = inr(j.cgst + j.sgst + j.igst); $('cs-total').textContent = inr(j.total);
-        $('cs-msg').textContent = 'Before GST: ' + inr(j.amount) + ' a quarter. ' + (maps === 'own' ? 'Google Maps API charges are billed separately by Google.' : 'Google Maps via Ametecs under the service terms.');
+        $('cs-totl').textContent = setup ? 'Total for the first quarter' : 'Total payable each quarter';
+        $('cs-msg').textContent = (setup ? 'Includes the one-time setup & onboarding. From the second quarter: ' + inr(j.amount - setup) + ' + GST. ' : 'Before GST: ' + inr(j.amount) + ' a quarter. ') + (maps === 'own' ? 'Google Maps API charges are billed separately by Google.' : 'Google Maps via Ametecs under the service terms.');
         $('cs-go').textContent = 'Get started'; $('cs-go').href = '/buy?plan=' + code + '&users=' + n;
       }).catch(function () { if (my === seq) blank('Could not work out the price right now. Please try again.', false); });
   }

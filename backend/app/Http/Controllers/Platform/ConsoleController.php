@@ -624,7 +624,7 @@ final class ConsoleController extends Controller
             'site_announcement' => 'nullable|string|max:200', 'site_hero_title' => 'nullable|string|max:120', 'site_hero_text' => 'nullable|string|max:400',
             'site_meta_description' => 'nullable|string|max:300', 'reminders_enabled' => 'in:0,1', 'trial_verify_email' => 'in:0,1', 'staff_mfa_required' => 'in:0,1',
             'price_annual_discount_pct' => 'numeric|min:0|max:60', 'price_half_yearly_discount_pct' => 'numeric|min:0|max:60', 'setup_base' => 'numeric|min:0|max:10000000',
-            'setup_included_users' => 'integer|min:0|max:100000', 'setup_per_extra' => 'numeric|min:0|max:100000', 'setup_on_cloud' => 'in:0,1', 'amc_pct' => 'numeric|min:0|max:100',
+            'setup_included_users' => 'integer|min:0|max:100000', 'setup_per_extra' => 'numeric|min:0|max:100000', 'cloud_setup_base' => 'numeric|min:0|max:10000000', 'cloud_setup_included_users' => 'integer|min:0|max:100000', 'cloud_setup_per_extra' => 'numeric|min:0|max:100000', 'amc_pct' => 'numeric|min:0|max:100',
             'quote_validity_days' => 'integer|min:1|max:90', 'price_c2c_user' => 'numeric|min:0|max:100000', 'price_smart31_user' => 'numeric|min:0|max:100000', 'deposit_per_fos' => 'numeric|min:0|max:1000000',
             'clear_secrets' => 'array', 'clear_secrets.*' => Rule::in(PlatformSettings::SECRETS),
             'mail_host' => ['nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9.-]+$/'], 'mail_port' => 'nullable|integer|min:1|max:65535', 'mail_encryption' => 'in:tls,ssl,none',

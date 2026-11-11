@@ -14,6 +14,21 @@ final class CloudPricingTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        \App\Services\Platform\PlatformSettings::set('cloud_setup_base', '0'); \App\Services\Platform\PlatformSettings::set('cloud_setup_per_extra', '0');   // these check subscription prices; the Cloud setup fee is tested in CloudPricingTest / OnPremLicensingTest
+    }
+
+    public function test_first_cloud_order_carries_setup_and_onboarding(): void
+    {
+        \App\Services\Platform\PlatformSettings::set('cloud_setup_base', '2500');
+        \App\Services\Platform\PlatformSettings::set('cloud_setup_per_extra', '100');
+        $setup = fn (int $n) => collect($this->check('cloud-ametecs', $n)->assertOk()->json('lines'))->firstWhere('type', 'setup')['amount'] ?? null;
+        $this->assertEquals([2500, 2500, 3500], [$setup(10), $setup(25), $setup(35)]);   // ₹2,500 up to 25 users + ₹100 per extra user
+        $this->get('/')->assertSee('One-time setup &amp; onboarding on the first order: ₹2,500 for up to 25 users, plus ₹100 for each user above that', false);
+    }
+
     private function check(string $plan, int $users, string $dep = 'cloud', string $billing = 'quarterly')
     {
         return $this->postJson('/price-check', ['plan' => $plan, 'users' => $users, 'deployment' => $dep, 'billing' => $billing]);

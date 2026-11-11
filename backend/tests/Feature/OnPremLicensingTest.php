@@ -72,15 +72,16 @@ final class OnPremLicensingTest extends TestCase
         $this->assertNull(Pricing::perpetualPrice($p, 501));
         $this->assertSame(5000.0, Pricing::setupFee(20));
         $this->assertSame(5500.0, Pricing::setupFee(30));                                  // ₹100 per user above 25
+        $this->assertSame([2500.0, 2500.0, 3500.0], [Pricing::setupFee(5, 'cloud'), Pricing::setupFee(25, 'cloud'), Pricing::setupFee(35, 'cloud')]);   // Cloud: ₹2,500 up to 25 users + ₹100 each above
 
         $q = fn (array $x) => Pricing::build($x + ['plan' => $p, 'kind' => 'new', 'licence_kind' => 'subscription', 'deployment' => 'cloud', 'billing' => 'quarterly', 'users' => 10]);
-        $this->assertSame([7959.9], array_column($q([])['lines'], 'amount'));             // 10 × 265.33 × 3, no setup on cloud
+        $this->assertSame([7959.9, 2500.0], array_column($q([])['lines'], 'amount'));     // 10 × 265.33 × 3 + Cloud setup & onboarding
+        $this->assertSame([7959.9], array_column($q(['first' => false])['lines'], 'amount'));   // charged once: not when setup is already paid
+        $this->assertSame([7959.9], array_column($q(['setup' => false])['lines'], 'amount'));   // staff waiver
         $perp = $q(['licence_kind' => 'perpetual', 'deployment' => 'onprem', 'users' => 30]);
         $this->assertSame([['perpetual_licence', 98000.0], ['setup', 5500.0]], array_map(fn ($l) => [$l['type'], $l['amount']], $perp['lines']));
         $this->assertNull($perp['billing']);
         $this->assertSame(98000.0, $q(['licence_kind' => 'perpetual', 'deployment' => 'onprem', 'users' => 30, 'setup' => false])['amount']);   // "no setup" (85,000 + 5 × 65,000 ÷ 25)
-        PlatformSettings::set('setup_on_cloud', '1');
-        $this->assertSame('setup', $q([])['lines'][1]['type']);
         foreach ([['users' => 3], ['users' => 501], ['licence_kind' => 'perpetual', 'deployment' => 'cloud']] as $bad) {
             try {
                 $q($bad);

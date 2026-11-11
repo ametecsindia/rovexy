@@ -973,7 +973,7 @@ function Settings() {
   const set = (k: string, v: string) => { setSaved(false); setF((x: any) => ({ ...x, [k]: v })); };
   const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days', 'demo_calling_from',
     'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
-    'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'setup_on_cloud', 'amc_pct', 'quote_validity_days',
+    'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'cloud_setup_base', 'cloud_setup_included_users', 'cloud_setup_per_extra', 'amc_pct', 'quote_validity_days',
     'price_c2c_user', 'price_smart31_user', 'deposit_per_fos'];
   const [clear, setClear] = useState<string[]>([]);
   const submit = (e: FormEvent) => { e.preventDefault(); void a.run(async () => { s.setData(await put('/settings', { ...Object.fromEntries(keys.map((k) => [k, f[k]])), clear_secrets: clear })); setClear([]); setSaved(true); toast('Settings saved'); }); };
@@ -1005,14 +1005,16 @@ function Settings() {
           <div className="form-grid">
             {box('price_annual_discount_pct', 'Annual billing discount %', 'Cloud: the plan rate is the annual price; quarterly = rate ÷ (1 − this)', 'number')}
             {box('price_half_yearly_discount_pct', 'Half-yearly discount %', 'Off the quarterly price', 'number')}
-            {box('setup_base', 'Setup & onboarding fee (₹)', 'On the first order', 'number')}{box('setup_included_users', 'Users covered by that fee', undefined, 'number')}
-            {box('setup_per_extra', 'Setup per extra user (₹)', undefined, 'number')}{box('amc_pct', 'AMC % per year', 'On-premises perpetual: % of the current licence price', 'number')}
+            {box('cloud_setup_base', 'Cloud setup & onboarding fee (₹)', 'One-time, on the first Cloud order', 'number')}{box('cloud_setup_included_users', 'Users covered by the Cloud fee', undefined, 'number')}
+            {box('cloud_setup_per_extra', 'Cloud setup per extra user (₹)', undefined, 'number')}
+            {box('setup_base', 'On-premises setup & onboarding fee (₹)', 'One-time, on the first on-premises order', 'number')}{box('setup_included_users', 'Users covered by the on-premises fee', undefined, 'number')}
+            {box('setup_per_extra', 'On-premises setup per extra user (₹)', undefined, 'number')}{box('amc_pct', 'AMC % per year', 'On-premises perpetual: % of the current licence price', 'number')}
             {box('quote_validity_days', 'Order / quote valid for (days)', 'After this the pay link stops; raise a fresh order', 'number')}
             {box('price_c2c_user', 'Click2Call per user per month (₹)', 'Plus GST; users who placed a Click2Call call that month', 'number')}
             {box('price_smart31_user', 'Click2Call + Smart31 per user per month (₹)', 'Instead of the Click2Call price, for users whose calls used a Smart31 number', 'number')}
             {box('deposit_per_fos', 'Refundable deposit per field user (₹)', 'On-premises; refunded when the client stops, less dues', 'number')}
           </div>
-          {toggle('setup_on_cloud', 'Charge the setup fee on cloud first orders too', 'On-premises first orders always carry it (staff can waive it per order).')}
+          <p className="muted small">The setup fee is charged once per company, on its first Cloud or on-premises order. Staff can waive it on a single order.</p>
         </Card>
         <Card title="Automatic e-mails">
           {toggle('reminders_enabled', 'Send renewal, trial-ending and unpaid-order reminders', 'Package: 30, 15, 7, 3, 1 and 0 days before expiry, and once after it expires. Trial: 3, 1 and 0 days before it ends. Unpaid website order: once, 3 hours later. Each goes once; see Sent e-mails.')}

@@ -32,7 +32,9 @@ final class PlatformSettings
         'setup_base' => '5000',                    // setup & onboarding: base + per user above the included count
         'setup_included_users' => '25',
         'setup_per_extra' => '100',
-        'setup_on_cloud' => '0',                   // 1 = cloud first orders also carry the setup fee (on-prem always does)
+        'cloud_setup_base' => '2500',              // ROVEXY Cloud setup & onboarding (11 Nov 2026): ₹2,500 up to 25 users + ₹100 per extra user
+        'cloud_setup_included_users' => '25',
+        'cloud_setup_per_extra' => '100',
         'amc_pct' => '18',                         // perpetual AMC per year, % of the current perpetual price
         'quote_validity_days' => '7',              // an unpaid order's pay link works this long
         'razorpay_key_id' => '',

@@ -18,7 +18,7 @@ use App\Models\Platform\Plan;
  *                       annual = band rate; quarterly = band rate ÷ (1 − annual discount); half-yearly = that × (1 − half-yearly discount)
  *  On-prem perpetual  : one-time price from the band milestones, straight-line between them
  *  On-prem subscription: priced like cloud
- *  Setup              : base + (users − included) × per extra; on the FIRST order (on-prem always, cloud when switched on)
+ *  Setup              : base + (users − included) × per extra; on the FIRST order (cloud: cloud_setup_*, on-prem: setup_*)
  *  More users mid-term: subscription (new − old monthly value) × remaining days ÷ 30.44; perpetual price(new) − price(old)
  *  AMC (perpetual)    : amc_pct % of the current perpetual price, 12 months
  * There is no ₹0 price: a size beyond the priced bands is a custom quote and is refused unless staff type a price
@@ -68,9 +68,11 @@ final class Pricing
         return null;
     }
 
-    public static function setupFee(int $users): float
+    /** Setup & onboarding: base + (users − included) × per extra. Cloud has its own amounts (cloud_setup_*), on-premises the setup_* ones. */
+    public static function setupFee(int $users, string $deployment = 'onprem'): float
     {
-        return round((float) PlatformSettings::get('setup_base') + max(0, $users - (int) PlatformSettings::get('setup_included_users')) * (float) PlatformSettings::get('setup_per_extra'), 2);
+        $k = $deployment === 'cloud' ? 'cloud_setup_' : 'setup_';
+        return round((float) PlatformSettings::get($k . 'base') + max(0, $users - (int) PlatformSettings::get($k . 'included_users')) * (float) PlatformSettings::get($k . 'per_extra'), 2);
     }
 
     /**
@@ -146,8 +148,7 @@ final class Pricing
 
         // 3. setup & onboarding, first order only
         if (in_array($kind, ['new', 'upgrade'], true) && ($s['first'] ?? true) && ($s['setup'] ?? null) !== false) {
-            $auto = $dep === 'onprem' || PlatformSettings::get('setup_on_cloud') === '1';
-            $fee = is_numeric($s['setup'] ?? null) ? round((float) $s['setup'], 2) : ($auto ? self::setupFee($users) : 0.0);
+            $fee = is_numeric($s['setup'] ?? null) ? round((float) $s['setup'], 2) : self::setupFee($users, $dep);   // cloud and on-prem first orders (staff can waive per order)
             if ($fee > 0) {
                 $lines[] = ['type' => 'setup', 'label' => "Setup & onboarding ({$users} users)", 'amount' => $fee];
             }
