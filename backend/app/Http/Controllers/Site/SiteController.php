@@ -483,41 +483,86 @@ final class SiteController extends Controller
         if ($page === 'thank-you') {
             return view('site.message', ['title' => 'Thank you', 'lines' => ['We have your details and will get back to you within one working day.'], 'action' => ['Back to ROVEXY', url('/')]]);
         }
-        $updated = '12 October 2026';
+        $updated = '11 November 2026';
+        $gstin = $set('seller_gstin') ?: '36AAHCT0971F1ZB';
+        $help = 'support@ametecsindia.com';
+        $wa = $set('seller_phone') ?: '+91 90000 98877';
         $pages = [
             'privacy' => ['Privacy policy', [
-                ['Who we are', "ROVEXY is operated by {$seller}, {$set('seller_address')}. For any privacy question write to {$mail}."],
-                ['What we hold', 'For each customer company (our client) we hold the data the company puts into ROVEXY: its employees, its customer portfolios, call records and recordings, field visits, payments and slips, and phone locations during work sessions. We also hold the contact details of people who enquire, start a trial or buy on this website.'],
-                ['Why we hold it', 'Only to provide the ROVEXY service to the company, to bill for it, and to send service and renewal e-mails. We do not sell, rent or share this data for anyone else\'s marketing.'],
-                ['Employee location', 'Phone location is collected only during a work session, between sign-in and sign-out on the app, at the interval the company sets in its policy (every 2 minutes unless the company changes it), and the phone shows a notice with that interval the whole time. It is visible only to the employee\'s own company.'],
-                ['Who can see the data', 'Each company\'s data is kept separate. Inside a company, access follows the roles and groups its admin sets. Ametecs staff access a workspace only to provide support or when the law requires it.'],
-                ['Payments', 'Online payments are processed by Razorpay. We never see or store your card or bank details.'],
-                ['How long we keep it', 'Call recordings and data are kept for the retention period the company sets in the console, then deleted. When a company stops using ROVEXY, its data is deleted on request or after the agreed notice period.'],
-                ['Your requests', "Employees and customers of a client company should first contact that company, which controls its data. You can also write to {$mail} and we will help."],
+                [null, "ROVEXY is a field-workforce, calling and company-phone management service built and operated by {$seller} (\"Ametecs\", \"we\"), Hyderabad, India. This policy explains plainly what data we hold and what we do with it. It covers two different things: our own records (this website, accounts, licences and billing) and the ROVEXY product your employer runs."],
+                ['1. What we store for accounts and billing', [
+                    'Account data: company name, contact name, work e-mail, phone and password (stored hashed, never in plain text). One-time e-mail codes are stored hashed and expire after 15 minutes.',
+                    'Enquiries and app downloads: the company name, e-mail, team size, purpose and industry you give us before a trial, a demo or a Google Play download.',
+                    'Billing data: orders, quotations, GST invoices, your GSTIN, state and billing address. Card, UPI and bank details are handled entirely by our payment gateway, Razorpay; we never see or store card numbers.',
+                    'Licence data: plan, licensed user count, expiry, add-ons (Click2Call, Smart31) and, for on-premises installations, the licence status reported by your server. This is counting data, not your employees\' work content.',
+                    'Operational logs: audit trails of console and Super Admin actions, and the service e-mails we send (codes, receipts, quotations, renewal reminders).',
+                ]],
+                ['2. What the ROVEXY product stores', 'Under the policy your employer sets and shows on each phone, ROVEXY records work data: the customer portfolios your employer uploads, call records and call recordings, call outcomes and follow-ups, field visits with check-in location and photos, payments and payment slips, attendance and work sessions, and phone location during a work session. It is stored where your employer chooses:'],
+                [null, [
+                    'ROVEXY Cloud: we host the data for your employer, keep each company\'s data separate, and process it only to provide the service. Recordings and data are kept for the retention period your employer sets in the console, then deleted.',
+                    'On-premises: the data stays on your employer\'s own server and domain. Ametecs receives only the licence and the limited technical details needed for support, not your calls, recordings or locations.',
+                ]],
+                [null, 'ROVEXY is transparent and policy-driven, never hidden software. Your employer is the owner and controller of this data. Questions about what your employer records should go to your employer, who controls those settings.'],
+                ['3. How we use and share our records', 'We use account and billing data to provide the service, issue GST invoices, send service e-mails and meet Indian tax and accounting duties. We share it only with our payment gateway (to take your payment), our infrastructure providers (to run the service), Google Maps services (to turn customer addresses into map locations and routes) and authorities where the law requires. We do not sell personal data, ever, and we do not use it for anyone else\'s marketing.'],
+                ['4. Retention and deletion', 'Active account data is kept while your licence is live. Trial and expired workspaces are not deleted automatically on expiry; we delete them on request, or after we tell you in advance. Invoices and tax records are kept for 8 years as Indian law requires. You may ask us to delete your account data (except records we must keep) by writing to ' . $help . '.'],
+                ['5. Security', 'Passwords and e-mail codes are hashed, sign-in is rate-limited and every sign-in is recorded, all traffic uses HTTPS, Ametecs staff open a workspace only to give support or when the law requires it, and every billing action is logged.'],
+                ['6. Your rights and contact', "You can view and correct your company and billing details in the console. For access, correction or deletion, or any privacy concern, contact our grievance contact: {$help}, {$seller}, {$set('seller_address')}. We reply within 7 working days. Employees and customers of a client company should first contact that company, which controls its data. This policy is governed by Indian law, including the Digital Personal Data Protection Act, 2023."],
+                ['7. ROVEXY mobile app (for employees)', 'ROVEXY (Android, in.ametecs.managedmobile) is the work app for your employer\'s staff. It works only with an account your employer creates and talks only to your employer\'s ROVEXY server. Before work starts, the app shows what your company can see, and a ROVEXY notification is shown whenever location, a call or a session is active.'],
+                [null, [
+                    'Calls: the app places customer calls from your work cases. It reads the call log for the duration of those calls and, where your employer records calls, uploads the recording of that customer call. Personal calls are not read.',
+                    'Location: read only during a work session, between sign-in and sign-out, at the interval your employer sets, to show field visits and routes. The Google Play version does not track location in the background; with the separate direct-install version for all-day field staff, a notice stays on screen the whole time location is collected.',
+                    'Camera and photos: used for visit and payment-slip photos you take, and for a camera session only when your employer requests one and you accept (the Android camera indicator is shown).',
+                    'Screen sharing: only when your employer requests it and you accept; Android asks for your permission each time.',
+                    'Account and device: your employee name, a random installation ID and the phone model, used to approve this phone for your account.',
+                ]],
+                [null, 'All app traffic is encrypted (HTTPS). The app contains no ads and no analytics trackers, and the data is not sold or shared with third parties. Your employer controls retention and deletion; ask your employer\'s administrator, or write to ' . $help . '. Signing out or uninstalling removes the app\'s data from the phone.'],
+                ['8. ROVEXY Admin mobile app', 'ROVEXY Admin (Android, in.ametecs.rovexy.admin) lets your organisation\'s administrators and managers use the ROVEXY console on a phone. It signs in with an existing console account and talks only to your organisation\'s ROVEXY server.'],
+                [null, [
+                    'What it sends: your sign-in e-mail and password (to start a session), messages you write to employees, and records you add or change in the console.',
+                    'What it shows: the work data ROVEXY already holds under your organisation\'s policy (section 2), such as calls and recordings, customers, field visits, payments and reports.',
+                    'On the phone: it collects no location, camera, contacts or files. The microphone is used only for an internet call you start from Messages. Exported files are saved only where you choose.',
+                ]],
+                [null, 'The app contains no ads and no analytics trackers, and the data is not sold or shared. Administrators must use ROVEXY only under a policy disclosed to their employees, as the law requires.'],
             ]],
             'terms' => ['Terms of service', [
-                ['The service', "ROVEXY is a cloud service provided by {$seller}. By starting a trial or buying a package, the company agrees to these terms."],
-                ['Packages', 'Packages are sold for the period and number of users shown at purchase. Prices are in Indian rupees and exclude GST, which is added on the invoice.'],
-                ['Use', 'A workspace may be used only by the company it is issued to, for lawful collection, calling and field work. The company is responsible for its employees\' use and for having the consent and notices the law requires for call recording and location.'],
-                ['Renewal and expiry', 'Renewals extend from the current expiry date, so renewing early never loses days. After expiry there are a few days\' grace; after that, phones cannot start work until the package is renewed. Data is not deleted on expiry.'],
-                ['Data', 'The company owns its data. We keep it secure, back it up and keep it for the retention period the company sets.'],
-                ['Availability and support', 'We work to keep the service available at all times and announce planned maintenance in advance. Support is by e-mail and phone on working days.'],
-                ['Liability', 'Our total liability for any claim is limited to the amount paid for the package in the twelve months before the claim.'],
-                ['Law', 'These terms are governed by the laws of India, with courts in Hyderabad, Telangana having jurisdiction.'],
+                [null, "These terms govern the use of ROVEXY, the field-workforce, calling and company-phone management service provided by {$seller} (\"Ametecs\"), Kondapur, Hyderabad, Telangana, GSTIN {$gstin}. By starting a trial, buying a licence or using the console or apps, you accept them on behalf of your organisation."],
+                ['1. The service and licence types', [
+                    'ROVEXY Cloud: hosted by Ametecs, priced per user per month and billed in advance for the period shown at purchase, with the Google Maps option and add-ons (Click2Call, Smart31 number rotation) you choose. The licence is valid for the paid period and renews only when a renewal payment is made.',
+                    'On-premises: installed on your own server with your own domain and SSL, with a refundable deposit and a one-time installation, setup and training fee per field user, as quoted. Support and updates are included for the first 12 months, followed by an optional Annual Maintenance Contract (AMC). Google Maps on-premises runs on your own Google account and is billed to you by Google.',
+                    'Free trial: a full-feature ROVEXY Cloud trial for the days and users shown at sign-up, with no card required.',
+                ]],
+                [null, 'A licence covers the number of users shown on the order and may be used only by the organisation it is issued to; it is not transferable. Prices are in Indian rupees and exclude GST.'],
+                ['2. Payments, taxes and invoices', "Payments are processed by Razorpay (UPI, cards, NetBanking); bank transfer is also accepted and recorded manually. GST is added at the prevailing rate (currently 18%, SAC 997331) and a GST tax invoice is issued when payment is received. Quotations are valid for 15 days. Refunds are governed by our Refund policy."],
+                ['3. Your responsibilities as an employer', 'ROVEXY is a transparent, policy-driven work tool; it is never covert surveillance software. You are responsible for using it lawfully: on company phones or phones your employees have agreed to use for work, telling your employees and customers what is recorded, obtaining any consent the law requires for call recording and location, and setting policies in proportion. You must not use it on people outside an employment or work relationship. You are responsible for your billing details (including GSTIN, if you wish to claim input tax credit) and for all activity under your console logins.'],
+                ['4. Data', 'You own your data. On ROVEXY Cloud we host it for you as described in the Privacy policy, keep it secure and back it up, and keep it for the retention period you set. On-premises, the data stays on your server and is your responsibility. Data is not deleted on expiry. We may suspend a workspace with overdue invoices after notice.'],
+                ['5. Renewal and expiry', 'Renewals extend from the current expiry date, so renewing early never loses days. After expiry there are a few days\' grace; after that, phones cannot start work until the licence is renewed.'],
+                ['6. Support, availability and updates', "Support is provided on working days by WhatsApp ({$wa}) and e-mail ({$help}). We aim for high availability of ROVEXY Cloud but do not warrant uninterrupted operation; planned maintenance is announced in advance. Updates are included in active Cloud licences and in the first year or a valid AMC for on-premises."],
+                ['7. Liability', 'To the maximum extent permitted by Indian law, Ametecs\' total liability under these terms is limited to the fees you paid in the 12 months before the claim, and we are not liable for indirect or consequential losses, or for decisions you take based on ROVEXY data. Nothing limits liability that cannot be limited under law.'],
+                ['8. Termination and changes', 'You may stop using the service at any time; paid periods run to their end as set out in the Refund policy. We may terminate for material breach (including unlawful recording or tracking, or licence misuse) after notice. We may update these terms; material changes are notified by e-mail or console notice 15 days in advance, and continued use means acceptance.'],
+                ['9. Governing law', "These terms are governed by the laws of India; courts at Hyderabad, Telangana have exclusive jurisdiction. Legal notices: {$help}."],
             ]],
             'refund' => ['Refund & cancellation policy', [
-                ['Free trial first', 'Every company can try ROVEXY free before paying, so you can check it suits your team.'],
-                ['Cancellation', "You can cancel an unpaid order at any time. A package can be stopped from renewing by simply not renewing it; write to {$mail} if you would like us to close the workspace."],
-                ['Refunds', 'Payments are non-refundable once the workspace has been created or the licence renewed, because the service is delivered immediately. If you were charged twice or charged by mistake, write to us within 7 days and the extra amount is refunded to the original payment method within 5–7 working days.'],
+                [null, 'We keep refunds simple and honest. ROVEXY offers a free trial so you can try everything before paying, but if a first purchase still does not work out, this policy has you covered.'],
+                ['1. 7-day money-back on your first Cloud purchase', 'If you are not satisfied with your first ROVEXY Cloud purchase, write to us within 7 days of payment and we refund the full amount. The licence is stopped on refund.'],
+                ['2. On-premises deposit', 'The per-user deposit for an on-premises installation is refundable when your organisation stops using ROVEXY and the licence is closed. The one-time installation, setup and training fee is refunded only if no installation work has started.'],
+                ['3. What is not refundable', [
+                    'Renewals: a renewal extends a service you have already used and is not refundable. To stop, simply do not renew; there is no auto-charge, and your licence runs to the end of the paid period.',
+                    'Used periods: months or days already used are not refunded.',
+                    'Add-ons and usage: Click2Call and Smart31 add-ons for a period already started, and Google Maps usage already consumed, are not refundable.',
+                    'AMC: covers a service year and is not refundable after it starts.',
+                ]],
+                ['4. Pro-rata refunds', 'Outside the cases above (for example, a genuine technical failure on our side that we cannot fix), Ametecs may at its discretion refund the unused part of a paid period. Duplicate payments for the same order are always refunded in full.'],
+                ['5. How to request a refund', "E-mail {$help} (or WhatsApp {$wa}) from your registered e-mail with your order or invoice number and the reason. We acknowledge within 2 working days."],
+                ['6. How refunds are paid', 'Approved refunds go back to the original payment method; Razorpay refunds usually reach you in 5 to 10 working days depending on your bank. Bank-transfer payments are refunded to the paying account. Where GST has been paid, a credit note is issued against the original tax invoice.'],
             ]],
             'delivery' => ['Service delivery policy', [
                 ['How the service is delivered', 'ROVEXY is software delivered online. Nothing is shipped physically.'],
-                ['When', 'A new workspace is created automatically as soon as payment is confirmed, and the sign-in link and details are e-mailed to the buyer. Renewals and upgrades apply to the existing workspace immediately.'],
-                ['If something goes wrong', "If you have paid and have not received your workspace e-mail within one hour, write to {$mail} with your order number."],
+                ['When', 'A new ROVEXY Cloud workspace is created automatically as soon as payment is confirmed, and the sign-in link and details are e-mailed to the buyer. Renewals and upgrades apply to the existing workspace immediately. On-premises installations are scheduled with you once payment is received.'],
+                ['If something goes wrong', "If you have paid and have not received your workspace e-mail within one hour, write to {$help} with your order number."],
             ]],
             'contact' => ['Contact us', [
                 ['Sales and demos', 'Tell us your team size and we will call you back within one working day.'],
-                ['Support', 'Existing customers can reach us by e-mail or phone on working days.'],
+                ['Support', "Existing customers can reach us on working days by WhatsApp ({$wa}) or e-mail ({$help})."],
             ]],
         ];
         [$title, $sections] = $pages[$page];

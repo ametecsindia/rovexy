@@ -9,7 +9,14 @@
   <h1 style="font-size:2.6rem">{{ $title }}</h1>
   @if(!empty($updated))<p class="upd">Last updated {{ $updated }}</p>@endif
   @if(!empty($cards))<div class="cards">@foreach($cards as [$h, $v, $href])<div><b>{{ $h }}</b>@if($href)<a href="{{ $href }}">{{ $v }}</a>@else{{ $v }}@endif</div>@endforeach</div>@endif
-  @foreach($sections as [$h, $p])@if($h)<h2>{{ $h }}</h2>@endif<p>{{ $p }}</p>@endforeach
+  @foreach($sections as [$h, $p])
+    @if($h)<h2>{{ $h }}</h2>@endif
+    @if(is_array($p))
+      <ul>@foreach($p as $li)<li>{{ $li }}</li>@endforeach</ul>
+    @else
+      <p>{{ $p }}</p>
+    @endif
+  @endforeach
   <p style="margin-top:32px"><a class="btn" href="{{ $action[1] ?? url('/') }}">{{ $action[0] ?? 'Back to ROVEXY' }}</a></p>
 </div></section>
 @endsection
