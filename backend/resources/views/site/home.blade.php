@@ -143,7 +143,7 @@
 .stage .rings i{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(212,174,106,.16)}.stage .rings i:nth-child(2){inset:14%;border-color:rgba(212,174,106,.22)}.stage .rings i:nth-child(3){inset:28%;border:0;background:radial-gradient(circle,rgba(184,137,59,.28),transparent 68%)}
 .stage .rings:after{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 0deg,transparent 0 80%,rgba(212,174,106,.35) 92%,transparent);mask:radial-gradient(circle,transparent 69.6%,#000 70%,#000 71%,transparent 71.4%);-webkit-mask:radial-gradient(circle,transparent 69.6%,#000 70%,#000 71%,transparent 71.4%);animation:sweep 9s linear infinite}
 @keyframes sweep{to{transform:rotate(1turn)}}
-.live-phone{position:relative;width:330px;height:680px;flex:none}.live-phone iframe{display:block;width:100%;height:100%;border:0;background:transparent;pointer-events:none}
+.live-phone{position:relative;width:330px;height:695px;flex:none}.live-phone iframe{display:block;width:100%;height:100%;border:0;background:transparent;pointer-events:none}
 .live-phone a{position:absolute;right:-6px;bottom:12px;transform:translateX(100%);font-size:.8rem;font-weight:600;color:var(--brass-2);text-decoration:none;white-space:nowrap}.live-phone a:hover{text-decoration:underline}
 @media (max-width:1100px){.live-phone a{position:static;transform:none;display:block;text-align:center;margin-top:8px}}
 .panes{position:relative;min-height:150px;width:100%;overflow:hidden}
