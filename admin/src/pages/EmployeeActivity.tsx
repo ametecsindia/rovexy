@@ -176,6 +176,8 @@ export function EmployeeActivityPage() {
             error={team.error} columns={[
               { key: 'name', label: 'Employee', render: (p: any) => <><strong>{p.employee.name}</strong><br /><small className="muted">{p.employee.employee_code}</small></> },
               { key: 'att', label: 'Attendance', align: 'right', render: (p: any) => <>{pc(p.attendance_pct)}{p.late_days > 0 && <><br /><small className="muted">{p.late_days} late</small></>}</> },
+              { key: 'login', label: oneDay ? 'Login' : 'Avg login', align: 'right', render: (p: any) => <>{p.login ?? '—'}{oneDay && p.late_days > 0 && <><br /><small style={{ color: 'var(--bad)' }}>late</small></>}</> },
+              { key: 'logout', label: oneDay ? 'Logout' : 'Avg logout', align: 'right', render: (p: any) => (p.logout === 'no sign-out' ? <small className="muted">no sign-out</small> : p.logout ?? '—') },
               { key: 'worked', label: 'Worked', align: 'right', render: (p: any) => hm(p.worked_s) },
               { key: 'prod', label: 'Productive', align: 'right', render: (p: any) => <>{hm(p.productive_s)}<br /><small className="muted">{pc(p.productivity_pct)}</small></> },
               { key: 'idle', label: 'Idle', align: 'right', render: (p: any) => <span style={{ color: p.high_idle ? 'var(--bad)' : undefined, fontWeight: p.high_idle ? 600 : undefined }} title={p.high_idle ? 'Idle is 25% or more of worked time' : undefined}>{hm(p.idle_s)}</span> },
@@ -185,7 +187,7 @@ export function EmployeeActivityPage() {
               { key: 'visits', label: 'Visits', align: 'right' },
               { key: 'split', label: 'Day split', render: (p: any) => <Split r={p} /> },
             ]} />
-          <p className="muted small" style={{ marginBottom: 0 }}>Click an employee for their detail. Idle in red = 25% or more of worked time.</p>
+          <p className="muted small" style={{ marginBottom: 0 }}>Click an employee for their detail. Login = first sign-in, Logout = last sign-out{oneDay ? '' : ' (average over the days worked)'}, company time. Idle in red = 25% or more of worked time.</p>
         </Card>
       )}
 

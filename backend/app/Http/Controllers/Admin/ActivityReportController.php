@@ -108,10 +108,11 @@ final class ActivityReportController extends Controller
             $users = $this->staff($r);
             $rows = DailyActivity::query()->whereIn('user_id', $users->pluck('id'))->whereBetween('work_date', [$from, $to])->orderBy('work_date')->get()->groupBy('user_id');
             $title = 'Team activity';
-            $sheets['Team'] = [['Code', 'Employee', 'Days worked', 'Attendance %', 'Late days', 'Worked', 'Productive', 'Productivity %', 'Idle', 'Break', 'Travel', 'Offline', 'Distance km', 'Calls', 'Connected', 'Visits'],
+            $avg = $from === $to ? '' : 'Avg ';
+            $sheets['Team'] = [['Code', 'Employee', 'Days worked', 'Attendance %', 'Late days', "{$avg}Login", "{$avg}Logout", 'Worked', 'Productive', 'Productivity %', 'Idle', 'Break', 'Travel', 'Offline', 'Distance km', 'Calls', 'Connected', 'Visits'],
                 ...$users->map(function (User $u) use ($r, $rows, $from, $to, $hms) {
                     $t = $this->totals($r, $rows[$u->id] ?? collect(), $from, $to);
-                    return [$u->employee_code, $u->name, $t['days_worked'], $t['attendance_pct'], $t['late_days'], $hms($t['worked_s']), $hms($t['productive_s']),
+                    return [$u->employee_code, $u->name, $t['days_worked'], $t['attendance_pct'], $t['late_days'], $t['login'] ?? '', $t['logout'] ?? '', $hms($t['worked_s']), $hms($t['productive_s']),
                         $t['productivity_pct'], $hms($t['idle_s']), $hms($t['break_s']), $hms($t['travel_s']), $hms($t['offline_s']),
                         $t['distance_m'] === null ? '' : round($t['distance_m'] / 1000, 1), $t['calls'], $t['connected'], $t['visits']];
                 })->all()];
@@ -198,6 +199,7 @@ final class ActivityReportController extends Controller
         return [
             ['Scheduled working days', $t['scheduled_days']], ['Days worked', $t['days_worked']], ['Attendance %', $t['attendance_pct']],
             ['Present / half day / short / absent', "{$t['present']} / {$t['half_day']} / {$t['short']} / {$t['absent']}"],
+            [$t['login_avg'] ? 'Average login time' : 'Login time', $t['login'] ?? ''], [$t['login_avg'] ? 'Average logout time' : 'Logout time', $t['logout'] ?? ''],
             ['Late arrivals (days)', $t['late_days']], ['Early departures (days)', $t['early_days']],
             ['Signed in', $hms($t['signed_in_s'])], ['Worked (signed in − break − offline)', $hms($t['worked_s'])], ['Productive', $hms($t['productive_s'])],
             ['Productivity %', $t['productivity_pct']], ['Active work', $hms($t['active_s'])], ['At customers', $hms($t['customer_s'])],
@@ -319,6 +321,19 @@ final class ActivityReportController extends Controller
             'coverage_pct' => $t['signed_in_s'] > 0 ? (int) round(($t['signed_in_s'] - $t['offline_s']) * 100 / $t['signed_in_s']) : null,
             'longest_idle_s' => (int) $rows->max('longest_idle_s'),
         ];
+        // Login / logout: the actual times for one day, else the average over the days worked (company time zone, HH:MM).
+        $tz = CurrentCompany::tz();
+        $clock = function (string $col) use ($rows, $tz): ?string {
+            $mins = $rows->pluck($col)->filter()->map(fn ($at) => ($c = Carbon::parse($at)->setTimezone($tz))->hour * 60 + $c->minute);
+            if ($mins->isEmpty()) {
+                return null;
+            }
+            $m = (int) round($mins->avg());
+            return sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+        };
+        $t['login'] = $clock('first_login_at');
+        $t['logout'] = $clock('last_logout_at') ?? ($rows->count() === 1 && $rows->first()->no_signout ? 'no sign-out' : null);
+        $t['login_avg'] = $rows->whereNotNull('first_login_at')->count() > 1;
         $t['attendance_pct'] = $scheduled > 0 ? (int) round(($t['present'] + $t['half_day'] / 2) * 100 / $scheduled) : null;
         $t['high_idle'] = $t['worked_s'] >= 3600 && $t['idle_s'] * 4 >= $t['worked_s'];   // idle ≥ 25% of worked time
         if (!$r->user()->hasPermission('location.view')) {

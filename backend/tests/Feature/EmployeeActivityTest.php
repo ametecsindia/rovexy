@@ -147,6 +147,9 @@ final class EmployeeActivityTest extends TestCase
         $this->assertContains('FOS1', $codes);
         $this->assertContains('FOS2', $codes);
         $this->assertNotContains('admin', $codes);   // only people who use the phone app
+        $fos1 = collect($team->json('employees'))->firstWhere('employee.employee_code', 'FOS1');
+        $this->assertSame(['09:12', '17:48', false], [$fos1['login'], $fos1['logout'], $fos1['login_avg']]);   // login / logout, company time
+        $range->assertJsonPath('totals.login', '09:12')->assertJsonPath('totals.logout', '17:48');
 
         $x = $this->as($this->u['admin'])->get("/api/admin/activity/export?kind=employee&format=xlsx&user_id={$emp->id}&from=2026-11-09&to=2026-11-09")->assertOk();
         $this->assertStringContainsString('spreadsheetml', (string) $x->headers->get('Content-Type'));
