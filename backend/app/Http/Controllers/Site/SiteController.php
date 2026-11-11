@@ -148,7 +148,7 @@ final class SiteController extends Controller
 
     private function otpExpired(string $purpose)
     {
-        $back = match ($purpose) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), default => url('/#trial') };
+        $back = match ($purpose) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), 'app' => url('/'), default => url('/#trial') };
         return view('site.message', ['title' => 'This code has expired', 'lines' => ['Codes work for ' . self::OTP_MINUTES . ' minutes. Please fill in the form again.'], 'action' => ['Back to the form', $back]]);
     }
 
@@ -192,13 +192,16 @@ final class SiteController extends Controller
             if ($p['tries'] >= self::OTP_TRIES) {
                 Cache::forget($key);
                 return view('site.message', ['title' => 'Too many wrong codes', 'lines' => ['For safety this request was cancelled. Please fill in the form again.'],
-                    'action' => ['Back to the form', match ($p['purpose']) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), default => url('/#trial') }]]);
+                    'action' => ['Back to the form', match ($p['purpose']) { 'buy' => url('/buy'), 'demo' => url('/explore-demo'), 'app' => url('/'), default => url('/#trial') }]]);
             }
             Cache::put($key, $p, now()->setTimestamp($p['expires_at']));
             $left = self::OTP_TRIES - $p['tries'];
             return $view(['error' => "That code is not right. {$left} " . ($left === 1 ? 'try' : 'tries') . ' left.']);
         }
         Cache::forget($key);
+        if ($p['purpose'] === 'app') {
+            return $this->createAppLead($p['data']);
+        }
         if ($p['purpose'] === 'demo') {
             return $this->createDemo($p['data']);
         }
@@ -219,6 +222,52 @@ final class SiteController extends Controller
             . PlatformSettings::get('trial_days') . ' days.</p><p>Sign in: <a href="' . e(Workspaces::consoleUrl($company)) . '">' . e(Workspaces::consoleUrl($company)) . '</a> with ' . e($d['email']) . '.</p><p>— Ametecs India</p>');
         return view('site.message', ['title' => 'Your trial is ready', 'lines' => ["Workspace: {$company->slug}", 'Sign in with ' . $d['email'] . ' and the password you chose.',
             'Next: add your team under Groups & people, then approve their phones under Devices.'], 'action' => ['Open my console', Workspaces::consoleUrl($company)]]);
+    }
+
+    public const PLAY = ['staff' => ['ROVEXY', 'in.ametecs.managedmobile'], 'admin' => ['ROVEXY Admin', 'in.ametecs.rovexy.admin']];
+    public const PURPOSES = ['Use ROVEXY in my company', 'Evaluate ROVEXY for my company', 'My company already uses ROVEXY', 'Other'];
+
+    /** GET /play/{staff|admin}: short details form before the Google Play link. */
+    public function appForm(string $app)
+    {
+        return view('site.play', ['app' => $app, 'appName' => self::PLAY[$app][0], 'purposes' => self::PURPOSES, 'industries' => self::industries()]);
+    }
+
+    /** Industry choices = the portfolio types ("Custom" shown as "Other"). */
+    private static function industries(): array
+    {
+        return collect(\App\Domain\Portfolios\PortfolioTypes::TYPES)->pluck('label')->map(fn ($l) => $l === 'Custom' ? 'Other' : $l)->all();
+    }
+
+    /** POST /play/{app}: details → e-mail code → lead saved → off to Google Play. */
+    public function appLead(Request $r, string $app)
+    {
+        if ($r->filled('hp_x9')) {
+            return redirect()->away(self::playUrl($app));
+        }
+        $d = $r->validate(['company' => 'required|string|max:150', 'email' => 'required|email|max:190', 'users' => 'required|integer|min:1|max:100000',
+            'purpose' => ['required', \Illuminate\Validation\Rule::in(self::PURPOSES)], 'industry' => ['required', \Illuminate\Validation\Rule::in(self::industries())]]);
+        $d['email'] = strtolower($d['email']);
+        $d['app'] = $app;
+        $back = fn (string $msg) => back()->withInput()->withErrors(['play' => $msg]);
+        return $this->startOtp('app', $d, $d['email'], 'your e-mail for the ' . e(self::PLAY[$app][0]) . ' app', $back);
+    }
+
+    private static function playUrl(string $app): string
+    {
+        return 'https://play.google.com/store/apps/details?id=' . (self::PLAY[$app] ?? self::PLAY['staff'])[1] . '&hl=en_IN';
+    }
+
+    private function createAppLead(array $d)
+    {
+        $app = self::PLAY[$d['app']][0];
+        $info = "{$app} app download. Purpose: {$d['purpose']}. Industry: {$d['industry']}.";
+        Lead::query()->create(['name' => $d['company'], 'company' => $d['company'], 'email' => $d['email'], 'users' => $d['users'], 'source' => 'app', 'status' => 'new', 'message' => $info]);
+        if ($to = PlatformSettings::get('seller_email')) {
+            Sales::send($to, "New {$app} app download — {$d['company']}", '<p>' . collect(['App' => $app, 'Company' => $d['company'], 'E-mail' => $d['email'],
+                'Employees' => $d['users'], 'Purpose' => $d['purpose'], 'Industry' => $d['industry']])->map(fn ($v, $k) => '<b>' . e($k) . ':</b> ' . e((string) $v))->implode('<br>') . '</p>');
+        }
+        return redirect()->away(self::playUrl($d['app']));
     }
 
     /** GET /explore-demo: the demo sign-up page (city decides the team, customers and recordings the demo shows). */

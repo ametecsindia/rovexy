@@ -2,6 +2,7 @@
 @php
   $buy = ($purpose ?? 'trial') === 'buy';
   $demo = ($purpose ?? 'trial') === 'demo';
+  $app = ($purpose ?? 'trial') === 'app';
   // Show the address partly hidden: gu••••@gmail.com
   [$local, $domain] = array_pad(explode('@', (string) $email, 2), 2, '');
   $masked = mb_substr($local, 0, 2) . str_repeat('•', max(2, min(6, mb_strlen($local) - 2))) . '@' . $domain;
@@ -59,13 +60,13 @@
   <div class="otp">
     <aside class="otp-l" aria-hidden="true">
       <i class="rings"><i></i><i></i><i></i></i>
-      <p class="kicker">{{ $buy ? 'Your ROVEXY order' : ($demo ? 'Your ROVEXY demo' : 'Your free trial') }}</p>
+      <p class="kicker">{{ $app ? 'ROVEXY on Google Play' : ($buy ? 'Your ROVEXY order' : ($demo ? 'Your ROVEXY demo' : 'Your free trial')) }}</p>
       <h2>{{ $buy ? 'One step before payment' : 'Almost there' }}</h2>
-      <p>We check the e-mail first, so only you can open this {{ $buy ? 'order' : ($demo ? 'demo' : 'workspace') }}.</p>
+      <p>We check the e-mail first, so only you can open this {{ $app ? 'download' : ($buy ? 'order' : ($demo ? 'demo' : 'workspace')) }}.</p>
       <ol class="track">
-        <li class="done"><b>Your details</b><span>Company, contact and password saved.</span></li>
+        <li class="done"><b>Your details</b><span>{{ $app ? 'Company and contact saved.' : 'Company, contact and password saved.' }}</span></li>
         <li class="on"><b>Confirm your e-mail</b><span>Enter the 6-digit code.</span></li>
-        <li class="next"><b>{{ $buy ? 'Pay and activate' : ($demo ? 'Demo ready' : 'Workspace ready') }}</b><span>{{ $buy ? 'Secure payment, then your console opens.' : ($demo ? 'Your console opens with your city\'s team and customers.' : 'Sign in and add your team.') }}</span></li>
+        <li class="next"><b>{{ $app ? 'Google Play' : ($buy ? 'Pay and activate' : ($demo ? 'Demo ready' : 'Workspace ready')) }}</b><span>{{ $app ? 'The app page opens; tap Install.' : ($buy ? 'Secure payment, then your console opens.' : ($demo ? 'Your console opens with your city\'s team and customers.' : 'Sign in and add your team.')) }}</span></li>
       </ol>
       <p class="safe"><span>🔒</span><span>The code works once and expires in {{ $minutes }} minutes. Ametecs will never ask you for it on a call.</span></p>
     </aside>
@@ -73,7 +74,7 @@
     <div class="otp-r">
       <div class="icon"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/></svg></div>
       <h1>Check your e-mail</h1>
-      <p class="lead">We sent a 6-digit code to <b>{{ $masked }}</b>. Enter it below to {{ $buy ? 'continue to payment' : ($demo ? 'open your demo' : 'create your workspace') }}.</p>
+      <p class="lead">We sent a 6-digit code to <b>{{ $masked }}</b>. Enter it below to {{ $app ? 'continue to Google Play' : ($buy ? 'continue to payment' : ($demo ? 'open your demo' : 'create your workspace')) }}.</p>
 
       @if(!empty($error))<div class="msg bad" role="alert">{{ $error }}</div>
       @elseif(!empty($notice) && str_contains($notice, 'new code'))<div class="msg ok" role="status">{{ $notice }}</div>@endif
@@ -93,7 +94,7 @@
         </div>
         <noscript><input name="code" inputmode="numeric" pattern="\d{6}" maxlength="6" required style="font-size:1.4rem;letter-spacing:.3em;max-width:220px;margin:8px 0"></noscript>
         <p class="expiry" id="expiry"><span class="dot"></span><span id="expiry-t">Code valid for {{ $minutes }} minutes</span></p>
-        <button class="btn gold go" type="submit" id="go" disabled{!! $demo ? ' data-busy="Building your demo…"' : '' !!}>{{ $buy ? 'Confirm and continue to payment' : ($demo ? 'Open my demo' : 'Create my workspace') }} →</button>
+        <button class="btn gold go" type="submit" id="go" disabled{!! $demo ? ' data-busy="Building your demo…"' : '' !!}>{{ $app ? 'Continue to Google Play' : ($buy ? 'Confirm and continue to payment' : ($demo ? 'Open my demo' : 'Create my workspace')) }} →</button>
         @if($demo)<p id="busy-note" class="expiry" hidden>Setting up your team, customers, calls and recordings. This can take up to a minute — please keep this page open.</p>@endif
       </form>
 
@@ -102,7 +103,7 @@
           @csrf<input type="hidden" name="token" value="{{ $token }}"><input type="hidden" name="purpose" value="{{ $purpose ?? 'trial' }}">
           <span>Didn't get it? Check spam, or </span><button type="submit" id="resend" data-wait="{{ $resendIn }}">send a new code</button>
         </form>
-        <a href="{{ $buy ? '/buy' : ($demo ? '/explore-demo' : '/#trial') }}">Use a different e-mail</a>
+        <a href="{{ $app ? '/' : ($buy ? '/buy' : ($demo ? '/explore-demo' : '/#trial')) }}">Use a different e-mail</a>
       </div>
     </div>
   </div>
