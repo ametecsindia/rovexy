@@ -54,12 +54,14 @@ Route::middleware('central')->group(function () {
     Route::get('/', [SiteController::class, 'home']);
     Route::get('/buy', [SiteController::class, 'buy']);
     Route::get('/explore-demo', [SiteController::class, 'exploreDemo']);   // demo client sign-up (DemoWorkspace)
+    Route::get('/play/{app}', [SiteController::class, 'appForm'])->whereIn('app', ['staff', 'admin']);   // Google Play buttons: details + e-mail code first
     // Live demo of the Android app (static page in public/live-demo; sample data, no server calls).
     Route::get('/demo', fn () => response()->file(public_path('live-demo/index.html'), ['Cache-Control' => 'no-cache']));
     Route::middleware('throttle:site')->group(function () {
         Route::post('/enquiry', [SiteController::class, 'enquiry']);
         Route::post('/trial', [SiteController::class, 'trial']);
         Route::post('/explore-demo', [SiteController::class, 'demo']);
+        Route::post('/play/{app}', [SiteController::class, 'appLead'])->whereIn('app', ['staff', 'admin']);
         Route::post('/trial/verify', [SiteController::class, 'verifyTrial']);
         Route::post('/verify-email', [SiteController::class, 'verifyTrial']);
         Route::post('/verify-email/resend', [SiteController::class, 'resendOtp']);
