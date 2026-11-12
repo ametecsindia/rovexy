@@ -44,7 +44,8 @@ final class Sales
      *  renewal  — next period of a subscription (plan / users / cycle may change)
      *  seats    — more users (or a higher plan) during the current term; expiry unchanged
      *  amc      — 12 more months of updates & support on a perpetual licence
-     * $spec: plan_id?, users?, billing?, licence_kind?, deployment?, setup? (null|false|number), custom_amount? (staff), coupon?
+     * $spec: plan_id?, users?, billing?, licence_kind?, deployment?, setup? (null|false|number), custom_amount? (staff), coupon?,
+     *        c2c_users? (Click2Call for this many of the users), smart31? (bool, with Click2Call)
      * Licence-based orders default plan / users / cycle / deployment from the licence. One open order per licence.
      * @param array{buyer_company:string,buyer_name:string,buyer_email:string,buyer_phone?:?string,buyer_gstin?:?string,state_code?:?string,workspace?:?string,admin_password?:?string} $buyer
      */
@@ -69,7 +70,8 @@ final class Sales
                 foreach (SalesOrder::query()->where('licence_id', $licence->id)->where('status', 'created')->get() as $open) {
                     if ($open->kind === $kind && $open->plan_id === $plan->id && $open->users === $pr['users'] && $open->billing === $pr['billing'] && !$open->expiredQuote()
                         && $open->coupon_code === $coupon?->code && $open->state_code === ($buyer['state_code'] ?? null) && $open->buyer_gstin === $gstin
-                        && $open->custom_price_id === $pr['custom_price_id'] && abs($open->total - $pr['total']) < 0.005) {
+                        && $open->custom_price_id === $pr['custom_price_id'] && abs($open->total - $pr['total']) < 0.005
+                        && $open->c2c_users === $pr['c2c_users'] && (bool) $open->smart31 === $pr['smart31']) {
                         return $open;   // the same request again → the same order and pay link
                     }
                     self::cancel($open, 'Replaced by a newer order', $createdBy ?? 'system');
@@ -118,7 +120,13 @@ final class Sales
         $coupon = self::coupon($spec['coupon'] ?? null, $plan, $kind !== 'new');
         $companyId = $licence?->company_id ?? ($buyer['company_id'] ?? null);
         $first = $companyId ? !Company::query()->whereKey($companyId)->value('setup_fee_paid') : $kind === 'new';
-        $pr = Pricing::build(['plan' => $plan, 'kind' => $kind, 'licence_kind' => $lk, 'deployment' => $dep, 'billing' => $billing, 'users' => $users,
+        // Click2Call users: as chosen, else what the licence has now (null on licences from before 12 Nov 2026 = no add-on line)
+        $c2c = array_key_exists('c2c_users', $spec) && $spec['c2c_users'] !== null ? (int) $spec['c2c_users'] : $licence?->c2c_users;
+        if ($plan->quarterlyCloud() && str_contains($plan->code, '-c2c')) {
+            $c2c = null;   // the 10 Nov add-on plans: Click2Call for everyone is in their rate (licences still renewing on them)
+        }
+        $s31 = array_key_exists('smart31', $spec) && $spec['smart31'] !== null ? (bool) $spec['smart31'] : in_array('smart31', $licence?->features ?? [], true);
+        $pr = Pricing::build(['plan' => $plan, 'kind' => $kind, 'licence_kind' => $lk, 'deployment' => $dep, 'billing' => $billing, 'users' => $users, 'c2c_users' => $c2c, 'smart31' => $s31,
             'licence' => $licence, 'first' => $first, 'setup' => $spec['setup'] ?? null, 'custom_amount' => $spec['custom_amount'] ?? null,
             'custom' => CustomPrice::for($plan, $kind, $companyId, $buyer['buyer_email'] ?? $licence?->holder_email), 'coupon' => $coupon, 'state' => $buyer['state_code'] ?? null]);
         return [$plan, $pr, $gstin, $coupon];
@@ -232,6 +240,9 @@ final class Sales
                 default => '<p>Your ROVEXY licence is renewed until <b>' . $licence->expires_at?->format('d M Y') . '</b> (' . e($plan->name) . ', up to ' . $licence->max_users . ' users).</p>',
             };
         }
+        if ($o->c2c_users !== null && $o->kind !== 'amc') {
+            self::applyCalling($licence, $o->c2c_users, (bool) $o->smart31, $actor);
+        }
         if ($o->coupon_code) {
             Coupon::query()->where('code', $o->coupon_code)->increment('used_count');
         }
@@ -292,6 +303,24 @@ final class Sales
             'expires_at' => $from->copy()->addMonthsNoOverflow(Pricing::CYCLES[$billing] ?? 12)])->save();
         $l->log('renewed', ['plan' => $plan->code, 'users' => $users, 'billing' => $billing, 'expires_at' => $l->expires_at->toDateString()], $actor);
         return $l;
+    }
+
+    /**
+     * Sets a licence's Click2Call users and the two calling features to match: Click2Call with any Click2Call user,
+     * Smart31 only with Click2Call. Used by paid orders and by Super Admin edits.
+     */
+    public static function applyCalling(Licence $l, int $c2c, bool $smart31, string $actor): void
+    {
+        $f = array_values(array_diff($l->features ?? [], ['click2call', 'smart31']));
+        if ($c2c > 0) {
+            $f = array_merge($f, $smart31 ? ['click2call', 'smart31'] : ['click2call']);
+        }
+        $before = ['c2c_users' => $l->c2c_users, 'smart31' => in_array('smart31', $l->features ?? [], true)];
+        $l->forceFill(['c2c_users' => $c2c, 'features' => $f])->save();
+        $after = ['c2c_users' => $c2c, 'smart31' => $c2c > 0 && $smart31];
+        if ($before !== $after) {
+            $l->log('calling_changed', $after, $actor);
+        }
     }
 
     /** Why a trial can't be started with this workspace name / e-mail, or null. Checked before the e-mail code is sent. */

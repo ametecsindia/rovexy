@@ -143,11 +143,12 @@ final class Click2CallSettings
             ->where('call_date', now(app(CurrentCompany::class)->get()->timezone ?: 'Asia/Kolkata')->toDateString())->where('attempt_count', '>', 0)->decrement('attempt_count');
     }
 
-    /** Licensed Click2Call users (C2C_MAX_USERS, 0 = no limit) and how many active people are allowed now. */
+    /** Licensed Click2Call users (the licence's count, else C2C_MAX_USERS; 0 = no limit) and how many active people are allowed now. */
     public static function userLimit(): array
     {
         $users = User::query()->where('status', 'active')->get()->filter(fn (User $u) => $u->hasPermission('calls.make'));   // people who place calls
-        return ['limit' => (int) config('ammp.telephony.click2call.max_users'), 'in_use' => $users->filter(fn ($u) => self::allows($u, 'click2call'))->count()];
+        $licensed = app(Licensing::class)->current()['c2c_users'];
+        return ['limit' => $licensed ?? (int) config('ammp.telephony.click2call.max_users'), 'in_use' => $users->filter(fn ($u) => self::allows($u, 'click2call'))->count()];
     }
 
     /** Adapter config when the company has Click2Call on; null = use the server's TELEPHONY_DRIVER. */

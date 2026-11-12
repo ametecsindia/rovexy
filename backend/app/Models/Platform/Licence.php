@@ -13,12 +13,12 @@ class Licence extends Model
 {
     protected $fillable = ['key', 'company_id', 'plan_id', 'holder_name', 'holder_email', 'kind', 'max_users', 'features', 'status',
         'starts_at', 'expires_at', 'grace_days', 'notes',
-        'deployment', 'billing', 'amc_expires_at', 'server_fingerprint', 'activated_at', 'last_validated_at', 'reported_users', 'amc_amount'];
+        'deployment', 'billing', 'amc_expires_at', 'server_fingerprint', 'activated_at', 'last_validated_at', 'reported_users', 'amc_amount', 'c2c_users'];
 
     protected function casts(): array
     {
         return ['features' => 'array', 'starts_at' => 'datetime', 'expires_at' => 'datetime', 'max_users' => 'integer', 'grace_days' => 'integer',
-            'amc_expires_at' => 'datetime', 'activated_at' => 'datetime', 'last_validated_at' => 'datetime', 'reported_users' => 'integer'];
+            'amc_expires_at' => 'datetime', 'activated_at' => 'datetime', 'last_validated_at' => 'datetime', 'reported_users' => 'integer', 'c2c_users' => 'integer'];
     }
 
     /** Past expiry + grace (perpetual and internal never expire). */

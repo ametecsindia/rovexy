@@ -29,7 +29,8 @@ use Illuminate\Http\Request;
 final class LicenceController extends Controller
 {
     private const EVENT = ['issued' => 'Licence issued', 'trial_started' => 'Trial started', 'renewed' => 'Renewed', 'upgraded' => 'Users / plan upgraded',
-        'superseded' => 'Trial replaced by a paid package', 'edited' => 'Changed by ROVEXY', 'amc_renewed' => 'Updates & support (AMC) renewed', 'activated' => 'Activated on a server'];
+        'superseded' => 'Trial replaced by a paid package', 'edited' => 'Changed by ROVEXY', 'amc_renewed' => 'Updates & support (AMC) renewed', 'activated' => 'Activated on a server',
+        'calling_changed' => 'Click2Call users changed'];
 
     public function show(Licensing $lic, CurrentCompany $ctx, LicenceClient $client)
     {
@@ -67,6 +68,7 @@ final class LicenceController extends Controller
             'plan_id' => $licence?->plan_id,
             'licence_billing' => $licence?->billing,
             'cycles' => Pricing::CYCLE_LABEL,
+            'c2c_rates' => ['c2c' => Pricing::c2cRate(false), 'smart31' => Pricing::c2cRate(true)],
             'billing' => ['state_code' => $company->state_code, 'gstin' => $company->gstin],
             'plans' => Plan::query()->with('cloudTiers')->where('active', true)->where('is_public', true)->orderBy('sort')->get()
                 ->filter(fn (Plan $p) => $p->quarterlyCloud() || $p->id === $licence?->plan_id)->values()   // cloud: ROVEXY Cloud plans + the current plan (to renew it)
@@ -111,7 +113,8 @@ final class LicenceController extends Controller
     {
         $r->merge(['buyer_gstin' => strtoupper(trim((string) $r->input('buyer_gstin'))) ?: null]);
         $d = $r->validate(['kind' => 'required|in:renewal,seats,amc', 'plan_id' => 'nullable|integer', 'users' => 'nullable|integer|min:1|max:100000',
-            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'buyer_gstin' => 'nullable|string|size:15', 'state_code' => 'required|digits:2', 'coupon' => 'nullable|string|max:30']);
+            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'buyer_gstin' => 'nullable|string|size:15', 'state_code' => 'required|digits:2', 'coupon' => 'nullable|string|max:30',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean']);
         return $d + ['buyer_name' => $r->user()->name, 'buyer_email' => $r->user()->email];
     }
 
@@ -253,7 +256,8 @@ final class LicenceController extends Controller
         abort_if(LicenceClient::isClient(), 404);
         $r->merge(['buyer_gstin' => strtoupper(trim((string) $r->input('buyer_gstin'))) ?: null]);
         $d = $r->validate(['kind' => 'nullable|in:renewal,seats', 'plan_id' => 'required|integer', 'users' => 'required|integer|min:1|max:100000',
-            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'buyer_gstin' => 'nullable|string|size:15', 'state_code' => 'required|digits:2', 'coupon' => 'nullable|string|max:30']);
+            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'buyer_gstin' => 'nullable|string|size:15', 'state_code' => 'required|digits:2', 'coupon' => 'nullable|string|max:30',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean']);
         $licence = $this->licence($ctx) ?? throw new DomainException('no_licence', 'This workspace has no licence. Contact Ametecs.');
         if ($licence->kind === 'internal') {
             throw new DomainException('internal_licence', 'This workspace is on an internal licence and does not need renewing.');
@@ -261,7 +265,8 @@ final class LicenceController extends Controller
         $kind = $licence->kind === 'trial' ? 'upgrade' : ($d['kind'] ?? 'renewal');
         $company = $ctx->get();
         $u = $r->user();
-        return [$kind, ['plan_id' => $d['plan_id'], 'users' => $d['users'], 'billing' => $d['billing'] ?? null, 'coupon' => $d['coupon'] ?? null],
+        return [$kind, ['plan_id' => $d['plan_id'], 'users' => $d['users'], 'billing' => $d['billing'] ?? null, 'coupon' => $d['coupon'] ?? null,
+            'c2c_users' => $d['c2c_users'] ?? null, 'smart31' => $d['smart31'] ?? null],
             ['buyer_company' => $company->name, 'buyer_name' => $u->name, 'buyer_email' => $company->billing_email ?: $u->email, 'buyer_phone' => $company->billing_phone,
                 'buyer_gstin' => $d['buyer_gstin'] ?? null, 'state_code' => $d['state_code'], 'company_id' => $company->id], $licence];
     }

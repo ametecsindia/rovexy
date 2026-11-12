@@ -216,7 +216,8 @@ final class ConsoleController extends Controller
             $dep = self::depositOf($deposits->get($l->id, collect()));
             return ['licence_id' => $l->id, 'key' => $l->key, 'holder' => $l->holder_name, 'deployment' => $l->deployment, 'workspace' => $l->company?->slug,
                 'c2c_users' => $u['c2c_users'], 'smart31_users' => $u['smart31_users'], 'usage_source' => $u['source'],
-                'amount' => \App\Services\Platform\CallingUsage::amount($u['c2c_users'], $u['smart31_users']),
+                // a subscription with Click2Call users chosen at purchase (12 Nov 2026) has paid for them with the period
+                'amount' => $l->kind === 'subscription' && $l->c2c_users !== null ? 0.0 : \App\Services\Platform\CallingUsage::amount($u['c2c_users'], $u['smart31_users']),
                 'deposit_balance' => $dep['balance'], 'deposit_fos' => $dep['fos'],
                 'amc_expires_at' => $l->amc_expires_at?->toDateString(), 'amc_amount' => $l->amc_amount,
                 'amc_due_soon' => $l->amc_expires_at !== null && $l->amc_expires_at->lt(now()->addDays(60))];
@@ -234,7 +235,8 @@ final class ConsoleController extends Controller
         $d = $r->validate(['max_users' => 'integer|min:0|max:100000', 'expires_at' => 'nullable|date', 'grace_days' => 'integer|min:0|max:90',
             'plan_id' => 'nullable|integer', 'features' => 'array', 'features.*' => Rule::in(array_keys(Licensing::FEATURES)),
             'status' => 'in:active,suspended,revoked', 'notes' => 'nullable|string|max:2000', 'reason' => 'nullable|string|max:255',
-            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'amc_expires_at' => 'nullable|date', 'amc_amount' => 'nullable|numeric|min:0|max:100000000']);
+            'billing' => 'nullable|in:annual,half_yearly,quarterly', 'amc_expires_at' => 'nullable|date', 'amc_amount' => 'nullable|numeric|min:0|max:100000000',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'boolean']);
         if ($l->status === 'revoked' && ($d['status'] ?? 'revoked') !== 'revoked') {
             throw new DomainException('licence_revoked', 'A revoked licence stays revoked. Issue a new one instead.');
         }
@@ -248,7 +250,19 @@ final class ConsoleController extends Controller
         if (!empty($d['expires_at']) && preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $d['expires_at'])) {
             $d['expires_at'] = Carbon::parse($d['expires_at'], Ledger::TZ)->endOfDay()->utc();   // a date means "to the end of that Indian day"
         }
-        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at', 'amc_amount']);
+        $calling = array_key_exists('c2c_users', $d) || array_key_exists('smart31', $d);
+        $c2c = $calling ? (int) ($d['c2c_users'] ?? $l->c2c_users ?? (in_array('click2call', $l->features ?? [], true) ? $l->max_users : 0)) : null;
+        $maxUsers = (int) ($d['max_users'] ?? $l->max_users);
+        if ($calling && $maxUsers > 0 && $c2c > $maxUsers) {
+            throw new DomainException('bad_c2c', "Click2Call users can't be more than the {$maxUsers} users on the licence.");
+        }
+        if ($calling && $l->deployment !== 'onprem' && $l->company_id && ($co = \App\Models\Company::query()->find($l->company_id))) {
+            $inUse = app(CurrentCompany::class)->run($co, fn () => \App\Telephony\Click2CallSettings::userLimit()['in_use']);
+            if ($c2c > 0 && $c2c < $inUse) {
+                throw new DomainException('c2c_in_use', "{$inUse} people in this workspace have Click2Call now. Ask the client to remove some (Calling configuration → Click2Call users), or keep at least {$inUse}.");
+            }
+        }
+        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at', 'amc_amount', 'c2c_users']);
         if (isset($d['plan_id'])) {
             $plan = Plan::query()->findOrFail($d['plan_id']);
             $l->plan_id = $plan->id;
@@ -256,6 +270,9 @@ final class ConsoleController extends Controller
         }
         $l->fill(array_intersect_key($d, array_flip(['max_users', 'expires_at', 'grace_days', 'features', 'status', 'notes', 'billing', 'amc_expires_at', 'amc_amount'])));
         $l->save();
+        if ($calling) {   // Click2Call users + Smart31 decide the two calling features (whatever the plan or ticks said)
+            Sales::applyCalling($l, $c2c, (bool) ($d['smart31'] ?? in_array('smart31', $l->features ?? [], true)), $this->actor());
+        }
         $l->log('edited', ['before' => $before, 'after' => $l->only(array_keys($before)), 'reason' => $d['reason'] ?? null], $this->actor());
         PlatformAudit::record('licence.updated', $l, ['reason' => $d['reason'] ?? null]);
         if ($l->status === 'revoked') {   // nothing left to pay for on a revoked licence
@@ -395,7 +412,7 @@ final class ConsoleController extends Controller
         $d = $r->validate(['kind' => 'required|in:new,upgrade,renewal,seats,amc', 'licence_id' => 'nullable|integer|required_unless:kind,new', 'company_id' => 'nullable|integer|exists:companies,id',
             'plan_id' => 'nullable|integer|required_if:kind,new', 'deployment' => 'nullable|in:cloud,onprem', 'licence_kind' => 'nullable|in:subscription,perpetual',
             'users' => 'nullable|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly', 'setup' => 'nullable', 'custom_amount' => 'nullable|numeric|min:1|max:999999999',
-            'coupon' => 'nullable|string|max:30', 'buyer_company' => ($preview ? 'nullable' : 'required') . '|string|max:150', 'buyer_name' => ($preview ? 'nullable' : 'required') . '|string|max:150',
+            'coupon' => 'nullable|string|max:30', 'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean', 'buyer_company' => ($preview ? 'nullable' : 'required') . '|string|max:150', 'buyer_name' => ($preview ? 'nullable' : 'required') . '|string|max:150',
             'buyer_email' => ($preview ? 'nullable' : 'required') . '|email|max:190', 'buyer_phone' => 'nullable|string|max:20', 'buyer_gstin' => 'nullable|string|max:15', 'state_code' => 'nullable|digits:2']);
         if (($d['custom_amount'] ?? null) !== null || ($d['setup'] ?? null) === 'none' || is_numeric($d['setup'] ?? null)) {
             $this->superOnly();   // typed prices and waived setup change what we charge
@@ -404,7 +421,7 @@ final class ConsoleController extends Controller
         if ($d['kind'] === 'new' && !empty($d['company_id']) && Licence::query()->where('company_id', $d['company_id'])->whereIn('status', ['active', 'suspended'])->exists()) {
             throw new DomainException('has_licence', 'This workspace already has a licence: raise a renewal or more-users order on it.');
         }
-        $spec = array_intersect_key($d, array_flip(['plan_id', 'deployment', 'licence_kind', 'users', 'billing', 'custom_amount', 'coupon']))
+        $spec = array_intersect_key($d, array_flip(['plan_id', 'deployment', 'licence_kind', 'users', 'billing', 'custom_amount', 'coupon', 'c2c_users', 'smart31']))
             + ['setup' => match (true) { ($d['setup'] ?? null) === 'none' => false, is_numeric($d['setup'] ?? null) => (float) $d['setup'], default => null }];
         if ($d['kind'] === 'new' && !empty($d['company_id'])) {
             $spec['deployment'] = 'cloud';

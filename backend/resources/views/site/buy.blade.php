@@ -91,21 +91,12 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
         @foreach($plans->reject(fn ($p) => $p->quarterlyCloud()) as $p)<label><input type="radio" name="plan" value="{{ $p->code }}" data-name="{{ $p->name }}" data-min="{{ $p->min_users }}" data-tag="{{ $p->tagline }}" {{ old('plan', $plan->code) === $p->code ? 'checked' : '' }}>{{ $p->name }}</label>@endforeach
       </div>
     </div>
-    @php
-      $cp = preg_match('/^cloud-(ametecs|own)(-c2c(-smart31)?)?$/', old('plan', $plan->code), $m) ? $m : [null, 'ametecs', '', ''];
-      $maps = $cp[1]; $tel = ($cp[3] ?? '') !== '' ? 'c2c_smart31' : (($cp[2] ?? '') !== '' ? 'c2c' : 'none');
-    @endphp
+    @php $maps = preg_match('/^cloud-(ametecs|own)/', old('plan', $plan->code), $m) ? $m[1] : 'ametecs'; @endphp
     <div id="cpick">
       <span class="lab">Google Maps</span>
       <div class="seg" role="radiogroup" aria-label="Google Maps service">
         <label><input type="radio" name="maps" value="ametecs" {{ $maps === 'ametecs' ? 'checked' : '' }}>Ametecs Google Maps<small>managed by us</small></label>
         <label><input type="radio" name="maps" value="own" {{ $maps === 'own' ? 'checked' : '' }}>Your own Google Maps<small>your Google billing</small></label>
-      </div>
-      <span class="lab">Calling add-on</span>
-      <div class="seg" role="radiogroup" aria-label="Calling add-on">
-        <label><input type="radio" name="tel" value="none" {{ $tel === 'none' ? 'checked' : '' }}>None<small>SIM calling</small></label>
-        <label><input type="radio" name="tel" value="c2c" {{ $tel === 'c2c' ? 'checked' : '' }}>Click2Call<small>per user a month</small></label>
-        <label><input type="radio" name="tel" value="c2c_smart31" {{ $tel === 'c2c_smart31' ? 'checked' : '' }}>Click2Call + Smart31<small>per user a month</small></label>
       </div>
       @foreach($plans->filter(fn ($p) => $p->quarterlyCloud()) as $p)<input type="radio" name="plan" value="{{ $p->code }}" data-name="{{ $p->name }}" data-min="{{ $p->min_users }}" data-tag="{{ $p->tagline }}" hidden {{ old('plan', $plan->code) === $p->code ? 'checked' : '' }}>@endforeach
       <input type="hidden" name="billing" value="quarterly">
@@ -119,6 +110,16 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
       <button type="button" id="plus" aria-label="More users">+</button>
       <span class="hint" id="uhint">everyone who signs in</span>
     </div>
+
+    {{-- Click2Call for only the users who need it (12 Nov 2026); 0 = none --}}
+    <span class="lab" id="clab">Click2Call (C2C) users <span class="hint">optional · ₹{{ number_format($c2cRate) }} / user / month</span></span>
+    <div class="step">
+      <button type="button" id="cminus" aria-label="Fewer Click2Call users">−</button>
+      <input type="number" name="c2c_users" id="c2c" value="{{ old('c2c_users', $c2c) }}" min="0" max="100000" inputmode="numeric" aria-labelledby="clab">
+      <button type="button" id="cplus" aria-label="More Click2Call users">+</button>
+      <span class="hint" id="chint">of the users above · 0 = SIM calling only</span>
+    </div>
+    <label class="check" id="s31row" style="margin-top:10px"><input type="checkbox" name="smart31" value="1" id="s31" {{ old('smart31', $smart31) ? 'checked' : '' }}> <span>Add Smart31 number rotation for the Click2Call users (₹{{ number_format($s31Rate) }} / user / month in all, instead of ₹{{ number_format($c2cRate) }})</span></label>
 
     <span class="lab">Coupon code</span>
     <div class="coupon"><input name="coupon" id="coupon" value="{{ old('coupon') }}" maxlength="30" placeholder="e.g. DIWALI25" autocomplete="off" aria-label="Coupon code"><button type="button" id="apply">Apply</button></div>
@@ -170,9 +171,14 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
   var inr=function(n){var d=Math.round(n*100)%100?2:0;return '₹'+(+n).toLocaleString('en-IN',{minimumFractionDigits:d,maximumFractionDigits:d});};
   var val=function(n){var x=f.querySelector('input[name='+n+']:checked');return x?x.value:null;};
   var plan=function(){return f.querySelector('input[name=plan]:checked');};
-  function cloudPlan(){   // Google Maps model + calling add-on → the plan that is charged
-    var code='cloud-'+val('maps')+({none:'',c2c:'-c2c',c2c_smart31:'-c2c-smart31'})[val('tel')];
-    var r=f.querySelector('input[name=plan][value="'+code+'"]'); if(r) r.checked=true;
+  function cloudPlan(){   // Google Maps model → the plan that is charged
+    var r=f.querySelector('input[name=plan][value="cloud-'+val('maps')+'"]'); if(r) r.checked=true;
+  }
+  function c2c(){   // Click2Call users: 0..users; Smart31 only with Click2Call
+    var n=+f.elements.users.value||0, c=Math.min(Math.max(0,Math.floor(+f.elements.c2c_users.value||0)),n);
+    if(+f.elements.c2c_users.value!==c) f.elements.c2c_users.value=c;
+    $('s31').disabled=!c; $('s31row').style.opacity=c?1:.5;
+    return {n:c, s31:c>0&&$('s31').checked};
   }
   function mode(){
     var own=val('kind')==='perpetual';
@@ -202,15 +208,15 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
     $('taxl').textContent=st?(st===seller?'CGST + SGST '+gst+'%':'IGST '+gst+'%'):'GST '+gst+'%';
     $('tax').textContent=inr(j.cgst+j.sgst+j.igst); $('total').textContent=inr(j.total);
     $('totl').textContent=own?'One-time total':'Payable now';
-    $('note').textContent=own?'One-time · you own it · optional AMC '+amc+'%/yr from year 2'
-      :(j.addon_per_user_month>0?'Subscription '+inr(j.base_quarter)+' + calling add-on '+inr(j.addon_quarter)+' a quarter ('+inr(j.base_per_user_month)+' + '+inr(j.addon_per_user_month)+' per user a month), before GST'
-        :inr(j.per_user_month)+' per user a month, billed quarterly, before GST');
+    var cm=j.c2c_monthly>0?(j.smart31?'Click2Call + Smart31':'Click2Call')+' for '+j.c2c_users+' user'+(j.c2c_users>1?'s':'')+': '+inr(j.c2c_monthly)+' a month':'';
+    $('note').textContent=own?'One-time · you own it · optional AMC '+amc+'%/yr from year 2'+(cm?' · '+cm+' + GST, billed monthly (not in the one-time total)':'')
+      :inr(j.per_user_month)+' per user a month, billed quarterly, before GST'+(cm?' · '+cm+' (in the quarterly total above)':'');
   }
   function quote(){
     mode();
-    var p=plan(), users=+f.elements.users.value||0, own=val('kind')==='perpetual', my=++seq, code=f.elements.coupon.value.trim();
+    var p=plan(), users=+f.elements.users.value||0, own=val('kind')==='perpetual', my=++seq, code=f.elements.coupon.value.trim(), cc=c2c();
     fetch('/price-check',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','X-CSRF-TOKEN':tok},
-      body:JSON.stringify({plan:p.value,users:users,deployment:own?'onprem':'cloud',billing:own?null:'quarterly',state_code:f.elements.state_code.value||null,code:code||null,email:f.elements.buyer_email.value||null})})
+      body:JSON.stringify({plan:p.value,users:users,c2c_users:cc.n,smart31:cc.s31,deployment:own?'onprem':'cloud',billing:own?null:'quarterly',state_code:f.elements.state_code.value||null,code:code||null,email:f.elements.buyer_email.value||null})})
       .then(function(r){return r.json();}).then(function(j){ if(my!==seq) return;
         var cm=$('cmsg');
         if(!j.ok&&j.error==='bad_coupon'){ cm.textContent=j.message; cm.style.color='#FFB4A8'; return; }
@@ -220,6 +226,9 @@ label.f .opt{font-weight:400;color:var(--mute)}label.f .req{color:var(--bad)}
   var later=function(){clearTimeout(t);t=setTimeout(quote,220);};
   $('minus').addEventListener('click',function(){f.elements.users.value=Math.max(+plan().dataset.min,(+f.elements.users.value||0)-1);later();});
   $('plus').addEventListener('click',function(){f.elements.users.value=(+f.elements.users.value||0)+1;later();});
+  $('cminus').addEventListener('click',function(){f.elements.c2c_users.value=Math.max(0,(+f.elements.c2c_users.value||0)-1);later();});
+  $('cplus').addEventListener('click',function(){f.elements.c2c_users.value=(+f.elements.c2c_users.value||0)+1;later();});
+  f.elements.c2c_users.addEventListener('input',later);
   $('apply').addEventListener('click',quote);
   f.elements.users.addEventListener('input',later);
   f.addEventListener('change',function(e){ if(e.target.name==='plan'&&(+f.elements.users.value)<+plan().dataset.min) f.elements.users.value=plan().dataset.min; later(); });

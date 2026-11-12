@@ -13,7 +13,7 @@ class SalesOrder extends Model
         'buyer_gstin', 'state_code', 'workspace', 'coupon_code', 'discount', 'admin_password', 'amount', 'cgst', 'sgst', 'igst', 'total', 'status', 'payment_method', 'payment_ref',
         'razorpay_order_id', 'razorpay_payment_id', 'paid_at', 'provisioned_at', 'invoice_number', 'created_by',
         'attempts', 'failed_at', 'failure_reason', 'cancelled_at', 'cancel_reason', 'list_price', 'pricing', 'custom_price_id',
-        'deployment', 'licence_kind', 'billing', 'users', 'lines', 'valid_until'];
+        'deployment', 'licence_kind', 'billing', 'users', 'lines', 'valid_until', 'c2c_users', 'smart31'];
 
     protected $appends = ['pay_state'];
 
@@ -22,7 +22,7 @@ class SalesOrder extends Model
     protected function casts(): array
     {
         return ['amount' => 'float', 'discount' => 'float', 'cgst' => 'float', 'sgst' => 'float', 'igst' => 'float', 'total' => 'float', 'paid_at' => 'datetime', 'provisioned_at' => 'datetime', 'failed_at' => 'datetime', 'cancelled_at' => 'datetime', 'attempts' => 'integer', 'list_price' => 'float', 'custom_price_id' => 'integer',
-            'users' => 'integer', 'lines' => 'array', 'valid_until' => 'date:Y-m-d'];
+            'users' => 'integer', 'lines' => 'array', 'valid_until' => 'date:Y-m-d', 'c2c_users' => 'integer', 'smart31' => 'boolean'];
     }
 
     /** What people see: paid | cancelled | failed (last attempt failed, can be retried) | pending (not paid yet). */

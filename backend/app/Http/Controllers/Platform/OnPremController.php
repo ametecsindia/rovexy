@@ -45,6 +45,8 @@ final class OnPremController extends Controller
             'can_renew' => $sub && $l->status === 'active', 'can_add_users' => $live && in_array($l->kind, ['subscription', 'perpetual'], true),
             'can_amc' => $l->kind === 'perpetual' && $l->status === 'active',
             'cycles' => Pricing::CYCLE_LABEL,
+            'c2c_users' => $l->c2c_users, 'smart31' => in_array('smart31', $l->features ?? [], true),
+            'c2c_rates' => ['c2c' => Pricing::c2cRate(false), 'smart31' => Pricing::c2cRate(true)],
             'plans' => Plan::query()->with('cloudTiers')->where('active', true)->where('is_public', true)->orderBy('sort')->get()
                 ->map(fn (Plan $p) => $p->only(['id', 'code', 'name', 'tagline', 'min_users', 'features']) + [
                     'from_rate' => $sub ? $p->cloudTiers->filter(fn ($t) => $t->max_users !== null && $t->rate_inr > 0)->min('rate_inr') : null,
@@ -103,9 +105,11 @@ final class OnPremController extends Controller
         $r->merge(['buyer_gstin' => strtoupper(trim((string) $r->input('buyer_gstin'))) ?: null]);
         $d = $r->validate(['kind' => 'required|in:renewal,seats,amc', 'plan_id' => 'nullable|integer', 'users' => 'nullable|integer|min:1|max:100000',
             'billing' => 'nullable|in:annual,half_yearly,quarterly', 'buyer_gstin' => 'nullable|string|size:15', 'state_code' => 'required|digits:2',
-            'coupon' => 'nullable|string|max:30', 'buyer_name' => 'nullable|string|max:150', 'buyer_email' => 'nullable|email|max:190']);
+            'coupon' => 'nullable|string|max:30', 'buyer_name' => 'nullable|string|max:150', 'buyer_email' => 'nullable|email|max:190',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean']);
         $spec = ['plan_id' => $d['kind'] === 'amc' ? null : ($d['plan_id'] ?? null), 'users' => $d['kind'] === 'amc' ? null : ($d['users'] ?? null),
-            'billing' => $d['kind'] === 'renewal' ? ($d['billing'] ?? null) : null, 'coupon' => $d['kind'] === 'renewal' ? ($d['coupon'] ?? null) : null];
+            'billing' => $d['kind'] === 'renewal' ? ($d['billing'] ?? null) : null, 'coupon' => $d['kind'] === 'renewal' ? ($d['coupon'] ?? null) : null,
+            'c2c_users' => $d['kind'] === 'amc' ? null : ($d['c2c_users'] ?? null), 'smart31' => $d['smart31'] ?? null];
         $buyer = ['buyer_company' => $l->holder_name, 'buyer_name' => $d['buyer_name'] ?? $l->holder_name, 'buyer_email' => $l->holder_email ?: ($d['buyer_email'] ?? ''),
             'buyer_gstin' => $d['buyer_gstin'] ?? null, 'state_code' => $d['state_code'], 'company_id' => null];
         if ($buyer['buyer_email'] === '') {

@@ -328,14 +328,18 @@ final class SiteController extends Controller
         $plans = $this->plans();
         $own = $r->query('kind') === 'perpetual';
         $pool = $plans->filter(fn (Plan $p) => $own !== $p->quarterlyCloud());   // on-premises: the classic plans; cloud: ROVEXY Cloud
-        $plan = $pool->firstWhere('code', $r->query('plan', $r->query('tier'))) ?? $pool->first();
+        $asked = (string) $r->query('plan', $r->query('tier'));
+        $legacy = preg_match('/^(cloud-(?:ametecs|own))-c2c(-smart31)?$/', $asked, $m) ? $m : null;   // old links: add-on plans → Click2Call for everyone
+        $plan = $pool->firstWhere('code', $legacy[1] ?? $asked) ?? $pool->first();
         abort_if($plan === null, 404);
+        $users = max($plan->min_users, (int) $r->query('users', $plan->min_users));
         return view('site.buy', ['plans' => $plans, 'plan' => $plan, 'states' => self::STATES, 'sellerState' => PlatformSettings::get('seller_state'),
             'kind' => $own ? 'perpetual' : 'cloud',
-            'users' => max($plan->min_users, (int) $r->query('users', $plan->min_users)), 'billing' => array_key_exists((string) $r->query('billing'), Pricing::CYCLES) ? $r->query('billing') : 'annual',
+            'users' => $users, 'c2c' => min($users, max(0, (int) $r->query('c2c', $legacy ? $users : 0))), 'smart31' => $r->boolean('smart31', isset($legacy[2])),
+            'billing' => array_key_exists((string) $r->query('billing'), Pricing::CYCLES) ? $r->query('billing') : 'annual',
             'gst' => (float) PlatformSettings::get('gst_rate'), 'payments' => Razorpay::configured(), 'trialDays' => (int) PlatformSettings::get('trial_days'),
             'annualPct' => (float) PlatformSettings::get('price_annual_discount_pct'), 'halfPct' => (float) PlatformSettings::get('price_half_yearly_discount_pct'),
-            'amcPct' => (float) PlatformSettings::get('amc_pct'),
+            'amcPct' => (float) PlatformSettings::get('amc_pct'), 'c2cRate' => Pricing::c2cRate(false), 's31Rate' => Pricing::c2cRate(true),
             'seller' => ['name' => PlatformSettings::get('seller_name'), 'gstin' => PlatformSettings::get('seller_gstin'), 'phone' => PlatformSettings::get('seller_phone')]]);
     }
 
@@ -345,7 +349,8 @@ final class SiteController extends Controller
             return redirect('/thank-you');
         }
         $own = $r->input('kind') === 'perpetual';   // on-premises perpetual: a licence key, no cloud workspace
-        $d = $r->validate(['plan' => 'required|string', 'kind' => 'nullable|in:cloud,perpetual', 'users' => 'required|integer|min:1|max:100000', 'billing' => ($own ? 'nullable' : 'required') . '|in:annual,half_yearly,quarterly',
+        $d = $r->validate(['plan' => 'required|string', 'kind' => 'nullable|in:cloud,perpetual', 'users' => 'required|integer|min:1|max:100000',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean', 'billing' => ($own ? 'nullable' : 'required') . '|in:annual,half_yearly,quarterly',
             'buyer_company' => 'required|string|max:150', 'buyer_name' => 'required|string|max:150',
             'buyer_email' => 'required|email|max:190', 'buyer_phone' => 'required|string|max:20', 'state_code' => ['required', \Illuminate\Validation\Rule::in(array_keys(self::STATES))],
             'buyer_gstin' => 'nullable|string|max:15', 'coupon' => 'nullable|string|max:30', 'workspace' => ($own ? 'nullable' : 'required') . '|string|max:40',
@@ -378,6 +383,7 @@ final class SiteController extends Controller
         }
         try {
             $o = Sales::createOrder('new', ['plan_id' => $plan->id, 'users' => $d['users'], 'billing' => $own ? null : $d['billing'], 'coupon' => $d['coupon'] ?? null,
+                'c2c_users' => (int) ($d['c2c_users'] ?? 0), 'smart31' => (bool) ($d['smart31'] ?? false),
                 'deployment' => $own ? 'onprem' : 'cloud', 'licence_kind' => $own ? 'perpetual' : 'subscription'],
                 $own ? $d : ['workspace' => $d['workspace'], 'admin_password' => $d['password']] + $d, null, 'website');
         } catch (DomainException $e) {
@@ -391,7 +397,8 @@ final class SiteController extends Controller
     public function priceCheck(Request $r)
     {
         $d = $r->validate(['plan' => 'required|string', 'users' => 'required|integer|min:1|max:100000', 'billing' => 'nullable|in:annual,half_yearly,quarterly',
-            'deployment' => 'nullable|in:cloud,onprem', 'state_code' => 'nullable|string|size:2', 'code' => 'nullable|string|max:30', 'email' => 'nullable|email|max:190']);
+            'deployment' => 'nullable|in:cloud,onprem', 'state_code' => 'nullable|string|size:2', 'code' => 'nullable|string|max:30', 'email' => 'nullable|email|max:190',
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'nullable|boolean']);
         $plan = Plan::query()->where('code', $d['plan'])->where('active', true)->firstOrFail();
         $onprem = ($d['deployment'] ?? 'cloud') === 'onprem';
         if ($msg = self::offerProblem($plan, $onprem)) {
@@ -399,6 +406,7 @@ final class SiteController extends Controller
         }
         try {
             [, $pr] = Sales::quote('new', ['plan_id' => $plan->id, 'users' => $d['users'], 'billing' => $d['billing'] ?? 'annual', 'coupon' => $d['code'] ?? null,
+                'c2c_users' => $d['c2c_users'] ?? null, 'smart31' => $d['smart31'] ?? null,
                 'deployment' => $onprem ? 'onprem' : 'cloud', 'licence_kind' => $onprem ? 'perpetual' : 'subscription'],
                 ['buyer_email' => $d['email'] ?? null, 'state_code' => $d['state_code'] ?? null]);
         } catch (DomainException $e) {

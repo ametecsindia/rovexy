@@ -216,9 +216,9 @@ final class LicenceClient
         return $this->memo = match (true) {
             in_array($row->status, LicenceAuthority::REASONS, true) && ($row->source !== 'file' || in_array($row->status, ['licence_revoked', 'licence_suspended'], true)) => ['key' => $row->licence_key, 'kind' => $p['kind'] ?? null, 'plan' => $p['plan'] ?? null,
                 'max_users' => (int) ($p['max_users'] ?? 0), 'features' => $p['features'] ?? [], 'status' => $row->status, 'expires_at' => $p['expires_at'] ?? null, 'grace_days' => (int) ($p['grace_days'] ?? 0)],
-            $p !== null && $this->stale($p) => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'features' => $p['features'] ?? [],
+            $p !== null && $this->stale($p) => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'features' => $p['features'] ?? [],
                 'status' => 'stale', 'expires_at' => $p['expires_at'], 'grace_days' => (int) $p['grace_days']],
-            $p !== null => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'features' => $p['features'] ?? [],
+            $p !== null => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'features' => $p['features'] ?? [],
                 'status' => $p['status'] === 'active' ? 'active' : 'licence_' . $p['status'], 'expires_at' => $p['expires_at'], 'grace_days' => (int) $p['grace_days']],
             // ponytail: this window lives in the customer's own database, so it can be stretched by editing key_saved_at — capped at 10 users
             // and every feature of an evaluation, never the paid licence (that needs a signature). Move the anchor into a signed file if it matters.

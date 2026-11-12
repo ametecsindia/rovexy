@@ -21,6 +21,9 @@ use App\Models\Platform\Plan;
  *  Setup              : base + (users − included) × per extra; on the FIRST order (cloud: cloud_setup_*, on-prem: setup_*)
  *  More users mid-term: subscription (new − old monthly value) × remaining days ÷ 30.44; perpetual price(new) − price(old)
  *  AMC (perpetual)    : amc_pct % of the current perpetual price, 12 months
+ *  Click2Call add-on  : for c2c_users of the users (0..users), ₹price_c2c_user/user/month, or ₹price_smart31_user with Smart31;
+ *                       subscriptions: × months in the cycle (more users mid-term: the difference × remaining days ÷ 30.44);
+ *                       perpetual: not in the one-time total — billed monthly (c2c_monthly), so nothing is charged here
  * There is no ₹0 price: a size beyond the priced bands is a custom quote and is refused unless staff type a price
  * (or a negotiated price applies). Prices exclude GST; GST is CGST+SGST in the seller's state, IGST otherwise.
  */
@@ -68,6 +71,12 @@ final class Pricing
         return null;
     }
 
+    /** ₹ per Click2Call user per month: Click2Call alone, or Click2Call + Smart31 (Super Admin → Settings). */
+    public static function c2cRate(bool $smart31): float
+    {
+        return (float) PlatformSettings::get($smart31 ? 'price_smart31_user' : 'price_c2c_user');
+    }
+
     /** Setup & onboarding: base + (users − included) × per extra. Cloud has its own amounts (cloud_setup_*), on-premises the setup_* ones. */
     public static function setupFee(int $users, string $deployment = 'onprem'): float
     {
@@ -79,7 +88,8 @@ final class Pricing
      * Lines and totals for one order. $s keys:
      *  plan (Plan), kind (new|upgrade|renewal|seats|amc), licence_kind (subscription|perpetual), deployment (cloud|onprem), billing, users,
      *  licence (?Licence — required for seats / amc), first (bool: no setup paid yet), setup (null = automatic | false = none | float),
-     *  custom_amount (?float, staff-typed licence price), custom (?CustomPrice), coupon (?Coupon), state (?string)
+     *  custom_amount (?float, staff-typed licence price), custom (?CustomPrice), coupon (?Coupon), state (?string),
+ *  c2c_users (?int: Click2Call users, null = no add-on choice — orders and licences from before 12 Nov 2026), smart31 (bool)
      * @return array{lines:list<array{type:string,label:string,amount:float}>,amount:float,discount:float,cgst:float,sgst:float,igst:float,total:float,
      *               list_price:?float,pricing:string,custom_price_id:?int,users:int,billing:?string,licence_kind:string,deployment:string}
      */
@@ -118,10 +128,18 @@ final class Pricing
         $months = $billing ? self::CYCLES[$billing] : null;
         $what = $plan->name . ($dep === 'onprem' ? ' On-premises' : ' Cloud');
 
+        // Click2Call for some users (validated first: it can make a more-users order worth placing)
+        $c2c = $kind === 'amc' || ($s['c2c_users'] ?? null) === null ? null : (int) $s['c2c_users'];
+        $s31 = $c2c > 0 && !empty($s['smart31']);
+        if ($c2c !== null && ($c2c < 0 || $c2c > $users)) {
+            throw new DomainException('bad_c2c', "Click2Call can be added for 0 to {$users} users.");
+        }
+        $c2cLine = $c2c === null ? null : self::c2c($kind, $lk, $c2c, $s31, $billing, $l);
+
         // 1. licence line at the standard price
         [$type, $label, $standard] = match ($kind) {
             'new', 'upgrade', 'renewal' => self::period($plan, $lk, $users, $billing, $what, $kind),
-            'seats' => self::seats($plan, $users, $billing, $l, $what),
+            'seats' => self::seats($plan, $users, $billing, $l, $what, ($c2cLine['amount'] ?? 0) > 0),
             'amc' => self::amc($l),
         };
 
@@ -141,9 +159,12 @@ final class Pricing
         if ($line === null) {
             throw new DomainException('custom_quote', "For {$users} users the {$plan->name} plan is priced on quotation. Ask us for a quote and we will call you.");
         }
-        $lines = [['type' => $type, 'label' => $label, 'amount' => $standard ?? $line]];
+        $lines = $kind === 'seats' && $line == 0 && $standard == 0 ? [] : [['type' => $type, 'label' => $label, 'amount' => $standard ?? $line]];   // Click2Call only
         if ($standard !== null && abs($line - $standard) >= 0.005) {
             $lines[] = ['type' => 'negotiated', 'label' => $customId ? 'Negotiated price for your account' : 'Special price', 'amount' => round($line - $standard, 2)];
+        }
+        if (($c2cLine['amount'] ?? 0) > 0) {
+            $lines[] = $c2cLine;
         }
 
         // 3. setup & onboarding, first order only
@@ -181,6 +202,7 @@ final class Pricing
             'lines' => $lines, 'amount' => $amount, 'discount' => round(-array_sum(array_filter(array_column($lines, 'amount'), fn ($a) => $a < 0)), 2),
             'cgst' => $cgst, 'sgst' => $intra ? round($tax - $cgst, 2) : 0.0, 'igst' => $intra ? 0.0 : $tax, 'total' => round($amount + $tax, 2),
             'list_price' => $standard, 'pricing' => $pricing, 'custom_price_id' => $customId, 'users' => $users, 'billing' => $billing, 'licence_kind' => $lk, 'deployment' => $dep,
+            'c2c_users' => $c2c, 'smart31' => $s31, 'c2c_rate' => $c2c === null ? null : self::c2cRate($s31), 'c2c_monthly' => $c2c ? round($c2c * self::c2cRate($s31), 2) : 0.0,
         ];
     }
 
@@ -199,8 +221,33 @@ final class Pricing
             $rate === null ? null : round($users * $rate * $m, 2)];
     }
 
-    /** More users (and/or a higher plan) during the current term. Expiry does not change. */
-    private static function seats(Plan $plan, int $users, ?string $billing, ?Licence $l, string $what): array
+    /**
+     * The Click2Call line. Subscriptions pay it with the period; more users mid-term pay the rise for the remaining days
+     * (a licence from before this change counts as 0 Click2Call users); perpetual pays it monthly (null amount = no line).
+     * @return array{type:string,label:string,amount:?float}
+     */
+    private static function c2c(string $kind, string $lk, int $n, bool $s31, ?string $billing, ?Licence $l): array
+    {
+        $rate = self::c2cRate($s31);
+        $name = $s31 ? 'Click2Call + Smart31' : 'Click2Call';
+        if ($lk === 'perpetual') {
+            return ['type' => 'c2c', 'label' => "{$name} — {$n} users × ₹" . number_format($rate, 2) . '/user/month, billed monthly', 'amount' => null];
+        }
+        if ($kind !== 'seats') {
+            $m = self::CYCLES[$billing];
+            return ['type' => 'c2c', 'label' => "{$name} — {$n} users × ₹" . number_format($rate, 2) . "/user/month × {$m} months", 'amount' => round($n * $rate * $m, 2)];
+        }
+        if (!$l?->expires_at || $l->expires_at->isPast()) {
+            return ['type' => 'c2c', 'label' => '', 'amount' => null];   // seats() refuses this order
+        }
+        $was = (int) ($l->c2c_users ?? 0) * self::c2cRate(in_array('smart31', $l->features ?? [], true) && $l->c2c_users !== null);
+        $days = max(1, (int) ceil(now()->diffInDays($l->expires_at, true)));
+        $diff = round(($n * $rate - $was) * $days / 30.44, 2);
+        return ['type' => 'c2c', 'label' => "{$name} — from " . (int) ($l->c2c_users ?? 0) . " to {$n} users for the remaining {$days} days", 'amount' => $diff > 0 ? $diff : null];
+    }
+
+    /** More users (and/or a higher plan) during the current term. Expiry does not change. $c2cUp: Click2Call rises, so the same users is fine. */
+    private static function seats(Plan $plan, int $users, ?string $billing, ?Licence $l, string $what, bool $c2cUp = false): array
     {
         if (!$l || $l->status !== 'active' || $l->expired()) {
             throw new DomainException('bad_order', 'More users can be added to an active licence only.');
@@ -209,7 +256,7 @@ final class Pricing
             throw new DomainException('bad_order', 'A trial or internal licence is changed by buying a package, not by adding users.');
         }
         $old = $l->plan ?? $plan;
-        if ($users < $l->max_users || ($users === $l->max_users && $old->id === $plan->id)) {
+        if ($users < $l->max_users || ($users === $l->max_users && $old->id === $plan->id && !$c2cUp)) {
             throw new DomainException('bad_order', "The licence already has {$l->max_users} users. Choose more users or a higher plan.");
         }
         if ($l->kind === 'perpetual') {
@@ -227,6 +274,9 @@ final class Pricing
             $days = max(1, (int) ceil(now()->diffInDays($l->expires_at, true)));
             $diff = $rn === null || $ro === null ? null : round(($users * $rn - $l->max_users * $ro) * $days / 30.44, 2);
             $label = "{$what} — from {$l->max_users} to {$users} users for the remaining {$days} days" . ($old->id !== $plan->id ? " ({$old->name} → {$plan->name})" : '');
+        }
+        if ($c2cUp && $diff !== null && abs($diff) < 0.005) {
+            return ['upgrade', $label, 0.0];   // only Click2Call changes
         }
         if ($diff !== null && $diff <= 0) {
             throw new DomainException('bad_order', 'This change does not cost more than the current licence. Contact us to lower a licence.');

@@ -442,6 +442,12 @@ function Licences({ can, isSuper }: { can: boolean; isSuper: boolean }) {
   );
 }
 
+/** Click2Call users + Smart31 as the edit form holds them (a licence from before per-user Click2Call with it on counts as all its users). */
+const callingOf = (x: any) => {
+  const on = (x.features ?? []).includes('click2call');
+  return { c2c_users: String(on ? (x.c2c_users ?? x.max_users ?? 0) : 0), smart31: on && (x.features ?? []).includes('smart31') };
+};
+
 function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean; isSuper: boolean; onClose: () => void }) {
   const l = useAsync(() => get(`/licences/${id}`), [id]);
   const plans = usePlans();
@@ -455,7 +461,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   const save = (body: any, msg = 'Licence saved') => a.run(async () => { l.setData(await patch(`/licences/${id}`, body)); setEdit(null); setStatusAsk(''); setStatusReason(''); toast(msg); });
   // Send only what was changed: re-sending the plan would reset custom features, re-sending the date would move the expiry.
   const startEdit = () => setEdit({ max_users: String(x.max_users), expires_at: x.expires_at ? new Date(new Date(x.expires_at).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : '',
-    grace_days: String(x.grace_days), plan_id: '', features: [...(x.features ?? [])], notes: x.notes ?? '', reason: '' });
+    grace_days: String(x.grace_days), plan_id: '', features: [...(x.features ?? [])], notes: x.notes ?? '', reason: '', ...callingOf(x) });
   const changes = () => {
     const orig = { max_users: String(x.max_users), grace_days: String(x.grace_days), notes: x.notes ?? '', expires_at: x.expires_at ? new Date(new Date(x.expires_at).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : '' };
     const b: any = { reason: edit.reason };
@@ -464,7 +470,10 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
     if (edit.notes !== orig.notes) b.notes = edit.notes || null;
     if (edit.expires_at !== orig.expires_at) b.expires_at = edit.expires_at || null;
     if (edit.plan_id) b.plan_id = Number(edit.plan_id);
-    if (!edit.plan_id && JSON.stringify([...edit.features].sort()) !== JSON.stringify([...(x.features ?? [])].sort())) b.features = edit.features;
+    const calling = (f: string[]) => f.filter((k) => k !== 'click2call' && k !== 'smart31').sort();   // the two calling features follow Click2Call users + Smart31
+    if (!edit.plan_id && JSON.stringify(calling(edit.features)) !== JSON.stringify(calling(x.features ?? []))) b.features = calling(edit.features);
+    const c = callingOf(x);
+    if (edit.c2c_users !== c.c2c_users || edit.smart31 !== c.smart31 || b.features || b.plan_id) { b.c2c_users = Number(edit.c2c_users || 0); b.smart31 = edit.smart31; }
     return b;
   };
   return (
@@ -475,6 +484,8 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
           <div><p><b>{x.holder_name}</b>{x.holder_email ? `, ${x.holder_email}` : ''}</p>
             <p>{x.deployment === 'onprem' ? 'On-premises install' : `Workspace ${x.company?.slug ?? '—'}`} · {x.plan?.name ?? '—'} · {LIC_KIND[x.kind] ?? x.kind}{x.billing ? `, ${CYCLE[x.billing] ?? x.billing} billing` : ''}</p>
             <p>Users: {x.used_users != null ? `${x.used_users} active of ` : x.reported_users != null ? `${x.reported_users} reported of ` : ''}{x.max_users || 'unlimited'} · Grace {x.grace_days} days</p>
+            <p>Click2Call: {!(x.features ?? []).includes('click2call') ? 'off' : x.c2c_users == null ? 'all users (set before per-user Click2Call)' : `${x.c2c_users} user${x.c2c_users === 1 ? '' : 's'}`}
+              {(x.features ?? []).includes('smart31') && (x.features ?? []).includes('click2call') ? ' · with Smart31' : ''}</p>
             <p>Valid {day(x.starts_at)} – {x.expires_at ? day(x.expires_at) : 'no expiry'} · <Badge value={x.status} /></p>
             {x.kind === 'perpetual' && <p>Updates &amp; support (AMC) until <b className={daysLeft(x.amc_expires_at)! < 0 ? 'bad' : ''}>{day(x.amc_expires_at)}</b></p>}
             {x.deployment === 'onprem' && <p className="small">Server: {x.server_fingerprint ? <code>{x.server_fingerprint}</code> : <span className="muted">not activated yet</span>}
@@ -519,11 +530,15 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
             <Field label="Expires on"><input type="date" value={edit.expires_at} onChange={(e) => setEdit({ ...edit, expires_at: e.target.value })} /></Field>
             <Field label="Grace days"><input type="number" min={0} max={90} value={edit.grace_days} onChange={(e) => setEdit({ ...edit, grace_days: e.target.value })} /></Field>
             <Field label="Plan (sets features)"><select value={edit.plan_id} onChange={(e) => setEdit({ ...edit, plan_id: e.target.value })}><option value="">Keep current</option>{(plans.data?.plans ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>
+            <Field label="Click2Call users" hint={`0 = Click2Call off · at most the users allowed`}><input type="number" min={0} max={Number(edit.max_users) || undefined} value={edit.c2c_users}
+              onChange={(e) => setEdit({ ...edit, c2c_users: e.target.value })} /></Field>
+            <Field label="Smart31 number rotation"><label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.smart31} disabled={!Number(edit.c2c_users)}
+              onChange={(e) => setEdit({ ...edit, smart31: e.target.checked })} />On for the Click2Call users</label></Field>
             <Field label="Notes"><input value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
             <Field label="Reason for the change"><input value={edit.reason} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} required /></Field>
           </div>
           {!edit.plan_id && <fieldset className="card"><legend>Features on this licence</legend>
-            {Object.entries(plans.data?.features ?? {}).map(([k, label]) => <label key={k} className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.features.includes(k)}
+            {Object.entries(plans.data?.features ?? {}).filter(([k]) => k !== 'click2call' && k !== 'smart31').map(([k, label]) => <label key={k} className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.features.includes(k)}
               onChange={() => setEdit({ ...edit, features: edit.features.includes(k) ? edit.features.filter((f: string) => f !== k) : [...edit.features, k] })} />{String(label)}</label>)}
           </fieldset>}
           <div className="row"><button disabled={a.busy} type="submit">Save changes</button><button type="button" className="secondary" onClick={() => setEdit(null)}>Cancel</button></div>
@@ -543,7 +558,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   );
 }
 
-const LIC_FIELD: Record<string, string> = { max_users: 'users', expires_at: 'expiry', grace_days: 'grace days', plan_id: 'plan', features: 'features', status: 'status', billing: 'billing', amc_expires_at: 'AMC until' };
+const LIC_FIELD: Record<string, string> = { c2c_users: 'Click2Call users', max_users: 'users', expires_at: 'expiry', grace_days: 'grace days', plan_id: 'plan', features: 'features', status: 'status', billing: 'billing', amc_expires_at: 'AMC until' };
 function historyText(d: any): string {
   if (!d) return '';
   const parts: string[] = [];
@@ -553,6 +568,7 @@ function historyText(d: any): string {
       if (b !== a) parts.push(`${LIC_FIELD[k] ?? k}: ${k === 'expires_at' ? `${d.before[k] ? day(d.before[k]) : 'none'} → ${d.after[k] ? day(d.after[k]) : 'never'}` : k === 'features' ? `${(d.before[k] ?? []).length} → ${(d.after[k] ?? []).length}` : `${d.before[k] ?? '—'} → ${d.after[k] ?? '—'}`}`);
     }
   }
+  if (!d.before && d.c2c_users != null) parts.push(d.c2c_users ? `Click2Call for ${d.c2c_users} users${d.smart31 ? ' + Smart31' : ''}` : 'Click2Call off');
   if (d.reason) parts.push(`reason: ${d.reason}`);
   if (!parts.length && d.plan) parts.push(`plan ${d.plan}`);
   if (!parts.length && d.expires_at) parts.push(`until ${d.expires_at}`);
@@ -573,17 +589,19 @@ function OrderBuilder({ licence, isSuper, onClose, onDone }: { licence?: any; is
   const kinds = !licence ? ['new'] : licence.kind === 'trial' ? ['upgrade'] : licence.kind === 'perpetual' ? ['seats', 'amc'] : ['renewal', 'seats'];
   const [f, setF] = useState<any>(() => ({ kind: kinds[0], deployment: licence?.deployment ?? 'onprem', licence_kind: licence ? (licence.kind === 'perpetual' ? 'perpetual' : 'subscription') : 'perpetual',
     company_id: '', plan_id: licence?.plan_id ? String(licence.plan_id) : '', users: String(licence?.max_users || 10), billing: licence?.billing ?? 'annual', setup: 'auto', setup_amount: '', custom_amount: '',
-    buyer_company: licence?.holder_name ?? '', buyer_name: '', buyer_email: licence?.holder_email ?? '', buyer_phone: '', buyer_gstin: '', state_code: '36', coupon: '' }));
+    buyer_company: licence?.holder_name ?? '', buyer_name: '', buyer_email: licence?.holder_email ?? '', buyer_phone: '', buyer_gstin: '', state_code: '36', coupon: '',
+    ...(licence ? callingOf(licence) : { c2c_users: '0', smart31: false }) }));
   const companies = useAsync(() => (licence ? Promise.resolve([]) : get<any>('/companies?per_page=500').then((r) => r.data ?? r)), []);
   const [quote, setQuote] = useState<any | null>(null);
   const [qErr, setQErr] = useState<string | null>(null);
   const [made, setMade] = useState<any | null>(null);
   const a = useAction();
-  const set = (k: string, v: string) => setF((x: any) => ({ ...x, [k]: v }));
+  const set = (k: string, v: any) => setF((x: any) => ({ ...x, [k]: v }));
   const body = () => ({ kind: f.kind, licence_id: licence?.id ?? null, company_id: f.deployment === 'cloud' && f.company_id ? Number(f.company_id) : null,
     deployment: licence ? undefined : f.deployment, licence_kind: licence ? undefined : (f.deployment === 'cloud' ? 'subscription' : f.licence_kind),
     plan_id: f.plan_id ? Number(f.plan_id) : null, users: f.kind === 'amc' ? undefined : Number(f.users), billing: f.licence_kind === 'subscription' || f.deployment === 'cloud' ? f.billing : undefined,
     setup: f.setup === 'auto' ? null : f.setup === 'none' ? 'none' : Number(f.setup_amount), custom_amount: f.custom_amount ? Number(f.custom_amount) : null,
+    c2c_users: f.kind === 'amc' ? undefined : Number(f.c2c_users || 0), smart31: f.kind === 'amc' ? undefined : f.smart31 && Number(f.c2c_users) > 0,
     coupon: f.coupon || null, buyer_company: f.buyer_company, buyer_name: f.buyer_name, buyer_email: f.buyer_email, buyer_phone: f.buyer_phone || null, buyer_gstin: f.buyer_gstin || null, state_code: f.state_code });
   useEffect(() => {
     setQErr(null);
@@ -606,6 +624,10 @@ function OrderBuilder({ licence, isSuper, onClose, onDone }: { licence?: any; is
             <option value="">Choose…</option>{(companies.data ?? []).map((c: any) => <option key={c.id} value={c.id}>{c.name} ({c.slug})</option>)}</select></Field>}
           {f.kind !== 'amc' && <Field label="Plan"><select value={f.plan_id} onChange={(e) => set('plan_id', e.target.value)} required={!licence}><option value="">{licence ? 'Keep current' : 'Choose…'}</option>{(plans.data?.plans ?? []).filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select></Field>}
           {f.kind !== 'amc' && <Field label={f.kind === 'seats' ? `Users after this order (now ${licence?.max_users})` : 'Users'}><input type="number" min={1} value={f.users} onChange={(e) => set('users', e.target.value)} required /></Field>}
+          {f.kind !== 'amc' && <Field label="Click2Call users" hint={f.kind === 'seats' ? `now ${callingOf(licence).c2c_users} · 0 = no Click2Call` : '0 = no Click2Call · at most the users'}>
+            <input type="number" min={0} max={Number(f.users) || undefined} value={f.c2c_users} onChange={(e) => set('c2c_users', e.target.value)} /></Field>}
+          {f.kind !== 'amc' && <Field label="Smart31 number rotation"><label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={f.smart31}
+            disabled={!Number(f.c2c_users)} onChange={(e) => set('smart31', e.target.checked)} />For the Click2Call users</label></Field>}
           {sub && ['new', 'upgrade', 'renewal'].includes(f.kind) && <Field label="Billing"><select value={f.billing} onChange={(e) => set('billing', e.target.value)}>{Object.entries(CYCLE).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>}
           {['new', 'upgrade'].includes(f.kind) && <Field label="Setup & onboarding" hint={isSuper ? undefined : 'Changing it is super-admin only'}><select value={f.setup} onChange={(e) => set('setup', e.target.value)} disabled={!isSuper}>
             <option value="auto">As per pricing rules</option><option value="none">No setup fee</option><option value="custom">Custom amount</option></select></Field>}
@@ -626,6 +648,7 @@ function OrderBuilder({ licence, isSuper, onClose, onDone }: { licence?: any; is
           {quote.igst > 0 && <tr><td>IGST</td><td>{inr(quote.igst)}</td></tr>}
           <tr className="t"><td>Total</td><td>{inr(quote.total)}</td></tr>
         </tbody>{quote.pricing === 'custom' && <caption>Negotiated / special price (standard {inr(quote.list_price)}).</caption>}</table>}
+        {quote?.licence_kind === 'perpetual' && quote.c2c_monthly > 0 && <Notice>{quote.smart31 ? 'Click2Call + Smart31' : 'Click2Call'} for {quote.c2c_users} users: {inr(quote.c2c_monthly)} a month + GST, billed monthly — not in this one-time total.</Notice>}
         <button disabled={a.busy || !quote} type="submit">Create order</button>
       </form>
     </Modal>
@@ -1010,7 +1033,7 @@ function Settings() {
             {box('setup_base', 'On-premises setup & onboarding fee (₹)', 'One-time, on the first on-premises order', 'number')}{box('setup_included_users', 'Users covered by the on-premises fee', undefined, 'number')}
             {box('setup_per_extra', 'On-premises setup per extra user (₹)', undefined, 'number')}{box('amc_pct', 'AMC % per year', 'On-premises perpetual: % of the current licence price', 'number')}
             {box('quote_validity_days', 'Order / quote valid for (days)', 'After this the pay link stops; raise a fresh order', 'number')}
-            {box('price_c2c_user', 'Click2Call per user per month (₹)', 'Plus GST; users who placed a Click2Call call that month', 'number')}
+            {box('price_c2c_user', 'Click2Call per user per month (₹)', 'Plus GST. Charged for the Click2Call users chosen at purchase (Cloud and subscriptions: with each period); on-prem perpetual: users who placed a Click2Call call that month', 'number')}
             {box('price_smart31_user', 'Click2Call + Smart31 per user per month (₹)', 'Instead of the Click2Call price, for users whose calls used a Smart31 number', 'number')}
             {box('deposit_per_fos', 'Refundable deposit per field user (₹)', 'On-premises; refunded when the client stops, less dues', 'number')}
           </div>

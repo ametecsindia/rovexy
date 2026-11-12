@@ -91,7 +91,7 @@ final class LicenceAuthority
         $open = SalesOrder::query()->where('licence_id', $l->id)->where('status', 'created')->latest('id')->first();
         return [
             'v' => 1, 'source' => $source, 'key' => $l->key, 'holder' => $l->holder_name, 'plan' => $l->plan?->name, 'plan_code' => $l->plan?->code,
-            'kind' => $l->kind, 'deployment' => $l->deployment, 'billing' => $l->billing, 'max_users' => $l->max_users, 'features' => array_values($l->features ?? []),
+            'kind' => $l->kind, 'deployment' => $l->deployment, 'billing' => $l->billing, 'max_users' => $l->max_users, 'c2c_users' => $l->c2c_users, 'features' => array_values($l->features ?? []),
             'status' => $l->status, 'expires_at' => $l->expires_at?->toAtomString(), 'grace_days' => $l->grace_days, 'amc_expires_at' => $l->amc_expires_at?->toAtomString(),
             'fingerprint' => $fingerprint, 'issued_at' => now()->toAtomString(),
             'open_order' => $open && !$open->expiredQuote() ? ['number' => $open->number, 'total' => $open->total, 'pay_url' => $open->payUrl()] : null,

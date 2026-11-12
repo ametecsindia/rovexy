@@ -98,7 +98,7 @@ final class CloudPricingTest extends TestCase
             ->assertSee('up to 50 connected calls per user per day', false);
         $this->assertStringNotContainsString('(per user per month, annual)', $html);   // old cloud offers gone from structured data
 
-        $this->get('/buy?plan=cloud-own-c2c&users=10')->assertOk()->assertSee('value="cloud-own-c2c"', false)->assertSee('Billed quarterly in advance');
+        $this->get('/buy?plan=cloud-own-c2c&users=10')->assertOk()->assertSee('value="cloud-own"', false)->assertSee('Billed quarterly in advance');   // old add-on link → Click2Call users (12 Nov)
         $this->get('/buy?plan=business')->assertOk()->assertSee('Rent · Cloud');                 // an old cloud link lands on ROVEXY Cloud
         $this->get('/buy?kind=perpetual&plan=business&users=25')->assertOk()->assertSee('Own · Perpetual');
     }

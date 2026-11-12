@@ -18,7 +18,7 @@ const STATE_LABEL: Record<string, string> = { active: 'Active', grace: 'In grace
 const KIND_LABEL: Record<string, string> = { trial: 'free trial', subscription: 'subscription', perpetual: 'perpetual licence', evaluation: 'evaluation', unverified: 'key not verified yet', internal: 'internal' };
 
 type Line = { type: string; label: string; amount: number };
-type Quote = { lines: Line[]; amount: number; discount: number; cgst: number; sgst: number; igst: number; total: number; pricing: 'standard' | 'custom'; users: number; billing: string; kind: string; valid_until: string | null };
+type Quote = { lines: Line[]; amount: number; discount: number; cgst: number; sgst: number; igst: number; total: number; pricing: 'standard' | 'custom'; users: number; c2c_users?: number | null; smart31?: boolean; c2c_monthly?: number; billing: string; kind: string; valid_until: string | null };
 
 export function LicencePage() {
   const l = useAsync(() => get('/licence'));
@@ -66,6 +66,8 @@ function StatusCard({ x }: { x: any }) {
     ['Plan', [x.plan ?? '—', KIND_LABEL[kind] ?? kind, x.billing && typeof x.billing === 'string' ? x.billing.replace('_', '-') : x.licence_billing?.replace('_', '-'), DEP[x.deployment] ?? x.deployment].filter(Boolean).join(' · ')],
     ['Users in use', <><b>{x.used_users}</b> active user{x.used_users === 1 ? "" : "s"} — out of <b>{x.max_users || 'unlimited'}</b> licensed
       <div className="muted small">New users and phones are refused once all licensed seats are in use.</div></>],
+    ['Click2Call', !(x.features ?? []).includes('click2call') ? 'not included — SIM calling from the app'
+      : `${x.c2c_users == null ? 'all users' : `${x.c2c_users} user${x.c2c_users === 1 ? '' : 's'}`}${(x.features ?? []).includes('smart31') ? ' · with Smart31 number rotation' : ''}`],
     ['Expires', perpetual ? 'never — perpetual licence' : x.expires_at ? `${day(x.expires_at)}${x.grace_days ? ` (+${x.grace_days} grace days)` : ''}` : 'no expiry'],
   ];
   if (perpetual) rows.push(['Updates & support', x.amc_expires_at ? `until ${day(x.amc_expires_at)}${new Date(x.amc_expires_at) < new Date() ? ' — renew the AMC for updates; the licence keeps working' : ''}` : '—']);
@@ -135,6 +137,9 @@ function Purchase({ x, reload }: { x: any; reload: () => Promise<void> }) {
   const [state, setState] = useState(x.billing?.state_code || '36');
   const [gstin, setGstin] = useState(x.billing?.gstin || '');
   const [coupon, setCoupon] = useState('');
+  const hasC2c = !trial && (x.features ?? []).includes('click2call');
+  const [c2c, setC2c] = useState(String(hasC2c ? (x.c2c_users ?? x.max_users ?? 0) : 0));
+  const [s31, setS31] = useState(hasC2c && (x.features ?? []).includes('smart31'));
   const [quote, setQuote] = useState<Quote | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
@@ -142,16 +147,18 @@ function Purchase({ x, reload }: { x: any; reload: () => Promise<void> }) {
   const chosen = x.plans?.find((p: any) => String(p.id) === plan);
   const amc = kind === 'amc';
   const code = chosen?.negotiated || kind !== 'renewal' ? '' : coupon;
-  const params = { kind: trial ? undefined : kind, plan_id: amc ? undefined : plan, users: amc ? undefined : users, billing: kind === 'renewal' ? billing : undefined, state_code: state, coupon: code || undefined };
+  const params = { kind: trial ? undefined : kind, plan_id: amc ? undefined : plan, users: amc ? undefined : users, billing: kind === 'renewal' ? billing : undefined, state_code: state, coupon: code || undefined,
+    c2c_users: amc ? undefined : Number(c2c || 0), smart31: amc ? undefined : (s31 && Number(c2c) > 0 ? 1 : 0) };
   const ready = amc || (!!plan && !!users);
   useEffect(() => {
     setQuote(null); setQuoteErr(null);
     if (!ready || !mayBuy) return;
     const t = setTimeout(() => { get<Quote>(`/licence/quote${qs(params)}`).then(setQuote, (e) => setQuoteErr(e.message)); }, 300);
     return () => clearTimeout(t);
-  }, [plan, users, billing, state, code, kind, mayBuy]);
+  }, [plan, users, billing, state, code, kind, mayBuy, c2c, s31]);
   const pay = () => a.run(async () => {
-    const o = await post<{ pay_url: string }>('/licence/renew', { ...params, users: amc ? undefined : Number(users), plan_id: amc ? undefined : Number(plan), buyer_gstin: gstin || null, coupon: code || null });
+    const o = await post<{ pay_url: string }>('/licence/renew', { ...params, users: amc ? undefined : Number(users), plan_id: amc ? undefined : Number(plan), buyer_gstin: gstin || null, coupon: code || null,
+      smart31: amc ? undefined : s31 && Number(c2c) > 0 });
     location.href = o.pay_url;
   });
   const cancel = (n: string) => a.run(async () => { await post(`/licence/orders/${n}/cancel`); setDone(`Order ${n} cancelled. Nothing was charged.`); await reload(); });
@@ -199,6 +206,10 @@ function Purchase({ x, reload }: { x: any; reload: () => Promise<void> }) {
         </div>}
         <div className="form-grid">
           {!amc && <Field label={kind === 'seats' ? `Users after the change (now ${x.max_users})` : 'Users'}><input type="number" min={1} value={users} onChange={(e) => setUsers(e.target.value)} /></Field>}
+          {!amc && <Field label="Click2Call users" hint={`Optional · ${x.c2c_rates ? `${inr(x.c2c_rates.c2c)} per user a month · ` : ''}0 = SIM calling only`}>
+            <input type="number" min={0} max={Number(users) || undefined} value={c2c} onChange={(e) => setC2c(e.target.value)} /></Field>}
+          {!amc && <Field label="Smart31 number rotation"><label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={s31} disabled={!Number(c2c)}
+            onChange={(e) => setS31(e.target.checked)} />For the Click2Call users{x.c2c_rates ? ` (${inr(x.c2c_rates.smart31)} per user a month in all)` : ''}</label></Field>}
           {kind === 'renewal' && <Field label="Billing"><select value={billing} onChange={(e) => setBilling(e.target.value)}>{Object.entries((x.cycles ?? {}) as Record<string, string>).map(([k, v]) => <option key={k} value={k}>{v}{k === 'annual' ? ' (best price)' : ''}</option>)}</select></Field>}
           <Field label="State (for GST)"><select value={state} onChange={(e) => setState(e.target.value)}>{Object.entries(STATES).map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></Field>
           <Field label="GSTIN (optional)"><input value={gstin} onChange={(e) => setGstin(e.target.value.toUpperCase())} maxLength={15} /></Field>
@@ -212,7 +223,8 @@ function Purchase({ x, reload }: { x: any; reload: () => Promise<void> }) {
             {quote.igst > 0 && <tr><td>IGST</td><td>{inr(quote.igst)}</td></tr>}
             <tr className="t"><td>To pay</td><td>{inr(quote.total)}</td></tr>
           </tbody>
-          <caption>{amc ? 'After payment: updates & support for 12 more months.' : `After payment: up to ${quote.users} users${quote.valid_until ? `, valid until ${day(quote.valid_until)}` : ''}.`}</caption>
+          <caption>{amc ? 'After payment: updates & support for 12 more months.' : `After payment: up to ${quote.users} users${quote.c2c_users ? `, Click2Call for ${quote.c2c_users}${quote.smart31 ? ' with Smart31' : ''}` : ''}${quote.valid_until ? `, valid until ${day(quote.valid_until)}` : ''}.`}
+            {perpetual && quote.c2c_monthly ? ` Click2Call is billed monthly: ${inr(quote.c2c_monthly)} a month + GST.` : ''}</caption>
         </table>}
         {open && <p className="muted small">This replaces the unpaid order {open.number}.</p>}
         <button disabled={a.busy || !quote} onClick={() => void pay()}>{a.busy ? 'Preparing…' : quote ? `Pay ${inr(quote.total)}` : amc ? 'Preparing the price…' : 'Choose a plan and users'}</button>
