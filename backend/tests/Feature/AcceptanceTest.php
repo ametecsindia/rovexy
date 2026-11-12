@@ -738,8 +738,11 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(['1600111001', '1600111002', '1600111003'], $used);   // each number once, in turn
         \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'c2c_call') && $req['did'] === '1600111002');
 
-        // Smart31 for selected people only, and he isn't one → company VMN.
-        $adm->putJson('/api/admin/calling/access/smart31', ['mode' => 'selected'])->assertOk();
+        // Smart31 is one company switch for every Click2Call user (12 Nov 2026): no per-person setting; switched off → company VMN.
+        $adm->putJson('/api/admin/calling/access/smart31', ['mode' => 'selected'])->assertNotFound();
+        $adm->patchJson("/api/admin/calling/users/{$emp->id}", ['smart31' => false])->assertOk();   // ignored
+        $this->assertTrue(collect($adm->getJson('/api/admin/calling/users')->json('users'))->firstWhere('id', $emp->id)['access']['smart31']['allowed']);   // follows Click2Call
+        $adm->putJson('/api/admin/calling/smart31', ['enabled' => false])->assertOk();
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->assertJsonPath('callback_from', '08047000001');
         app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
 
@@ -753,6 +756,7 @@ final class AcceptanceTest extends TestCase
         $adm->putJson('/api/admin/calling/access/click2call', ['mode' => 'everyone'])->assertOk();
         $adm->getJson('/api/admin/calling/access')->assertJsonPath('smart31.in_plan', false)->assertJsonPath('click2call.in_plan', false);
         $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '1600111009'])->assertForbidden();
+        $adm->putJson('/api/admin/calling/smart31', ['enabled' => true])->assertForbidden();   // no Smart31 LC → no switch
         $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('calling_routes', ['sim']);
         $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '08047000001'])->assertForbidden();
 

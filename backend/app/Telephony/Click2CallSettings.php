@@ -192,6 +192,9 @@ final class Click2CallSettings
         if (!self::inPlan($feature)) {
             return false;
         }
+        if ($feature === 'smart31') {
+            return self::allows($u, 'click2call');   // 12 Nov 2026: Smart31 is one company switch for every Click2Call user
+        }
         if (self::accessMode($feature) === 'everyone') {
             return true;
         }

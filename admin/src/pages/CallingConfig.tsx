@@ -460,7 +460,15 @@ export function PeopleAccessPage() {
     <Page title="People & access" subtitle="Decide who may use each calling option. Employees only see the options they are allowed.">
       <ErrorBox error={a.error} />
       <Card title="Who may use each option">
-        {feats.map((f) => (
+        {feats.map((f) => f === 'smart31' ? (
+          // Smart31: one switch for the company — on = every Click2Call user rotates numbers (only with a Smart31 licence)
+          <div key={f} className="cc-who">
+            <div><strong>{NAME[f]}</strong><br /><small className="muted">{SHORT[f]}</small></div>
+            <Switch on={x.smart31.on} disabled={a.busy} label={x.smart31.on ? 'Enabled' : 'Disabled'}
+              onChange={(on) => a.run(async () => { await put('/calling/smart31', { enabled: on }); await reload(); })} />
+            <div className="cc-chips"><span className="muted">{x.smart31.on ? 'On for every Click2Call user' : 'Off for every Click2Call user'}</span></div>
+          </div>
+        ) : (
           <div key={f} className="cc-who">
             <div><strong>{NAME[f]}</strong><br /><small className="muted">{SHORT[f]}{!x[f].on && ' · switched off'}</small></div>
             <div className="seg" role="tablist">
@@ -484,6 +492,7 @@ export function PeopleAccessPage() {
           { key: 'n', label: 'Employee', render: (u: any) => <>{u.name} <small className="muted">{u.employee_code}</small><br /><small className="muted">{u.groups.join(', ') || 'no group'}</small></> },
           ...feats.map((f) => ({ key: f, label: NAME[f], render: (u: any) => {
             const s = u.access[f];
+            if (f === 'smart31') return <div className="cc-cell"><Badge value={s.allowed && x.smart31.on ? 'active' : 'off'} label={s.allowed && x.smart31.on ? 'yes' : 'no'} /><small>with Click2Call</small></div>;
             return (
               <div className="cc-cell">
                 {s.via === 'everyone' || s.via === 'group'

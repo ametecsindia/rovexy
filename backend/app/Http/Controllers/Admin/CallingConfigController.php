@@ -35,7 +35,7 @@ final class CallingConfigController extends Controller
         return response()->json(collect(C::FEATURES)->mapWithKeys(fn ($f) => [$f => [
             'in_plan' => C::inPlan($f),
             'on' => match ($f) { 'click2call' => C::active(), 'smart31' => C::smart31On(), default => C::simOn() },
-            'mode' => C::accessMode($f),
+            'mode' => $f === 'smart31' ? 'click2call' : C::accessMode($f),
             'grants' => $grants->where('feature', $f)->values()->map(fn ($g) => $g->team_id
                 ? ['id' => $g->id, 'type' => 'group', 'team_id' => $g->team_id, 'name' => $teams[$g->team_id] ?? "#{$g->team_id}"]
                 : ['id' => $g->id, 'type' => 'person', 'name' => $users[$g->user_id]?->name ?? "#{$g->user_id}", 'code' => $users[$g->user_id]?->employee_code]),
@@ -184,6 +184,9 @@ final class CallingConfigController extends Controller
             $personal = $grants->first(fn ($g) => $g->feature === $f && (int) $g->user_id === $u->id);
             $teams = $u->teams->pluck('id')->all();
             $viaGroup = $grants->first(fn ($g) => $g->feature === $f && $g->team_id && in_array($g->team_id, $teams));
+            if ($f === 'smart31') {
+                return ['allowed' => C::allows($u, $f), 'via' => 'click2call', 'grant_id' => null];
+            }
             return ['allowed' => C::allows($u, $f), 'via' => C::accessMode($f) === 'everyone' ? 'everyone' : ($personal ? 'person' : ($viaGroup ? 'group' : null)),
                 'grant_id' => $personal?->id];
         })();
@@ -204,7 +207,7 @@ final class CallingConfigController extends Controller
     {
         $u = User::query()->findOrFail($id);
         $d = $r->validate(['click_agent_number' => ['nullable', 'regex:/^\+?[0-9 ]{10,15}$/'], 'c2c_default_number' => 'nullable|string|max:20',
-            'click2call' => 'boolean', 'sim' => 'boolean', 'smart31' => 'boolean'],
+            'click2call' => 'boolean', 'sim' => 'boolean'],   // Smart31 follows Click2Call (company switch), no per-person setting
             ['click_agent_number.regex' => "Enter the employee's 10-digit mobile number."]);
         if (array_key_exists('click_agent_number', $d)) {
             $u->click_agent_number = $d['click_agent_number'] ? \App\Telephony\Click2CallAdapter::normalize($d['click_agent_number']) : null;

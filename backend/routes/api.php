@@ -358,9 +358,9 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::prefix('calling')->middleware('perm:telephony.configure')->group(function () {
             $cc = Admin\CallingConfigController::class;
             Route::get('access', [$cc, 'access']);
-            Route::put('access/{feature}', [$cc, 'setAccessMode'])->whereIn('feature', ['sim', 'click2call', 'smart31']);
-            Route::post('access/{feature}', [$cc, 'grant'])->whereIn('feature', ['sim', 'click2call', 'smart31']);
-            Route::delete('access/{feature}/{id}', [$cc, 'revoke'])->whereIn('feature', ['sim', 'click2call', 'smart31'])->whereNumber('id');
+            Route::put('access/{feature}', [$cc, 'setAccessMode'])->whereIn('feature', ['sim', 'click2call']);
+            Route::post('access/{feature}', [$cc, 'grant'])->whereIn('feature', ['sim', 'click2call']);
+            Route::delete('access/{feature}/{id}', [$cc, 'revoke'])->whereIn('feature', ['sim', 'click2call'])->whereNumber('id');
             Route::put('sim', [$cc, 'setSim']);
             Route::get('numbers', [$cc, 'numbers']);
             Route::post('vouchers', [$cc, 'addVoucher'])->middleware(['feature:click2call', 'throttle:20,1']);
