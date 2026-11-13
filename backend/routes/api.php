@@ -59,6 +59,11 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::patch('licences/{id}', [$c, 'updateLicence'])->whereNumber('id')->middleware('platform:licences');
     Route::post('licences/{id}/deposits', [$c, 'addDeposit'])->whereNumber('id')->middleware('platform:licences');   // G16
     Route::get('billing-overview', [$c, 'billingOverview'])->middleware('platform:licences');                        // G15 + G16
+    $mc = \App\Http\Controllers\Platform\MapsController::class;   // Google Maps usage, estimated cost and the price table
+    Route::get('maps/usage', [$mc, 'index'])->middleware('platform:licences');
+    Route::get('maps/usage/{type}/{id}', [$mc, 'show'])->whereIn('type', ['cloud', 'onprem'])->whereNumber('id')->middleware('platform:licences');
+    Route::get('maps/prices', [$mc, 'prices'])->middleware('platform:licences');
+    Route::put('maps/prices', [$mc, 'savePrices'])->middleware('platform:settings');
     Route::get('plans', [$c, 'plans'])->middleware('platform:plans');
     Route::post('plans', [$c, 'savePlan'])->middleware('platform:plans');
     Route::put('plans/{id}', [$c, 'savePlan'])->whereNumber('id')->middleware('platform:plans');
@@ -181,6 +186,7 @@ Route::prefix('mobile/v1')->middleware('company')->group(function () {
             Route::get('dispositions', [Mobile\CustomerController::class, 'dispositions']);
             // Field map (Google Routes / Geocoding via the server key; 30 a minute is far above normal use).
             Route::get('field/config', [Mobile\FieldMapController::class, 'config'])->middleware('feature:field_map');
+            Route::post('field/map-load', [Mobile\FieldMapController::class, 'mapLoad'])->middleware(['throttle:maps', 'feature:field_map']);
             Route::get('field/plan', [Mobile\FieldMapController::class, 'plan'])->middleware('feature:field_map');
             Route::post('field/distances', [Mobile\FieldMapController::class, 'distances'])->middleware(['throttle:maps', 'feature:field_map']);
             Route::post('field/route', [Mobile\FieldMapController::class, 'route'])->middleware(['throttle:maps', 'feature:field_map']);
@@ -398,6 +404,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
             Route::delete('plans/{userId}', [$fp, 'destroy'])->whereNumber('userId');
         });
         Route::get('integrations/maps', [Admin\IntegrationController::class, 'maps'])->middleware('perm:system.health');
+        Route::get('integrations/maps/report', [Admin\IntegrationController::class, 'mapsReport'])->middleware('perm:system.health');
         Route::put('integrations/maps', [Admin\IntegrationController::class, 'saveMaps'])->middleware('perm:telephony.configure');
         Route::put('integrations/maps/limits', [Admin\IntegrationController::class, 'saveMapsLimits'])->middleware('perm:telephony.configure');
         Route::put('integrations/{system}', [Admin\IntegrationController::class, 'save'])->whereIn('system', ['smartprs', 'smartept'])->middleware(['perm:telephony.configure', 'feature:integrations']);

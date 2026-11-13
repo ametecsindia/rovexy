@@ -39,6 +39,12 @@ final class GoogleMaps
     public const SERVER = 'gmaps';
     public const DISPLAY = 'gmaps_web';
 
+    /** Super Admin switch on the company's licence (Licences → Edit → Google Maps). Off = ROVEXY makes no Google Maps call. */
+    public static function allowed(): bool
+    {
+        return (bool) (app(\App\Services\Platform\Licensing::class)->current()['maps'] ?? true);
+    }
+
     public function configured(): bool
     {
         return $this->stored(self::SERVER) !== null;
@@ -57,6 +63,9 @@ final class GoogleMaps
     /** Admin "Save & test": one uncached Geocoding call with the given key. */
     public function test(string $key): array
     {
+        if (!self::allowed()) {
+            return ['ok' => false, 'detail' => 'Google Maps service is not enabled in your ROVEXY licence. Contact Ametecs.'];
+        }
         // Admin-only screen: Google's own reason is shown, it says exactly what to fix in Google Cloud.
         try {
             $g = Http::timeout(10)->connectTimeout(5)->acceptJson()->get('https://maps.googleapis.com/maps/api/geocode/json', ['address' => 'Hyderabad, India', 'key' => $key]);
@@ -65,6 +74,8 @@ final class GoogleMaps
         } catch (\Illuminate\Http\Client\HttpClientException) {   // connection / proxy failures
             return ['ok' => false, 'detail' => 'The server could not reach Google (internet / firewall).'];
         }
+        MapsUsage::count('geocode', 1, $g->json('status') !== 'OK');
+        MapsUsage::count('routes', 1, !$r->successful());
         $geo = ($g->json('status') === 'OK') ? 'Geocoding API ✓' : 'Geocoding API ✗ ' . trim((string) ($g->json('status') ?? $g->status()) . ' ' . (string) ($g->json('error_message') ?? ''));
         $rt = $r->successful() ? 'Routes API ✓' : 'Routes API ✗ ' . self::reason($r);
         return ['ok' => $g->json('status') === 'OK' && $r->successful(), 'detail' => $geo . ' · ' . $rt
@@ -80,6 +91,7 @@ final class GoogleMaps
 
     private function stored(string $system): ?string
     {
+        if (!self::allowed()) return null;
         $k = \App\Models\IntegrationConnection::query()->where('system', $system)->where('enabled', true)->first()?->api_key;
         return filled($k) ? (string) $k : null;
     }
@@ -110,7 +122,7 @@ final class GoogleMaps
                 'origins' => [['waypoint' => self::waypoint($origin)]],
                 'destinations' => array_map(fn ($i) => ['waypoint' => self::waypoint($dests[$i])], $miss),
                 'travelMode' => self::MODE, 'routingPreference' => self::PREF,
-            ], 'originIndex,destinationIndex,distanceMeters,duration,condition');
+            ], 'originIndex,destinationIndex,distanceMeters,duration,condition', 'matrix');
             $got = [];
             foreach ($rows as $e) {   // proto3 JSON leaves out zero values, so index 0 arrives as "missing"
                 if (($e['condition'] ?? '') === 'ROUTE_EXISTS') {
@@ -168,7 +180,7 @@ final class GoogleMaps
             if ($optimize) $body['optimizeWaypointOrder'] = true;
         }
         $r = $this->post('/directions/v2:computeRoutes', $body,
-            'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex');
+            'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline,routes.legs.distanceMeters,routes.legs.duration,routes.optimizedIntermediateWaypointIndex', $sku);
         $route = $r['routes'][0] ?? throw new DomainException('maps_no_route', 'No road route was found to this customer.');
         $opt = $route['optimizedIntermediateWaypointIndex'] ?? [];
         $order = ($optimize && $opt && min($opt) >= 0) ? array_map(fn ($k) => $between[$k], $opt) : $between;
@@ -196,13 +208,16 @@ final class GoogleMaps
         $this->key();   // not set up → no count
         MapsUsage::take('geocode');
         $res = $this->send(fn ($http) => $http->get('https://maps.googleapis.com/maps/api/geocode/json',
-            ['address' => $address, 'region' => strtolower($region), 'key' => $this->key()]));
+            ['address' => $address, 'region' => strtolower($region), 'key' => $this->key()]), 'geocode');
         $status = $res['status'] ?? 'UNKNOWN_ERROR';
         if ($status === 'ZERO_RESULTS') {
             Cache::put($key, 'none', 86400);
             return null;
         }
-        if ($status !== 'OK') $this->fail('geocode', $status, (string) ($res['error_message'] ?? ''));
+        if ($status !== 'OK') {
+            MapsUsage::failed('geocode');
+            $this->fail('geocode', $status, (string) ($res['error_message'] ?? ''));
+        }
         $g = $res['results'][0];
         $out = ['lat' => (float) $g['geometry']['location']['lat'], 'lng' => (float) $g['geometry']['location']['lng'],
             'formatted_address' => (string) ($g['formatted_address'] ?? ''), 'precise' => ($g['geometry']['location_type'] ?? '') !== 'APPROXIMATE',
@@ -241,20 +256,23 @@ final class GoogleMaps
         return 2 * 6371000 * asin(min(1.0, sqrt($h)));
     }
 
-    private function post(string $path, array $body, string $fields): array
+    private function post(string $path, array $body, string $fields, string $sku): array
     {
         return $this->send(fn ($http) => $http->withHeaders(['X-Goog-Api-Key' => $this->key(), 'X-Goog-FieldMask' => $fields])
-            ->post('https://routes.googleapis.com' . $path, $body));
+            ->post('https://routes.googleapis.com' . $path, $body), $sku);
     }
 
-    private function send(callable $call): array
+    /** One Google call already reserved with MapsUsage::take($sku); a failure is marked on that day's count. */
+    private function send(callable $call, string $sku): array
     {
         try {
             $res = $call(Http::timeout(10)->connectTimeout(5)->acceptJson());
         } catch (\Illuminate\Http\Client\HttpClientException $e) {   // connection / proxy failures
+            MapsUsage::failed($sku);
             $this->fail('network', 'unreachable', $e->getMessage());
         }
         if (!$res->successful()) {
+            MapsUsage::failed($sku);
             $this->fail('http', (string) $res->status(), self::reason($res));
         }
         return (array) $res->json();
@@ -273,6 +291,9 @@ final class GoogleMaps
 
     private function key(): string
     {
+        if (!self::allowed()) {
+            throw new DomainException('maps_disabled', 'Google Maps is not enabled for this company (contact your admin). Straight-line distance is shown instead.');
+        }
         return $this->stored(self::SERVER)
             ?? throw new DomainException('maps_not_configured', 'Driving distances are not set up yet (admin: Integrations → Google Maps). Straight-line distance is shown instead.');
     }

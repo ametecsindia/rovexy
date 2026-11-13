@@ -3,6 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { del, download, fmtDate, get, patch, post, put, qs, setOnUnauthorized } from '../lib/api';
 import { Badge, Card, ErrorBox, Field, Icon, Kpi, Modal, Notice, Page, Pager, PayBadge, Table, Toaster, toast, useAction, useAsync } from '../components/ui';
 import { MyProfile, StaffSignIn, type MfaPending, type StaffMe } from './StaffAuth';
+import { MapsUsageReport, money, UsageBars, SKU_ORDER } from '../components/MapsReport';
 
 /*
  * Super Admin console (/super) for Ametecs staff: companies, licences, plans, orders & payments, leads, staff, settings,
@@ -22,6 +23,7 @@ const MENU: { to: string; module: string; label: string; icon: string }[] = [
   { to: '/licences', module: 'licences', label: 'Licences', icon: 'shield' },
   { to: '/orders', module: 'orders', label: 'Orders & payments', icon: 'chart' },
   { to: '/billing', module: 'licences', label: 'Calling add-ons, deposits & AMC', icon: 'chart' },
+  { to: '/maps', module: 'licences', label: 'Google Maps usage', icon: 'chart' },
   { to: '/leads', module: 'leads', label: 'Leads', icon: 'contacts' },
   { to: '/plans', module: 'plans', label: 'Plans & pricing', icon: 'settings' },
   { to: '/coupons', module: 'plans', label: 'Discount codes', icon: 'chart' },
@@ -69,6 +71,7 @@ export function SuperApp() {
           {can('licences') && <Route path="/licences" element={<Licences can={can('licences', 'manage')} isSuper={me.role === 'super'} />} />}
           {can('orders') && <Route path="/orders" element={<Orders can={can('orders', 'manage')} />} />}
           {can('licences') && <Route path="/billing" element={<BillingOverview />} />}
+          {can('licences') && <Route path="/maps" element={<MapsUsagePage canPrices={can('settings', 'manage')} />} />}
           {can('leads') && <Route path="/leads" element={<Leads can={can('leads', 'manage')} isSuper={me.role === 'super'} canCompanies={can('companies', 'manage')} />} />}
           {can('plans') && <Route path="/plans" element={<Plans can={can('plans', 'manage')} />} />}
           {can('plans') && <Route path="/coupons" element={<Coupons can={can('plans', 'manage')} />} />}
@@ -461,7 +464,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   const save = (body: any, msg = 'Licence saved') => a.run(async () => { l.setData(await patch(`/licences/${id}`, body)); setEdit(null); setStatusAsk(''); setStatusReason(''); toast(msg); });
   // Send only what was changed: re-sending the plan would reset custom features, re-sending the date would move the expiry.
   const startEdit = () => setEdit({ max_users: String(x.max_users), expires_at: x.expires_at ? new Date(new Date(x.expires_at).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : '',
-    grace_days: String(x.grace_days), plan_id: '', features: [...(x.features ?? [])], notes: x.notes ?? '', reason: '', ...callingOf(x) });
+    grace_days: String(x.grace_days), plan_id: '', features: [...(x.features ?? [])], notes: x.notes ?? '', reason: '', maps_enabled: x.maps_enabled !== false, ...callingOf(x) });
   const changes = () => {
     const orig = { max_users: String(x.max_users), grace_days: String(x.grace_days), notes: x.notes ?? '', expires_at: x.expires_at ? new Date(new Date(x.expires_at).getTime() + 5.5 * 3600000).toISOString().slice(0, 10) : '' };
     const b: any = { reason: edit.reason };
@@ -470,6 +473,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
     if (edit.notes !== orig.notes) b.notes = edit.notes || null;
     if (edit.expires_at !== orig.expires_at) b.expires_at = edit.expires_at || null;
     if (edit.plan_id) b.plan_id = Number(edit.plan_id);
+    if (edit.maps_enabled !== (x.maps_enabled !== false)) b.maps_enabled = edit.maps_enabled;
     const calling = (f: string[]) => f.filter((k) => k !== 'click2call' && k !== 'smart31').sort();   // the two calling features follow Click2Call users + Smart31
     if (!edit.plan_id && JSON.stringify(calling(edit.features)) !== JSON.stringify(calling(x.features ?? []))) b.features = calling(edit.features);
     const c = callingOf(x);
@@ -486,6 +490,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
             <p>Users: {x.used_users != null ? `${x.used_users} active of ` : x.reported_users != null ? `${x.reported_users} reported of ` : ''}{x.max_users || 'unlimited'} · Grace {x.grace_days} days</p>
             <p>Click2Call: {!(x.features ?? []).includes('click2call') ? 'off' : x.c2c_users == null ? 'all users (set before per-user Click2Call)' : `${x.c2c_users} user${x.c2c_users === 1 ? '' : 's'}`}
               {(x.features ?? []).includes('smart31') && (x.features ?? []).includes('click2call') ? ' · with Smart31' : ''}</p>
+            <p>Google Maps service: {x.maps_enabled === false ? <Badge value="bad" label="off" /> : <Badge value="ok" label="on" />}</p>
             <p>Valid {day(x.starts_at)} – {x.expires_at ? day(x.expires_at) : 'no expiry'} · <Badge value={x.status} /></p>
             {x.kind === 'perpetual' && <p>Updates &amp; support (AMC) until <b className={daysLeft(x.amc_expires_at)! < 0 ? 'bad' : ''}>{day(x.amc_expires_at)}</b></p>}
             {x.deployment === 'onprem' && <p className="small">Server: {x.server_fingerprint ? <code>{x.server_fingerprint}</code> : <span className="muted">not activated yet</span>}
@@ -534,6 +539,8 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
               onChange={(e) => setEdit({ ...edit, c2c_users: e.target.value })} /></Field>
             <Field label="Smart31 number rotation"><label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.smart31} disabled={!Number(edit.c2c_users)}
               onChange={(e) => setEdit({ ...edit, smart31: e.target.checked })} />On for the Click2Call users</label></Field>
+            <Field label="Google Maps service" hint="Off = this client's ROVEXY makes no Google Maps calls (no map, no road distances, no address look-ups). On-premises: applies at the next licence check-in."><label className="row" style={{ gap: 8 }}><input type="checkbox" style={{ width: 'auto' }} checked={edit.maps_enabled}
+              onChange={(e) => setEdit({ ...edit, maps_enabled: e.target.checked })} />Allow Google Maps APIs through ROVEXY</label></Field>
             <Field label="Notes"><input value={edit.notes} onChange={(e) => setEdit({ ...edit, notes: e.target.value })} /></Field>
             <Field label="Reason for the change"><input value={edit.reason} onChange={(e) => setEdit({ ...edit, reason: e.target.value })} required /></Field>
           </div>
@@ -558,7 +565,7 @@ function LicenceDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   );
 }
 
-const LIC_FIELD: Record<string, string> = { c2c_users: 'Click2Call users', max_users: 'users', expires_at: 'expiry', grace_days: 'grace days', plan_id: 'plan', features: 'features', status: 'status', billing: 'billing', amc_expires_at: 'AMC until' };
+const LIC_FIELD: Record<string, string> = { c2c_users: 'Click2Call users', max_users: 'users', expires_at: 'expiry', grace_days: 'grace days', plan_id: 'plan', features: 'features', status: 'status', billing: 'billing', amc_expires_at: 'AMC until', maps_enabled: 'Google Maps' };
 function historyText(d: any): string {
   if (!d) return '';
   const parts: string[] = [];
@@ -1476,3 +1483,81 @@ function BillingOverview() {
   );
 }
 
+
+// ── Google Maps usage (13 Nov 2026) ──
+const APIS: Record<string, string> = { maps_js: 'Maps JavaScript', geocode: 'Geocoding', routes: 'Compute Routes', routes_2w: 'Routes Enterprise (2-wheeler)', matrix: 'Route Matrix' };
+function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [open, setOpen] = useState<any | null>(null);
+  const [prices, setPrices] = useState(false);
+  const r = useAsync(() => get(`/maps/usage${qs({ month })}`), [month]);
+  const a = useAction();
+  const d = r.data;
+  const nn = (v: number) => Number(v ?? 0).toLocaleString('en-IN');
+  return (
+    <Page title="Google Maps usage" subtitle="Every Google Maps call ROVEXY makes, per company and per Google API, with the estimated cost at Google's India list prices. Cloud workspaces are counted live; on-premises installs report at their licence check-in. Turn the service on or off per client in Licences → Edit."
+      actions={<><button className="secondary" onClick={() => setPrices(true)}>Prices…</button><button className="secondary" disabled={a.busy} onClick={() => a.run(() => download(`/maps/usage${qs({ month, format: 'csv' })}`))}>Download CSV</button></>}>
+      <ErrorBox error={r.error ?? a.error} />
+      <div className="row" style={{ alignItems: 'flex-end' }}><Field label="Month"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field>
+        {d && <small className="muted">Prices as of {d.prices.as_of} (<a href={d.prices.source} target="_blank" rel="noreferrer">Google's India price list</a>). Estimates, not Google's bill.</small>}</div>
+      {d && <>
+        <div className="kpi-grid small" style={{ margin: '12px 0' }}>
+          <Kpi icon="chart" tone="info" label="Requests to Google" value={nn(d.totals.requests)} />
+          <Kpi icon="check" tone="ok" label="Successful" value={nn(d.totals.ok)} />
+          <Kpi icon="shield" tone={d.totals.failed ? 'warn' : 'ok'} label="Failed" value={nn(d.totals.failed)} />
+          <Kpi icon="chart" tone="warn" label="Estimated cost, all companies" value={money(d.totals)} sub={`Ametecs's Google account: ${money(d.ametecs_account)}`} />
+        </div>
+        <div className="grid2">
+          <Card title="By Google API (this month)"><Table rows={d.apis.map((x: any) => ({ ...x, id: x.sku }))} columns={[
+            { key: 'api', label: 'API', render: (x: any) => <><strong>{x.api}</strong><div className="muted small">{x.label}</div></> },
+            { key: 'units', label: 'Billable', align: 'right', render: (x: any) => <>{nn(x.units)}<div className="muted small">{x.unit}</div></> },
+            { key: 'usd', label: 'Estimate', align: 'right', render: (x: any) => `$${x.usd.toFixed(2)}` }]} /></Card>
+          <Card title="Last 12 months, all companies (billable units)"><UsageBars items={d.trend.map((t: any) => { const u = SKU_ORDER.reduce((s, k) => s + t[k], 0); return { label: t.month.slice(2), value: u, title: `${t.month}: ${nn(u)} billable, ${nn(t.requests)} requests` }; })} /></Card>
+        </div>
+        <Card title="Companies — highest estimated cost first">
+          <Table rows={d.rows.map((x: any) => ({ ...x, id: `${x.type}-${x.id}` }))} onRow={(x: any) => setOpen(x)} empty="No companies." columns={[
+            { key: 'name', label: 'Company', render: (x: any) => <><strong>{x.name}</strong><div className="muted small">{x.type === 'onprem' ? 'On-premises' : `Cloud · ${x.slug}`}{x.demo ? ' · demo' : ''} · {x.billed_by === 'ametecs' ? "Ametecs's Google account" : 'own Google account'}</div></> },
+            { key: 'maps_enabled', label: 'Maps', render: (x: any) => x.maps_enabled ? <Badge value="ok" label="on" /> : <Badge value="bad" label="off" /> },
+            { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => <>{nn(x.requests)}<div className="muted small">{nn(x.failed)} failed</div></> },
+            ...SKU_ORDER.map((k) => ({ key: k, label: APIS[k], align: 'right' as const, render: (x: any) => nn(x.units[k]) })),
+            { key: 'cost', label: 'Estimated cost', align: 'right', render: (x: any) => money(x.cost) },
+          ]} />
+        </Card>
+      </>}
+      {open && <Modal title={`Google Maps usage · ${open.name}`} onClose={() => setOpen(null)}><MapsUsageReport path={`/maps/usage/${open.type}/${open.id}`} /></Modal>}
+      {prices && <MapsPrices can={canPrices} onClose={() => { setPrices(false); void r.reload(); }} />}
+    </Page>
+  );
+}
+
+/** The price table used for every estimate: Google's India list built in; replace it when Google changes prices. */
+function MapsPrices({ can, onClose }: { can: boolean; onClose: () => void }) {
+  const p = useAsync(() => get('/maps/prices'));
+  const [t, setT] = useState<any | null>(null);
+  const a = useAction();
+  const cur = t ?? p.data?.table;
+  const setSku = (sku: string, f: (s: any) => any) => setT({ ...cur, skus: { ...cur.skus, [sku]: f(cur.skus[sku]) } });
+  const save = (table: any) => a.run(async () => { p.setData(await put('/maps/prices', { table })); setT(null); toast('Prices saved'); });
+  return (
+    <Modal title="Google Maps prices (US$ per 1,000)" onClose={onClose}>
+      <ErrorBox error={p.error ?? a.error} />
+      {cur && <>
+        <Notice>{p.data.custom ? 'Your own table is in use.' : "Google's India list as built in."} Check <a href={cur.source} target="_blank" rel="noreferrer">{cur.source}</a> and change a number here when Google changes its prices — no software change needed. On-premises installs receive this table with their licence.</Notice>
+        <div className="form-grid">
+          <Field label="Prices as of"><input type="date" disabled={!can} value={cur.as_of ?? ''} onChange={(e) => setT({ ...cur, as_of: e.target.value })} /></Field>
+          <Field label="₹ per US$ (display only)"><input type="number" step="0.01" disabled={!can} value={cur.usd_inr} onChange={(e) => setT({ ...cur, usd_inr: Number(e.target.value) })} /></Field>
+        </div>
+        <Table rows={SKU_ORDER.map((k) => ({ ...cur.skus[k], gid: cur.skus[k].id, id: k }))} columns={[
+          { key: 'google', label: 'Google SKU', render: (s: any) => <>{s.google}<div className="muted small">{s.gid} · {s.tier}</div></> },
+          { key: 'free', label: 'Free / month', render: (s: any) => <input type="number" min={0} disabled={!can} style={{ width: 100 }} value={s.free} onChange={(e) => setSku(s.id, (x) => ({ ...x, free: Number(e.target.value) }))} /> },
+          ...[0, 1].map((i) => ({ key: `t${i}`, label: i === 0 ? 'Free cap – 5,000,000' : '5,000,000+', render: (s: any) => <input type="number" step="0.01" min={0} disabled={!can} style={{ width: 80 }} value={s.tiers[i]?.[1] ?? ''}
+            onChange={(e) => setSku(s.id, (x) => ({ ...x, tiers: x.tiers.map((tr: any, j: number) => (j === i ? [tr[0], Number(e.target.value)] : tr)) }))} /> })),
+        ]} />
+        {can && <div className="row" style={{ marginTop: 12 }}>
+          <button disabled={a.busy || !t} onClick={() => save(t)}>Save prices</button>
+          {p.data.custom && <button className="secondary" disabled={a.busy} onClick={() => save(null)}>Back to the built-in list</button>}
+        </div>}
+      </>}
+    </Modal>
+  );
+}

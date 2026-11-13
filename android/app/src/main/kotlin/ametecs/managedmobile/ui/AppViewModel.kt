@@ -868,8 +868,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * The map key, kept on the phone (per server) so a map opens at once instead of waiting for the server every time.
-     * A cached key is returned straight away and re-checked in the background (a key the admin changed is used next time).
-     * Throws only when nothing is cached and the server can't be reached.
+     * Called once per map load: the server counts the load (Google bills each one) and answers with the current key, so a
+     * cached key is returned straight away and re-checked in the background (a key the admin changed or removed — limit
+     * reached, Google Maps off in the licence — applies next time). Throws only when nothing is cached and the server
+     * can't be reached.
      */
     suspend fun mapKey(): String? {
         val cached = g.store.getString("map_key")?.split("\n")?.takeIf { it.size == 2 && it[0] == serverUrl }?.get(1)
@@ -878,9 +880,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return cached
     }
 
-    private suspend fun refreshMapKey(): String? =
-        (fieldConfig()["map_key"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
+    private suspend fun refreshMapKey(): String? {
+        val cfg = try {
+            g.session.work("POST", "/api/mobile/v1/field/map-load", buildJsonObject {}).obj()
+        } catch (e: ApiException) {
+            if (e.status != 404) throw e
+            fieldConfig()   // a server not yet updated has no map-load
+        }
+        return (cfg["map_key"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
             .also { g.store.putString("map_key", it?.let { k -> serverUrl + "\n" + k }) }
+    }
 
     /** "Reached the customer": the server checks the GPS is within 100 m (+ drift) of the pin and logs a visit on the timeline. */
     suspend fun checkIn(id: Long, lat: Double, lng: Double, accuracy: Float?, mock: Boolean = false) {

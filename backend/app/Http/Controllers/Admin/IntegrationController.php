@@ -283,7 +283,32 @@ final class IntegrationController extends Controller
             'key_hint' => $hint($rows->get(GoogleMaps::SERVER)), 'display_key_hint' => $hint($rows->get(GoogleMaps::DISPLAY)),
             'enabled' => (bool) ($rows->get(GoogleMaps::SERVER)?->enabled ?? false), 'last_status' => $rows->get(GoogleMaps::SERVER)?->last_status,
             'usage' => \App\Services\MapsUsage::report(), 'month' => \App\Services\MapsUsage::month(),
+            'licensed' => GoogleMaps::allowed(), 'cost' => \App\Services\MapsPricing::estimate(\App\Services\MapsUsage::used()),
         ]);
+    }
+
+    /**
+     * Integrations → Google Maps usage: this company's calls only (rows are keyed by the signed-in workspace). Between
+     * from..to (default: this month): per-API totals, daily and weekly series; plus the last 12 months with estimated cost
+     * and yearly totals. ?format=csv downloads the daily rows.
+     */
+    public function mapsReport(Request $r)
+    {
+        $d = $r->validate(['from' => 'nullable|date_format:Y-m-d', 'to' => 'nullable|date_format:Y-m-d|after_or_equal:from', 'format' => 'nullable|in:json,csv']);
+        $tz = \App\Services\MapsUsage::tz();
+        $from = $d['from'] ?? now($tz)->startOfMonth()->toDateString();
+        $to = $d['to'] ?? now($tz)->toDateString();
+        abort_if(\Illuminate\Support\Carbon::parse($from)->diffInDays(\Illuminate\Support\Carbon::parse($to)) > 400, 422, 'Choose at most about a year.');
+        $q = DB::table('maps_usage_days')->where('company_id', app(\App\Support\CurrentCompany::class)->id());
+        $daily = \App\Services\MapsReport::daily($q, $from, $to);
+        if (($d['format'] ?? null) === 'csv') {
+            return \App\Services\MapsReport::csv("google-maps-usage-{$from}-to-{$to}.csv", $daily);
+        }
+        $monthly = \App\Services\MapsReport::monthly($q, 12, now($tz)->format('Y-m'));
+        return response()->json(['from' => $from, 'to' => $to, 'timezone' => $tz, 'licensed' => GoogleMaps::allowed(),
+            'totals' => array_values(\App\Services\MapsReport::totals($q, $from, $to)), 'daily' => $daily, 'weekly' => \App\Services\MapsReport::weekly($daily),
+            'monthly' => $monthly, 'yearly' => \App\Services\MapsReport::yearly($monthly), 'limits' => \App\Services\MapsUsage::report(),
+            'cost' => \App\Services\MapsPricing::estimate(\App\Services\MapsUsage::used())]);
     }
 
     /** G12: monthly limit per Google service (blank = Google's free allowance, so the client is never billed by default). */

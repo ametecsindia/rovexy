@@ -32,6 +32,24 @@ final class FieldMapController extends Controller
     }
 
     /**
+     * POST field/map-load — the phone is about to load the map (one Google "Dynamic Maps" load): counted, then answered like
+     * field/config. Map loads past the month's limit, or with Google Maps off in the licence, get no key (phone: "Map not set up").
+     */
+    public function mapLoad(GoogleMaps $maps)
+    {
+        $key = $maps->displayKey();
+        if ($key !== null) {
+            try {
+                \App\Services\MapsUsage::take('maps_js');
+            } catch (\App\Domain\DomainException $e) {
+                if ($e->reason !== 'maps_limit') throw $e;
+                $key = null;
+            }
+        }
+        return response()->json(['map_key' => $key, 'routing' => $maps->configured()]);
+    }
+
+    /**
      * GET field/plan → today's route the admin published for me (G9), in visiting order, with the road line to draw and
      * which stops I have already checked in at today. Served from the saved plan: no Google call from the phone.
      */

@@ -23,10 +23,13 @@ final class OnPremController extends Controller
     public function validate(Request $r)
     {
         $d = $r->validate(['key' => 'required|string|max:40', 'fingerprint' => 'required|string|regex:/^[a-f0-9]{40,64}$/', 'users' => 'nullable|integer|min:0|max:1000000',
-            'usage' => 'nullable|array|max:3']);
+            'usage' => 'nullable|array|max:3', 'maps_usage' => 'nullable|array|max:500']);
         [$status, $body] = LicenceAuthority::validate($d['key'], $d['fingerprint'], $d['users'] ?? null);
         if ($status === 200 && !empty($d['usage'])) {   // G15: only from the licensed, bound server
             \App\Services\Platform\CallingUsage::record((int) \App\Models\Platform\Licence::query()->where('key', strtoupper(trim($d['key'])))->value('id'), $d['usage']);
+        }
+        if ($status === 200 && !empty($d['maps_usage'])) {
+            \App\Services\MapsUsage::recordReported((int) \App\Models\Platform\Licence::query()->where('key', strtoupper(trim($d['key'])))->value('id'), $d['maps_usage']);
         }
         return response()->json($body, $status);
     }

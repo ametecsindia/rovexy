@@ -236,7 +236,7 @@ final class ConsoleController extends Controller
             'plan_id' => 'nullable|integer', 'features' => 'array', 'features.*' => Rule::in(array_keys(Licensing::FEATURES)),
             'status' => 'in:active,suspended,revoked', 'notes' => 'nullable|string|max:2000', 'reason' => 'nullable|string|max:255',
             'billing' => 'nullable|in:annual,half_yearly,quarterly', 'amc_expires_at' => 'nullable|date', 'amc_amount' => 'nullable|numeric|min:0|max:100000000',
-            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'boolean']);
+            'c2c_users' => 'nullable|integer|min:0|max:100000', 'smart31' => 'boolean', 'maps_enabled' => 'boolean']);
         if ($l->status === 'revoked' && ($d['status'] ?? 'revoked') !== 'revoked') {
             throw new DomainException('licence_revoked', 'A revoked licence stays revoked. Issue a new one instead.');
         }
@@ -262,13 +262,13 @@ final class ConsoleController extends Controller
                 throw new DomainException('c2c_in_use', "{$inUse} people in this workspace have Click2Call now. Ask the client to remove some (Calling configuration → Click2Call users), or keep at least {$inUse}.");
             }
         }
-        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at', 'amc_amount', 'c2c_users']);
+        $before = $l->only(['max_users', 'expires_at', 'grace_days', 'plan_id', 'features', 'status', 'billing', 'amc_expires_at', 'amc_amount', 'c2c_users', 'maps_enabled']);
         if (isset($d['plan_id'])) {
             $plan = Plan::query()->findOrFail($d['plan_id']);
             $l->plan_id = $plan->id;
             $l->features = $d['features'] ?? $plan->features;
         }
-        $l->fill(array_intersect_key($d, array_flip(['max_users', 'expires_at', 'grace_days', 'features', 'status', 'notes', 'billing', 'amc_expires_at', 'amc_amount'])));
+        $l->fill(array_intersect_key($d, array_flip(['max_users', 'expires_at', 'grace_days', 'features', 'status', 'notes', 'billing', 'amc_expires_at', 'amc_amount', 'maps_enabled'])));
         $l->save();
         if ($calling) {   // Click2Call users + Smart31 decide the two calling features (whatever the plan or ticks said)
             Sales::applyCalling($l, $c2c, (bool) ($d['smart31'] ?? in_array('smart31', $l->features ?? [], true)), $this->actor());

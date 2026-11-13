@@ -54,7 +54,7 @@ final class AutoGeocode
         $maps = app(GoogleMaps::class);
         $stats = ['saved' => 0, 'approx' => 0, 'not_found' => 0, 'reused' => 0, 'left' => 0, 'stopped' => null];
         if (!$maps->configured()) {
-            $stats['stopped'] = 'Google Maps is not set up (Integrations → Google Maps).';
+            $stats['stopped'] = GoogleMaps::allowed() ? 'Google Maps is not set up (Integrations → Google Maps).' : 'Google Maps is not enabled in the ROVEXY licence.';
             $stats['left'] = self::pending()->count();
             return $stats;
         }

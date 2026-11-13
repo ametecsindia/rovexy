@@ -108,7 +108,10 @@ final class LicenceClient
                 'users' => app(\App\Support\CurrentCompany::class)->withoutScope(fn () => User::query()->where('status', 'active')->count()),
                 // G15: Click2Call / Smart31 users this month and last (for the monthly add-on bill)
                 'usage' => rescue(fn () => app(\App\Support\CurrentCompany::class)->bound() ? \App\Services\Platform\CallingUsage::report()
-                    : app(\App\Support\CurrentCompany::class)->run(\App\Models\Company::query()->orderBy('id')->firstOrFail(), fn () => \App\Services\Platform\CallingUsage::report()), [], false)]);
+                    : app(\App\Support\CurrentCompany::class)->run(\App\Models\Company::query()->orderBy('id')->firstOrFail(), fn () => \App\Services\Platform\CallingUsage::report()), [], false),
+                // Google Maps calls per day and API, for Super Admin's Maps usage report
+                'maps_usage' => rescue(fn () => app(\App\Support\CurrentCompany::class)->bound() ? \App\Services\MapsUsage::report40()
+                    : app(\App\Support\CurrentCompany::class)->run(\App\Models\Company::query()->orderBy('id')->firstOrFail(), fn () => \App\Services\MapsUsage::report40()), [], false)]);
             $j = $res->json();
         } catch (\Throwable $e) {
             return $this->outage($row, 'Licence server unreachable: ' . $e->getMessage());
@@ -216,9 +219,9 @@ final class LicenceClient
         return $this->memo = match (true) {
             in_array($row->status, LicenceAuthority::REASONS, true) && ($row->source !== 'file' || in_array($row->status, ['licence_revoked', 'licence_suspended'], true)) => ['key' => $row->licence_key, 'kind' => $p['kind'] ?? null, 'plan' => $p['plan'] ?? null,
                 'max_users' => (int) ($p['max_users'] ?? 0), 'features' => $p['features'] ?? [], 'status' => $row->status, 'expires_at' => $p['expires_at'] ?? null, 'grace_days' => (int) ($p['grace_days'] ?? 0)],
-            $p !== null && $this->stale($p) => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'features' => $p['features'] ?? [],
+            $p !== null && $this->stale($p) => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'maps' => $p['maps'] ?? true, 'features' => $p['features'] ?? [],
                 'status' => 'stale', 'expires_at' => $p['expires_at'], 'grace_days' => (int) $p['grace_days']],
-            $p !== null => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'features' => $p['features'] ?? [],
+            $p !== null => ['key' => $p['key'], 'kind' => $p['kind'], 'plan' => $p['plan'], 'max_users' => (int) $p['max_users'], 'c2c_users' => $p['c2c_users'] ?? null, 'maps' => $p['maps'] ?? true, 'features' => $p['features'] ?? [],
                 'status' => $p['status'] === 'active' ? 'active' : 'licence_' . $p['status'], 'expires_at' => $p['expires_at'], 'grace_days' => (int) $p['grace_days']],
             // ponytail: this window lives in the customer's own database, so it can be stretched by editing key_saved_at — capped at 10 users
             // and every feature of an evaluation, never the paid licence (that needs a signature). Move the anchor into a signed file if it matters.

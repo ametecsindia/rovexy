@@ -15,6 +15,7 @@ use App\Support\CurrentCompany;
  *  - expiry: after expires_at the company has grace_days; after that phones can't sign in to work and new users / phones
  *    can't be added (the admin console stays open so the licence can be renewed)
  *  - c2c_users: how many people may use Click2Call (null = not counted: licences from before 12 Nov 2026, trials)
+ *  - maps: Super Admin's Google Maps switch (false = no Google Maps calls; GoogleMaps::allowed)
  *  - features: plan feature keys; a route behind `feature:<key>` answers 403 feature_not_in_plan
  * The licence is the newest non-superseded row for this workspace. A company with no licence row at all is treated as unrestricted — every self-serve path (trial, buy) and
  * `ammp:create-company` creates one, so this only covers workspaces made before licensing existed.
@@ -54,7 +55,7 @@ final class Licensing
         $lic = $this->licence();
         if ($lic === null) {
             return $this->memo = ['state' => 'unrestricted', 'kind' => null, 'plan' => null, 'max_users' => 0, 'used_users' => $this->usedUsers(),
-                'features' => array_keys(self::FEATURES), 'c2c_users' => null, 'expires_at' => null, 'grace_until' => null, 'key' => null, 'message' => null];
+                'features' => array_keys(self::FEATURES), 'c2c_users' => null, 'maps' => true, 'expires_at' => null, 'grace_until' => null, 'key' => null, 'message' => null];
         }
         $expires = $lic['expires_at'] ? \Illuminate\Support\Carbon::parse($lic['expires_at']) : null;
         $graceUntil = $expires?->copy()->addDays((int) $lic['grace_days']);
@@ -68,7 +69,7 @@ final class Licensing
         };
         return $this->memo = [
             'state' => $state, 'kind' => $lic['kind'], 'plan' => $lic['plan'], 'max_users' => (int) $lic['max_users'], 'used_users' => $this->usedUsers(),
-            'features' => array_values($lic['features']), 'c2c_users' => isset($lic['c2c_users']) ? (int) $lic['c2c_users'] : null, 'expires_at' => $expires?->toAtomString(), 'grace_until' => $graceUntil?->toAtomString(),
+            'features' => array_values($lic['features']), 'c2c_users' => isset($lic['c2c_users']) ? (int) $lic['c2c_users'] : null, 'maps' => (bool) ($lic['maps'] ?? true), 'expires_at' => $expires?->toAtomString(), 'grace_until' => $graceUntil?->toAtomString(),
             'key' => $lic['key'], 'message' => self::message($state, $lic['kind'], $graceUntil),
         ];
     }
@@ -116,7 +117,7 @@ final class Licensing
             return null;
         }
         $l = Licence::query()->where('company_id', $cid)->where('status', '!=', 'superseded')->with('plan:id,name')->latest('id')->first();
-        return $l ? ['key' => $l->key, 'kind' => $l->kind, 'plan' => $l->plan?->name ?? ucfirst($l->kind), 'max_users' => $l->max_users, 'features' => $l->features ?? [], 'c2c_users' => $l->c2c_users,
+        return $l ? ['key' => $l->key, 'kind' => $l->kind, 'plan' => $l->plan?->name ?? ucfirst($l->kind), 'max_users' => $l->max_users, 'features' => $l->features ?? [], 'c2c_users' => $l->c2c_users, 'maps' => (bool) ($l->maps_enabled ?? true),
             'status' => $l->status, 'expires_at' => $l->expires_at?->toAtomString(), 'grace_days' => $l->grace_days] : null;
     }
 
