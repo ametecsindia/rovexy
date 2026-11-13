@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { del, download, fmtDate, get, patch, post, put, qs, setOnUnauthorized } from '../lib/api';
 import { Badge, Card, ErrorBox, Field, Icon, Kpi, Modal, Notice, Page, Pager, PayBadge, Table, Toaster, toast, useAction, useAsync } from '../components/ui';
 import { MyProfile, StaffSignIn, type MfaPending, type StaffMe } from './StaffAuth';
-import { MapsUsageReport, SKU_ORDER } from '../components/MapsReport';
+import { GM_APIS, MapsUsageReport, Road, SKU_ORDER, StackBars, monthName, nn, paceFor, usdInr } from '../components/MapsReport';
 
 /*
  * Super Admin console (/super) for Ametecs staff: companies, licences, plans, orders & payments, leads, staff, settings,
@@ -1490,17 +1490,7 @@ function BillingOverview() {
  * API is drawn as a road from 0 to its free allowance (the flag), filled to the busiest account's use, with a marker where
  * that account is heading by month end at today's pace. Then the 12-month trend by API, then clients ranked by calls.
  */
-const GM_APIS: { sku: string; name: string; what: string; color: string }[] = [
-  { sku: 'maps_js', name: 'Maps JavaScript', what: 'map loads on phones', color: '#0A2F6B' },
-  { sku: 'matrix', name: 'Route Matrix', what: 'road distances to nearest customers', color: '#2A6FB8' },
-  { sku: 'routes', name: 'Compute Routes', what: 'routes on phones', color: '#C89B2D' },
-  { sku: 'routes_2w', name: 'Routes Enterprise', what: 'optimised two-wheeler day plans', color: '#8A5A00' },
-  { sku: 'geocode', name: 'Geocoding', what: 'address to map pin', color: '#5B8C5A' },
-];
-const nn = (v: number) => Number(v ?? 0).toLocaleString('en-IN');
-const usdInr = (c: { usd: number; inr: number }) => `$${c.usd.toFixed(2)} (≈₹${Math.round(c.inr).toLocaleString('en-IN')})`;
 const shiftMonth = (m: string, by: number) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
-const monthName = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
 
 function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
   const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
@@ -1514,9 +1504,7 @@ function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
   const d = r.data;
 
   // month-end pace: only for the month in progress
-  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
-  const days = new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate();
-  const pace = month === thisMonth ? days / Math.max(1, now.getDate()) : 1;
+  const pace = paceFor(month);
 
   // Google accounts: Ametecs's shared one (if any client uses it) + every client on its own account
   const free: Record<string, number> = Object.fromEntries((d?.ametecs_account?.lines ?? []).map((l: any) => [l.sku, l.free]));
@@ -1541,7 +1529,6 @@ function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
   // 12 months ending at the chosen month, empty months included
   const months = Array.from({ length: 12 }, (_, i) => shiftMonth(month, i - 11));
   const trend = months.map((m) => d?.trend?.find((t: any) => t.month === m) ?? { month: m });
-  const peak = Math.max(1, ...trend.map((t: any) => GM_APIS.reduce((s, x) => s + (t[x.sku] ?? 0), 0)));
 
   return (
     <div className="gm">
@@ -1572,44 +1559,16 @@ function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
             <h2 id="gm-roads-h">Free allowance by API</h2>
             <p>Google gives each billing account a free allowance per API every month. Each road runs to that allowance; the gold is the busiest account so far{current ? ', the marker is where it is heading by month end' : ''}.</p>
           </div>
-          {roads.map((x) => {
-            const end = Math.max(x.free, x.heading, 1);
-            const pct = (v: number) => `${Math.min(100, (v / end) * 100)}%`;
-            const passed = x.free > 0 && x.used > x.free;
-            return (
-              <div key={x.sku} className={`gm-road${passed ? ' passed' : x.heading > x.free ? ' warn' : ''}`}>
-                <div className="gm-road-name"><strong>{x.name}</strong><span>{x.what}</span></div>
-                <div className="gm-track" role="img" aria-label={`${x.name}: ${nn(x.used)} of ${nn(x.free)} free used${x.who ? ` by ${x.who}` : ''}`}>
-                  <div className="gm-asphalt" />
-                  <div className="gm-fill" style={{ width: x.used ? `max(6px, ${pct(x.used)})` : 0 }} />
-                  {current && x.heading > x.used && <div className="gm-pace" style={{ left: pct(x.heading) }} title={`Heading for ${nn(x.heading)} by month end`} />}
-                  <div className="gm-flag" style={{ left: pct(x.free) }} title={`Free allowance ${nn(x.free)}`} />
-                </div>
-                <div className="gm-road-num">
-                  <strong>{nn(x.used)}</strong> <span>of {nn(x.free)} free</span>
-                  <small>{x.who ? `Busiest: ${x.who}` : 'No calls yet'}{current && x.heading > x.used ? <><br />On course for {nn(x.heading)} by month end</> : null}</small>
-                </div>
-              </div>
-            );
-          })}
+          {roads.map((x) => <Road key={x.sku} name={x.name} what={x.what} used={x.used} free={x.free} heading={current ? x.heading : x.used} note={x.who ? `Busiest: ${x.who}` : 'No calls yet'} />)}
         </section>
 
         <div className="gm-split">
           <section className="gm-panel" aria-labelledby="gm-trend-h">
             <div className="gm-head"><h2 id="gm-trend-h">Twelve months</h2><p>Billable calls of all clients, by API.</p></div>
-            <div className="gm-bars">
-              {trend.map((t: any) => {
-                const total = GM_APIS.reduce((s, x) => s + (t[x.sku] ?? 0), 0);
-                return (
-                  <button key={t.month} className={`gm-bar${t.month === month ? ' on' : ''}`} onClick={() => setMonth(t.month)} title={`${monthName(t.month)}: ${nn(total)} billable calls`} aria-label={`${monthName(t.month)}, ${nn(total)} billable calls`}>
-                    <span className="gm-stack" style={{ height: `${(total / peak) * 100}%` }}>
-                      {GM_APIS.map((x) => (t[x.sku] ? <i key={x.sku} style={{ flexGrow: t[x.sku], background: x.color }} /> : null))}
-                    </span>
-                    <small>{new Date(t.month + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' })}</small>
-                  </button>
-                );
-              })}
-            </div>
+            <StackBars onPick={setMonth} items={trend.map((t: any) => {
+              const total = GM_APIS.reduce((sum, x) => sum + (t[x.sku] ?? 0), 0);
+              return { key: t.month, on: t.month === month, values: t, label: new Date(t.month + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' }), title: `${monthName(t.month)}: ${nn(total)} billable calls` };
+            })} />
             <ul className="gm-key">{GM_APIS.map((x) => <li key={x.sku}><i style={{ background: x.color }} />{x.name}<b>{nn(d.apis.find((y: any) => y.sku === x.sku)?.units ?? 0)}</b></li>)}</ul>
           </section>
 

@@ -1024,9 +1024,9 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
 .kv-grid div small { display: block; color: var(--muted); font-size: .78rem; }
 
 /* ── Super Admin → Google Maps usage (13 Nov 2026): free-allowance roads ── */
-.gm { --gm-navy: #072654; --gm-brand: #0A2F6B; --gm-gold: #C89B2D; --gm-gold-2: #E0B84D; --gm-bed: #E4E8EF; --gm-red: #B42318;
-  display: grid; gap: 20px; padding-top: 16px; font-variant-numeric: tabular-nums; }
-.gm h1, .gm h2 { font-family: "Montserrat", "Inter Variable", system-ui, sans-serif; }
+.gm, .gr { --gm-navy: #072654; --gm-brand: #0A2F6B; --gm-gold: #C89B2D; --gm-gold-2: #E0B84D; --gm-bed: #E4E8EF; --gm-red: #B42318; }
+.gm { display: grid; gap: 20px; padding-top: 16px; font-variant-numeric: tabular-nums; }
+.gm h1, .gm h2, .gr h3, .gr-verdict { font-family: "Montserrat", "Inter Variable", system-ui, sans-serif; }
 .gm-band { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "month actions" "verdict verdict" "sub sub";
   gap: 10px 16px; padding: 22px 28px 26px; border-radius: 14px; color: #fff; background: var(--gm-navy); overflow: hidden; }
 .gm-band::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px;
@@ -1103,3 +1103,37 @@ dl.lic-table dd { margin: 0; padding: 10px 14px; word-break: break-word; }
   .gm-road { grid-template-columns: 1fr; gap: 6px; }
   .gm-clients button { grid-template-columns: minmax(0, 1fr) 70px; } .gm-c-bar, .gm-c-cost { display: none; }
 }
+
+/* the same roads in one company's report (Super Admin popup, client Integrations) */
+.gr { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; font-variant-numeric: tabular-nums; }
+.gr-sec, .gr-more { min-width: 0; } .gr-more .table-wrap { overflow-x: auto; }
+.gr-range { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: flex-end; }
+.gr-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.gr-chips button { background: var(--surface); color: var(--gm-navy); border: 1px solid var(--border); box-shadow: none; padding: 6px 12px; border-radius: 999px; font-weight: 600; }
+.gr-chips button[aria-pressed="true"] { background: var(--gm-navy); border-color: var(--gm-navy); color: #fff; }
+.gr-dates { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.gr-dates label { display: grid; gap: 2px; font-size: .78rem; color: var(--muted); }
+.gr-dates input { padding: 6px 8px; }
+.gr-strip { position: relative; background: var(--gm-navy); color: #fff; border-radius: 12px; padding: 18px 20px 22px; display: grid; gap: 14px; overflow: hidden; }
+.gr-strip::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: repeating-linear-gradient(90deg, var(--gm-gold-2) 0 22px, transparent 22px 34px); }
+.gr-verdict { margin: 0; font-size: 1.2rem; font-weight: 700; line-height: 1.3; max-width: 38ch; }
+.gr-strip dl { margin: 0; display: flex; flex-wrap: wrap; gap: 10px 28px; }
+.gr-strip dt { color: #b9c6d8; font-size: .78rem; }
+.gr-strip dd { margin: 2px 0 0; font-weight: 700; }
+.gr-sec { display: grid; gap: 6px; }
+.gr h3 { margin: 0 0 4px; font-size: 1rem; color: var(--gm-navy); }
+.gr-sec-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.gr-seg { display: inline-flex; background: var(--muted-bg); border-radius: 8px; padding: 3px; }
+.gr-seg button { background: none; border: 0; box-shadow: none; color: var(--muted); padding: 5px 12px; border-radius: 6px; font-weight: 600; }
+.gr-seg button[aria-selected="true"] { background: var(--surface); color: var(--gm-navy); box-shadow: 0 1px 2px rgba(7, 38, 84, .15); }
+.gr-note { margin: 0; color: var(--muted); font-size: .82rem; }
+.gr .gm-bars { height: 140px; }
+.gr .gm-key { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); column-gap: 24px; margin-top: 6px; }
+.gm-key li { grid-template-columns: 12px 1fr auto auto; }
+.gr-key-fail { color: var(--gm-red); font-size: .76rem; }
+.gr-more summary { cursor: pointer; color: var(--gm-brand); font-weight: 600; padding: 6px 0; }
+.gr-more table th.num, .gr-more table td.num { text-align: right; }
+.gm-road.compact { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name num" "track track"; gap: 4px 12px; padding: 10px 0; }
+.gm-road.compact .gm-road-name { grid-area: name; } .gm-road.compact .gm-track { grid-area: track; } .gm-road.compact .gm-road-num { grid-area: num; text-align: right; }
+.gm-road.compact .gm-road-name span { display: block; }
+.gr-more table td:first-child { white-space: nowrap; }

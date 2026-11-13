@@ -1,101 +1,162 @@
 import { useState } from 'react';
 import { download, get, qs } from '../lib/api';
 import { RANGES } from '../lib/periods';
-import { ErrorBox, Kpi, Notice, Table, useAction, useAsync } from './ui';
+import { ErrorBox, useAction, useAsync } from './ui';
 
 /*
- * Google Maps usage report (client: Integrations → Google Maps usage; Super Admin: one company). Reads
- * {totals, daily, weekly, monthly, yearly} from `path`; `${path}?format=csv` downloads the daily rows.
+ * Google Maps usage, shared by Super Admin (whole page + one company) and the client's Integrations page.
+ * Free allowances are per Google billing account and per API, so each API is drawn as a road to its free allowance
+ * (the flag). Reads {totals, daily, weekly, monthly, yearly} from `path`; `${path}?format=csv` downloads the daily rows.
  */
 
-export const SKU_ORDER = ['geocode', 'routes', 'routes_2w', 'matrix', 'maps_js'];
-const n = (v: number | null | undefined) => Number(v ?? 0).toLocaleString('en-IN');
+export const GM_APIS: { sku: string; name: string; what: string; color: string }[] = [
+  { sku: 'maps_js', name: 'Maps JavaScript', what: 'map loads on phones', color: '#0A2F6B' },
+  { sku: 'matrix', name: 'Route Matrix', what: 'road distances to nearest customers', color: '#2A6FB8' },
+  { sku: 'routes', name: 'Compute Routes', what: 'routes on phones', color: '#C89B2D' },
+  { sku: 'routes_2w', name: 'Routes Enterprise', what: 'optimised two-wheeler day plans', color: '#8A5A00' },
+  { sku: 'geocode', name: 'Geocoding', what: 'address to map pin', color: '#5B8C5A' },
+];
+export const SKU_ORDER = GM_APIS.map((x) => x.sku);
+export const nn = (v: number | null | undefined) => Number(v ?? 0).toLocaleString('en-IN');
+export const usdInr = (c: { usd: number; inr: number }) => `$${c.usd.toFixed(2)} (≈₹${Math.round(c.inr).toLocaleString('en-IN')})`;
 export const money = (c: { usd: number; inr: number } | null | undefined) => (c ? `$${c.usd.toFixed(2)} · ≈₹${Math.round(c.inr).toLocaleString('en-IN')}` : '—');
-const PRESETS = RANGES.filter(([l]) => ['Last 7 days', 'This month', 'Last month', 'This year'].includes(l));
+export const monthName = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+/** Days in the month / days gone, in India time (1 for a finished month): today's pace to month end. */
+export function paceFor(month: string): number {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const current = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  return month === current ? new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate() / Math.max(1, now.getDate()) : 1;
+}
 
-/** Simple bar chart: one bar per period, the value is billable units of all APIs. */
-export function UsageBars({ items }: { items: { label: string; value: number; title: string }[] }) {
-  const W = 640, H = 160, P = { l: 44, r: 6, t: 8, b: 22 };
-  const max = Math.max(4, ...items.map((i) => i.value));
-  const bw = (W - P.l - P.r) / Math.max(1, items.length);
-  const y = (v: number) => P.t + (H - P.t - P.b) * (1 - v / max);
-  const every = Math.ceil(items.length / 12);
-  if (!items.length) return null;
+/** One API as a road from 0 to its free allowance (flag); gold = used, thin marker = month end at today's pace. */
+export function Road({ name, what, used, free, heading, note, compact }: { name: string; what: string; used: number; free: number; heading: number; note?: string; compact?: boolean }) {
+  const end = Math.max(free, heading, 1);
+  const pct = (v: number) => `${Math.min(100, (v / end) * 100)}%`;
+  const state = free > 0 && used > free ? ' passed' : heading > free ? ' warn' : '';
   return (
-    <div className="chart">
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Google Maps usage per period">
-        {[0, 0.5, 1].map((f) => <g key={f}><line x1={P.l} x2={W - P.r} y1={y(max * f)} y2={y(max * f)} className="grid-line" /><text x={P.l - 6} y={y(max * f) + 4} textAnchor="end" className="axis">{n(Math.round(max * f))}</text></g>)}
-        {items.map((it, i) => (
-          <g key={it.label}>
-            <title>{it.title}</title>
-            {it.value > 0 && <rect x={P.l + i * bw + bw * 0.18} y={y(it.value)} width={bw * 0.64} height={y(0) - y(it.value)} rx={3} fill="var(--series-1)" />}
-            {i % every === 0 && <text x={P.l + i * bw + bw / 2} y={H - 6} textAnchor="middle" className="axis">{it.label}</text>}
-          </g>
-        ))}
-      </svg>
+    <div className={`gm-road${state}${compact ? ' compact' : ''}`}>
+      <div className="gm-road-name"><strong>{name}</strong><span>{what}</span></div>
+      <div className="gm-track" role="img" aria-label={`${name}: ${nn(used)} of ${nn(free)} free used`}>
+        <div className="gm-asphalt" />
+        <div className="gm-fill" style={{ width: used ? `max(6px, ${pct(used)})` : 0 }} />
+        {heading > used && <div className="gm-pace" style={{ left: pct(heading) }} title={`Heading for ${nn(heading)} by month end`} />}
+        <div className="gm-flag" style={{ left: pct(free) }} title={`Free allowance ${nn(free)}`} />
+      </div>
+      <div className="gm-road-num">
+        <strong>{nn(used)}</strong> <span>of {nn(free)} free</span>
+        <small>{note}{heading > used ? <>{note ? <br /> : null}On course for {nn(heading)} by month end</> : null}</small>
+      </div>
     </div>
   );
 }
 
+/** Stacked columns, one per period, coloured by API. */
+export function StackBars({ items, onPick }: { items: { key: string; label: string; title: string; values: Record<string, number>; on?: boolean }[]; onPick?: (key: string) => void }) {
+  const peak = Math.max(1, ...items.map((t) => SKU_ORDER.reduce((s, k) => s + (t.values[k] ?? 0), 0)));
+  const every = Math.ceil(items.length / 12);
+  return (
+    <div className="gm-bars" style={{ gridTemplateColumns: `repeat(${Math.max(1, items.length)}, 1fr)`, gap: items.length > 20 ? 2 : 6 }}>
+      {items.map((t, i) => {
+        const total = SKU_ORDER.reduce((s, k) => s + (t.values[k] ?? 0), 0);
+        return (
+          <button key={t.key} type="button" className={`gm-bar${t.on ? ' on' : ''}`} onClick={() => onPick?.(t.key)} tabIndex={onPick ? 0 : -1} title={t.title} aria-label={t.title}>
+            <span className="gm-stack" style={{ height: `${(total / peak) * 100}%` }}>
+              {GM_APIS.map((x) => (t.values[x.sku] ? <i key={x.sku} style={{ flexGrow: t.values[x.sku], background: x.color }} /> : null))}
+            </span>
+            <small>{i % every === 0 ? t.label : ' '}</small>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+const PRESETS = RANGES.filter(([l]) => ['Last 7 days', 'This month', 'Last month', 'This year'].includes(l));
+const VIEWS = { daily: 'Days', weekly: 'Weeks', monthly: 'Months', yearly: 'Years' } as const;
+const COL = { daily: 'Day', weekly: 'Week', monthly: 'Month', yearly: 'Year' } as const;
+const short = (iso: string) => new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+const span = (a: string, b: string) => (a === b ? short(a) : `${short(a)} to ${short(b)}`);
+
 export function MapsUsageReport({ path }: { path: string }) {
   const [range, setRange] = useState<[string, string]>(() => PRESETS.find(([l]) => l === 'This month')![1]());
-  const [view, setView] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('daily');
+  const [view, setView] = useState<keyof typeof VIEWS>('daily');
   const r = useAsync(() => get(`${path}${qs({ from: range[0], to: range[1] })}`), [path, range[0], range[1]]);
   const a = useAction();
   const d = r.data;
-  const label = (sku: string) => d?.totals?.find((t: any) => t.sku === sku)?.api ?? sku;
-  const sum = (k: string) => (d?.totals ?? []).reduce((s: number, t: any) => s + t[k], 0);
-  const units = (row: any) => SKU_ORDER.reduce((s, k) => s + Number((row.units ?? row)[k] ?? 0), 0);
-  const thisMonth = d?.monthly?.[d.monthly.length - 1];
-  const yearCost = d?.monthly?.filter((m: any) => m.month.startsWith(String(new Date().getFullYear()))).reduce((s: any, m: any) => ({ usd: s.usd + m.cost.usd, inr: s.inr + m.cost.inr }), { usd: 0, inr: 0 });
-  const perApi = () => SKU_ORDER.map((k) => ({ key: k, label: label(k), align: 'right' as const, render: (x: any) => n((x.units ?? x)[k]) }));
-  const series = !d ? [] : view === 'daily' ? d.daily.map((x: any) => ({ label: x.day.slice(5), value: units(x), title: `${x.day}: ${n(units(x))} billable · ${n(x.requests)} requests, ${n(x.failed)} failed` }))
-    : view === 'weekly' ? d.weekly.map((x: any) => ({ label: x.week.slice(5), value: units(x), title: `Week of ${x.week}: ${n(units(x))} billable` }))
-      : view === 'monthly' ? d.monthly.map((x: any) => ({ label: x.month.slice(2), value: units(x), title: `${x.month}: ${n(units(x))} billable · ${money(x.cost)}` }))
-        : d.yearly.map((x: any) => ({ label: x.year, value: units(x), title: `${x.year}: ${n(units(x))} billable` }));
+  const tot = (k: string) => (d?.totals ?? []).reduce((s: number, t: any) => s + t[k], 0);
+  const month = d?.monthly?.[d.monthly.length - 1];
+  const pace = month ? paceFor(month.month) : 1;
+  const year = d?.yearly?.[d.yearly.length - 1];
+  const failed = tot('failed');
+  const series = !d ? [] : view === 'daily' ? d.daily.map((x: any) => ({ key: x.day, label: short(x.day).split(' ')[0], title: `${short(x.day)}: ${nn(x.requests)} calls, ${nn(x.failed)} failed`, values: x }))
+    : view === 'weekly' ? d.weekly.map((x: any) => ({ key: x.week, label: short(x.week), title: `Week of ${short(x.week)}: ${nn(x.requests)} calls`, values: x }))
+      : view === 'monthly' ? d.monthly.map((x: any) => ({ key: x.month, label: new Date(x.month + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' }), title: `${monthName(x.month)}: ${nn(x.requests)} calls, ${money(x.cost)}`, values: x.units }))
+        : d.yearly.map((x: any) => ({ key: x.year, label: x.year, title: `${x.year}: ${nn(x.requests)} calls, ${money(x)}`, values: x.units }));
+  const rows = !d ? [] : view === 'daily' ? [...d.daily].reverse().map((x: any) => ({ when: short(x.day), requests: x.requests, failed: x.failed, units: x }))
+    : view === 'weekly' ? [...d.weekly].reverse().map((x: any) => ({ when: `Week of ${short(x.week)}`, requests: x.requests, failed: x.failed, units: x }))
+      : view === 'monthly' ? [...d.monthly].reverse().map((x: any) => ({ when: monthName(x.month), requests: x.requests, failed: x.failed, units: x.units, cost: x.cost }))
+        : d.yearly.map((x: any) => ({ when: x.year, requests: x.requests, failed: x.failed, units: x.units, cost: x }));
+  const withCost = view === 'monthly' || view === 'yearly';
   return (
-    <div>
-      <ErrorBox error={r.error ?? a.error} />
-      <div className="row" style={{ alignItems: 'flex-end', flexWrap: 'wrap', gap: 8 }}>
-        {PRESETS.map(([l, fn]) => { const [f, t] = fn(); return <button key={l} className={f === range[0] && t === range[1] ? '' : 'secondary'} onClick={() => setRange([f, t])}>{l}</button>; })}
-        <label>From <input type="date" value={range[0]} onChange={(e) => setRange([e.target.value, range[1]])} /></label>
-        <label>To <input type="date" value={range[1]} onChange={(e) => setRange([range[0], e.target.value])} /></label>
-        <button className="secondary" disabled={a.busy} onClick={() => a.run(() => download(`${path}${qs({ from: range[0], to: range[1], format: 'csv' })}`))}>Download CSV</button>
-      </div>
-      {d && <>
-        <div className="kpi-grid small" style={{ margin: '12px 0' }}>
-          <Kpi icon="chart" tone="info" label="Requests to Google" value={n(sum('requests'))} sub={`${range[0]} – ${range[1]}`} />
-          <Kpi icon="check" tone="ok" label="Successful" value={n(sum('ok'))} />
-          <Kpi icon="shield" tone={sum('failed') ? 'warn' : 'ok'} label="Failed" value={n(sum('failed'))} />
-          <Kpi icon="chart" tone="info" label="Estimated cost this month" value={thisMonth ? money(thisMonth.cost) : '—'} sub={yearCost ? `this year ${money(yearCost)}` : undefined} />
+    <div className="gr">
+      <div className="gr-range">
+        <div className="gr-chips" role="group" aria-label="Dates">
+          {PRESETS.map(([l, fn]) => { const [f, t] = fn(); return <button key={l} type="button" aria-pressed={f === range[0] && t === range[1]} onClick={() => setRange([f, t])}>{l}</button>; })}
         </div>
-        <h3>By Google API</h3>
-        <Table rows={d.totals.map((t: any) => ({ ...t, id: t.sku }))} columns={[
-          { key: 'api', label: 'Google API', render: (t: any) => <><strong>{t.api}</strong><div className="muted small">{t.label}</div></> },
-          { key: 'requests', label: 'Requests', align: 'right', render: (t: any) => n(t.requests) },
-          { key: 'units', label: 'Billable', align: 'right', render: (t: any) => <>{n(t.units)}<div className="muted small">{t.unit}</div></> },
-          { key: 'ok', label: 'Successful', align: 'right', render: (t: any) => n(t.ok) },
-          { key: 'failed', label: 'Failed', align: 'right', render: (t: any) => n(t.failed) },
-        ]} />
-        <div className="tabs" role="tablist" style={{ marginTop: 16 }}>{(['daily', 'weekly', 'monthly', 'yearly'] as const).map((k) => <button key={k} role="tab" aria-selected={view === k} className={`tab${view === k ? ' on' : ''}`} onClick={() => setView(k)}>{k[0].toUpperCase() + k.slice(1)}</button>)}</div>
-        {(view === 'monthly' || view === 'yearly') && <p className="muted small">Last 12 months, whatever the dates above.</p>}
-        <UsageBars items={series} />
-        {view === 'daily' && <Table rows={[...d.daily].reverse().map((x: any) => ({ ...x, id: x.day }))} empty="No Google Maps calls in these dates." columns={[{ key: 'day', label: 'Date' }, { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => n(x.requests) }, { key: 'failed', label: 'Failed', align: 'right', render: (x: any) => n(x.failed) }, ...perApi()]} />}
-        {view === 'weekly' && <Table rows={[...d.weekly].reverse().map((x: any) => ({ ...x, id: x.week }))} empty="No Google Maps calls in these dates." columns={[{ key: 'week', label: 'Week from' }, { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => n(x.requests) }, { key: 'failed', label: 'Failed', align: 'right', render: (x: any) => n(x.failed) }, ...perApi()]} />}
-        {view === 'monthly' && <Table rows={[...d.monthly].reverse().map((x: any) => ({ ...x, id: x.month }))} columns={[{ key: 'month', label: 'Month' }, { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => n(x.requests) }, ...perApi(),
-          { key: 'cost', label: 'Estimated cost', align: 'right', render: (x: any) => <span title={x.cost.lines.filter((l: any) => l.usd > 0).map((l: any) => `${l.google_sku}: ${n(l.billable)} above the free ${n(l.free)} → $${l.usd}`).join('\n') || 'Within Google\'s free allowance'}>{money(x.cost)}</span> }]} />}
-        {view === 'yearly' && <Table rows={d.yearly.map((x: any) => ({ ...x, id: x.year }))} columns={[{ key: 'year', label: 'Year' }, { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => n(x.requests) }, ...perApi(),
-          { key: 'cost', label: 'Estimated cost', align: 'right', render: (x: any) => money(x) }]} />}
-        {thisMonth && <><h3>Estimated cost this month, by Google SKU</h3>
-          <Table rows={thisMonth.cost.lines.map((l: any) => ({ ...l, id: l.sku }))} columns={[
-            { key: 'google_sku', label: 'Google SKU', render: (l: any) => <>{l.google_sku}<div className="muted small">{l.google_sku_id} · {l.tier}</div></> },
-            { key: 'units', label: 'Used', align: 'right', render: (l: any) => n(l.units) },
-            { key: 'free', label: 'Free / month', align: 'right', render: (l: any) => n(l.free) },
-            { key: 'billable', label: thisMonth.cost.shared_account ? 'Billable (whole account)' : 'Billable', align: 'right', render: (l: any) => n(l.billable) },
-            { key: 'usd', label: 'Estimate', align: 'right', render: (l: any) => <>{money(l)}{l.sales_quote && <div className="muted small">above 10 million: Google quotes</div>}</> },
-          ]} /></>}
-        <Notice tone="info">Estimate only, from Google's official India price list (updated {thisMonth?.cost.as_of ?? '—'}): free monthly allowance per API, then US$ per 1,000. {thisMonth?.cost.shared_account ? 'This company uses Ametecs\'s Google account, so the free allowance is shared and the cost is shared out by usage. ' : ''}
-          Google bills per Google billing account (other software on the same account shares the free allowance), counts its month from midnight US Pacific time, converts to rupees at its own rate and adds GST. The Google Cloud billing report is the actual bill. Rupees here at ₹{thisMonth?.cost.usd_inr ?? '—'} per US$.</Notice>
+        <div className="gr-dates">
+          <label>From <input type="date" value={range[0]} onChange={(e) => e.target.value && setRange([e.target.value, range[1]])} /></label>
+          <label>To <input type="date" value={range[1]} onChange={(e) => e.target.value && setRange([range[0], e.target.value])} /></label>
+          <button type="button" className="secondary" disabled={a.busy} onClick={() => a.run(() => download(`${path}${qs({ from: range[0], to: range[1], format: 'csv' })}`))}>Download CSV</button>
+        </div>
+      </div>
+      <ErrorBox error={r.error ?? a.error} />
+      {!d ? <p className="muted">Loading…</p> : <>
+        <div className="gr-strip">
+          <p className="gr-verdict">{!tot('requests') ? `No calls to Google from ${span(range[0], range[1])}.`
+            : `${nn(tot('requests'))} calls to Google from ${span(range[0], range[1])}, ${failed ? `${nn(failed)} failed` : 'all successful'}.`}</p>
+          <dl>
+            <div><dt>This month so far</dt><dd>{month && month.cost.usd > 0 ? usdInr(month.cost) : 'Free'}</dd></div>
+            <div><dt>This year</dt><dd>{year && year.usd > 0 ? usdInr(year) : 'Free'}</dd></div>
+            <div><dt>Successful</dt><dd>{tot('requests') ? `${failed ? Math.min(99.9, Math.floor((tot('ok') / tot('requests')) * 1000) / 10) : 100}%` : '—'}</dd></div>
+          </dl>
+        </div>
+
+        {month && <section className="gr-sec">
+          <h3>{monthName(month.month)} against Google's free allowance</h3>
+          {GM_APIS.map((x) => {
+            const l = month.cost.lines.find((y: any) => y.sku === x.sku);
+            const used = month.units[x.sku] ?? 0;
+            return <Road key={x.sku} compact name={x.name} what={x.what} used={used} free={l?.free ?? 0} heading={Math.round(used * pace)}
+              note={l?.usd > 0 ? `Estimated ${usdInr(l)}` : used ? 'Inside the free allowance' : 'Not used this month'} />;
+          })}
+          {month.cost.shared_account && <p className="gr-note">This client uses Ametecs's Google account, so the free allowance is shared with other clients and the cost is shared out by use.</p>}
+        </section>}
+
+        <section className="gr-sec">
+          <div className="gr-sec-head">
+            <h3>Calls by API</h3>
+            <div className="gr-seg" role="tablist" aria-label="Group by">
+              {(Object.keys(VIEWS) as (keyof typeof VIEWS)[]).map((k) => <button key={k} type="button" role="tab" aria-selected={view === k} onClick={() => setView(k)}>{VIEWS[k]}</button>)}
+            </div>
+          </div>
+          {withCost && <p className="gr-note">The last 12 months, whatever the dates above.</p>}
+          {series.length ? <StackBars items={series} /> : <p className="gr-note">No calls in these dates.</p>}
+          <ul className="gm-key">{GM_APIS.map((x) => {
+            const t = d.totals.find((y: any) => y.sku === x.sku);
+            return <li key={x.sku}><i style={{ background: x.color }} />{x.name}<span className="gr-key-fail">{t?.failed ? `${nn(t.failed)} failed` : ''}</span><b>{nn(t?.units)}</b></li>;
+          })}</ul>
+          <details className="gr-more">
+            <summary>Show the numbers</summary>
+            <div className="table-wrap"><table>
+              <thead><tr><th>{COL[view]}</th><th className="num">Calls</th><th className="num">Failed</th>{GM_APIS.map((x) => <th key={x.sku} className="num">{x.name}</th>)}{withCost && <th className="num">Estimate</th>}</tr></thead>
+              <tbody>{rows.map((x: any) => <tr key={x.when}><td>{x.when}</td><td className="num">{nn(x.requests)}</td><td className="num">{nn(x.failed)}</td>
+                {GM_APIS.map((y) => <td key={y.sku} className="num">{nn(x.units[y.sku])}</td>)}{withCost && <td className="num">{x.cost.usd > 0 ? money(x.cost) : 'Free'}</td>}</tr>)}</tbody>
+            </table></div>
+          </details>
+        </section>
+
+        <p className="gm-foot">Estimates from Google's India price list (updated {month?.cost.as_of ?? '—'}), at ₹{month?.cost.usd_inr ?? '—'} per US$. Google bills each Google account separately,
+          counts its month from midnight US Pacific time, converts to rupees at its own rate and adds GST; the Google Cloud billing report is the actual bill.</p>
       </>}
     </div>
   );
