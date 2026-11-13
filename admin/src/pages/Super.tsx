@@ -1515,7 +1515,7 @@ function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
           <Card title="Last 12 months, all companies (billable units)"><UsageBars items={d.trend.map((t: any) => { const u = SKU_ORDER.reduce((s, k) => s + t[k], 0); return { label: t.month.slice(2), value: u, title: `${t.month}: ${nn(u)} billable, ${nn(t.requests)} requests` }; })} /></Card>
         </div>
         <Card title="Companies — highest estimated cost first">
-          <Table rows={d.rows.map((x: any) => ({ ...x, id: `${x.type}-${x.id}` }))} onRow={(x: any) => setOpen(x)} empty="No companies." columns={[
+          <Table rows={d.rows.map((x: any) => ({ ...x, eid: x.id, id: `${x.type}-${x.id}` }))} onRow={(x: any) => setOpen(x)} empty="No companies." columns={[
             { key: 'name', label: 'Company', render: (x: any) => <><strong>{x.name}</strong><div className="muted small">{x.type === 'onprem' ? 'On-premises' : `Cloud · ${x.slug}`}{x.demo ? ' · demo' : ''} · {x.billed_by === 'ametecs' ? "Ametecs's Google account" : 'own Google account'}</div></> },
             { key: 'maps_enabled', label: 'Maps', render: (x: any) => x.maps_enabled ? <Badge value="ok" label="on" /> : <Badge value="bad" label="off" /> },
             { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => <>{nn(x.requests)}<div className="muted small">{nn(x.failed)} failed</div></> },
@@ -1524,7 +1524,7 @@ function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
           ]} />
         </Card>
       </>}
-      {open && <Modal title={`Google Maps usage · ${open.name}`} onClose={() => setOpen(null)}><MapsUsageReport path={`/maps/usage/${open.type}/${open.id}`} /></Modal>}
+      {open && <Modal title={`Google Maps usage · ${open.name}`} onClose={() => setOpen(null)}><MapsUsageReport path={`/maps/usage/${open.type}/${open.eid}`} /></Modal>}
       {prices && <MapsPrices can={canPrices} onClose={() => { setPrices(false); void r.reload(); }} />}
     </Page>
   );
