@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { del, download, fmtDate, get, patch, post, put, qs, setOnUnauthorized } from '../lib/api';
 import { Badge, Card, ErrorBox, Field, Icon, Kpi, Modal, Notice, Page, Pager, PayBadge, Table, Toaster, toast, useAction, useAsync } from '../components/ui';
 import { MyProfile, StaffSignIn, type MfaPending, type StaffMe } from './StaffAuth';
-import { MapsUsageReport, money, UsageBars, SKU_ORDER } from '../components/MapsReport';
+import { MapsUsageReport, SKU_ORDER } from '../components/MapsReport';
 
 /*
  * Super Admin console (/super) for Ametecs staff: companies, licences, plans, orders & payments, leads, staff, settings,
@@ -1484,49 +1484,159 @@ function BillingOverview() {
 }
 
 
-// ── Google Maps usage (13 Nov 2026) ──
-const APIS: Record<string, string> = { maps_js: 'Maps JavaScript', geocode: 'Geocoding', routes: 'Compute Routes', routes_2w: 'Routes Enterprise (2-wheeler)', matrix: 'Route Matrix' };
+// ── Google Maps usage (13 Nov 2026; redesigned) ──
+/*
+ * One question first: will any Google account pay this month? Free allowances are per Google billing account, so each
+ * API is drawn as a road from 0 to its free allowance (the flag), filled to the busiest account's use, with a marker where
+ * that account is heading by month end at today's pace. Then the 12-month trend by API, then clients ranked by calls.
+ */
+const GM_APIS: { sku: string; name: string; what: string; color: string }[] = [
+  { sku: 'maps_js', name: 'Maps JavaScript', what: 'map loads on phones', color: '#0A2F6B' },
+  { sku: 'matrix', name: 'Route Matrix', what: 'road distances to nearest customers', color: '#2A6FB8' },
+  { sku: 'routes', name: 'Compute Routes', what: 'routes on phones', color: '#C89B2D' },
+  { sku: 'routes_2w', name: 'Routes Enterprise', what: 'optimised two-wheeler day plans', color: '#8A5A00' },
+  { sku: 'geocode', name: 'Geocoding', what: 'address to map pin', color: '#5B8C5A' },
+];
+const nn = (v: number) => Number(v ?? 0).toLocaleString('en-IN');
+const usdInr = (c: { usd: number; inr: number }) => `$${c.usd.toFixed(2)} (≈₹${Math.round(c.inr).toLocaleString('en-IN')})`;
+const shiftMonth = (m: string, by: number) => { const [y, mo] = m.split('-').map(Number); const d = new Date(y, mo - 1 + by, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; };
+const monthName = (m: string) => new Date(m + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+
 function MapsUsagePage({ canPrices }: { canPrices: boolean }) {
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const thisMonth = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }).slice(0, 7);
+  const [month, setMonth] = useState(thisMonth);
   const [open, setOpen] = useState<any | null>(null);
   const [prices, setPrices] = useState(false);
+  const [q, setQ] = useState('');
+  const [idle, setIdle] = useState(false);
   const r = useAsync(() => get(`/maps/usage${qs({ month })}`), [month]);
   const a = useAction();
   const d = r.data;
-  const nn = (v: number) => Number(v ?? 0).toLocaleString('en-IN');
+
+  // month-end pace: only for the month in progress
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const days = new Date(Number(month.slice(0, 4)), Number(month.slice(5)), 0).getDate();
+  const pace = month === thisMonth ? days / Math.max(1, now.getDate()) : 1;
+
+  // Google accounts: Ametecs's shared one (if any client uses it) + every client on its own account
+  const free: Record<string, number> = Object.fromEntries((d?.ametecs_account?.lines ?? []).map((l: any) => [l.sku, l.free]));
+  const accounts: { name: string; units: Record<string, number> }[] = !d ? [] : [
+    ...(d.rows.some((x: any) => x.billed_by === 'ametecs') ? [{ name: "Ametecs's Google account", units: Object.fromEntries(d.ametecs_account.lines.map((l: any) => [l.sku, l.units])) }] : []),
+    ...d.rows.filter((x: any) => x.billed_by === 'own').map((x: any) => ({ name: x.name, units: x.units })),
+  ];
+  const roads = GM_APIS.map((api) => {
+    const top = accounts.reduce((b, ac) => ((ac.units[api.sku] ?? 0) > (b?.units[api.sku] ?? -1) ? ac : b), accounts[0]);
+    const used = top?.units[api.sku] ?? 0;
+    return { ...api, used, who: used > 0 ? top.name : null, heading: Math.round(used * pace), free: free[api.sku] ?? 0 };
+  });
+  const over = roads.filter((x) => x.free > 0 && x.heading > x.free);
+  const cost = d?.totals ?? { usd: 0, inr: 0 };
+  const current = month === thisMonth;
+
+  const active = (d?.rows ?? []).filter((x: any) => x.requests > 0);
+  const quiet = (d?.rows ?? []).filter((x: any) => x.requests === 0);
+  const maxReq = Math.max(1, ...active.map((x: any) => x.requests));
+  const match = (x: any) => !q || `${x.name} ${x.slug ?? ''}`.toLowerCase().includes(q.toLowerCase());
+
+  // 12 months ending at the chosen month, empty months included
+  const months = Array.from({ length: 12 }, (_, i) => shiftMonth(month, i - 11));
+  const trend = months.map((m) => d?.trend?.find((t: any) => t.month === m) ?? { month: m });
+  const peak = Math.max(1, ...trend.map((t: any) => GM_APIS.reduce((s, x) => s + (t[x.sku] ?? 0), 0)));
+
   return (
-    <Page title="Google Maps usage" subtitle="Every Google Maps call ROVEXY makes, per company and per Google API, with the estimated cost at Google's India list prices. Cloud workspaces are counted live; on-premises installs report at their licence check-in. Turn the service on or off per client in Licences → Edit."
-      actions={<><button className="secondary" onClick={() => setPrices(true)}>Prices…</button><button className="secondary" disabled={a.busy} onClick={() => a.run(() => download(`/maps/usage${qs({ month, format: 'csv' })}`))}>Download CSV</button></>}>
+    <div className="gm">
+      <header className="gm-band">
+        <div className="gm-month" role="group" aria-label="Month">
+          <button className="gm-arrow" aria-label="Previous month" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
+          <label className="gm-month-name">{monthName(month)}<input type="month" value={month} max={thisMonth} onChange={(e) => e.target.value && setMonth(e.target.value)} aria-label="Choose month" /></label>
+          <button className="gm-arrow" aria-label="Next month" disabled={month >= thisMonth} onClick={() => setMonth(shiftMonth(month, 1))}>›</button>
+        </div>
+        <h1 className="gm-verdict">{!d ? 'Reading Google Maps usage…'
+          : over.length ? `${over.length === 1 ? `${over[0].name} is` : `${over.length} APIs are`} ${current ? 'heading past' : 'went past'} Google's free allowance${current ? ' this month' : ''}.`
+            : cost.usd > 0 ? `Google will charge about ${usdInr(cost)} for ${monthName(month)}.`
+              : current ? 'Every Google account is inside its free allowance this month.' : `Every Google account stayed inside its free allowance in ${monthName(month)}.`}</h1>
+        {d && <p className="gm-sub">
+          {nn(d.totals.requests)} calls to Google from {active.length} {active.length === 1 ? 'client' : 'clients'}, {nn(d.totals.failed)} failed.
+          {' '}Estimated Google charges so far {usdInr(cost)}{d.rows.some((x: any) => x.billed_by === 'ametecs') ? `, of which Ametecs pays ${usdInr(d.ametecs_account)}` : ''}.
+        </p>}
+        <div className="gm-actions">
+          <button className="gm-ghost" onClick={() => setPrices(true)}>Google prices</button>
+          <button className="gm-ghost" disabled={a.busy} onClick={() => a.run(() => download(`/maps/usage${qs({ month, format: 'csv' })}`))}>Download CSV</button>
+        </div>
+      </header>
       <ErrorBox error={r.error ?? a.error} />
-      <div className="row" style={{ alignItems: 'flex-end' }}><Field label="Month"><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></Field>
-        {d && <small className="muted">Prices as of {d.prices.as_of} (<a href={d.prices.source} target="_blank" rel="noreferrer">Google's India price list</a>). Estimates, not Google's bill.</small>}</div>
+
       {d && <>
-        <div className="kpi-grid small" style={{ margin: '12px 0' }}>
-          <Kpi icon="chart" tone="info" label="Requests to Google" value={nn(d.totals.requests)} />
-          <Kpi icon="check" tone="ok" label="Successful" value={nn(d.totals.ok)} />
-          <Kpi icon="shield" tone={d.totals.failed ? 'warn' : 'ok'} label="Failed" value={nn(d.totals.failed)} />
-          <Kpi icon="chart" tone="warn" label="Estimated cost, all companies" value={money(d.totals)} sub={`Ametecs's Google account: ${money(d.ametecs_account)}`} />
+        <section className="gm-roads" aria-labelledby="gm-roads-h">
+          <div className="gm-head">
+            <h2 id="gm-roads-h">Free allowance by API</h2>
+            <p>Google gives each billing account a free allowance per API every month. Each road runs to that allowance; the gold is the busiest account so far{current ? ', the marker is where it is heading by month end' : ''}.</p>
+          </div>
+          {roads.map((x) => {
+            const end = Math.max(x.free, x.heading, 1);
+            const pct = (v: number) => `${Math.min(100, (v / end) * 100)}%`;
+            const passed = x.free > 0 && x.used > x.free;
+            return (
+              <div key={x.sku} className={`gm-road${passed ? ' passed' : x.heading > x.free ? ' warn' : ''}`}>
+                <div className="gm-road-name"><strong>{x.name}</strong><span>{x.what}</span></div>
+                <div className="gm-track" role="img" aria-label={`${x.name}: ${nn(x.used)} of ${nn(x.free)} free used${x.who ? ` by ${x.who}` : ''}`}>
+                  <div className="gm-asphalt" />
+                  <div className="gm-fill" style={{ width: x.used ? `max(6px, ${pct(x.used)})` : 0 }} />
+                  {current && x.heading > x.used && <div className="gm-pace" style={{ left: pct(x.heading) }} title={`Heading for ${nn(x.heading)} by month end`} />}
+                  <div className="gm-flag" style={{ left: pct(x.free) }} title={`Free allowance ${nn(x.free)}`} />
+                </div>
+                <div className="gm-road-num">
+                  <strong>{nn(x.used)}</strong> <span>of {nn(x.free)} free</span>
+                  <small>{x.who ? `Busiest: ${x.who}` : 'No calls yet'}{current && x.heading > x.used ? <><br />On course for {nn(x.heading)} by month end</> : null}</small>
+                </div>
+              </div>
+            );
+          })}
+        </section>
+
+        <div className="gm-split">
+          <section className="gm-panel" aria-labelledby="gm-trend-h">
+            <div className="gm-head"><h2 id="gm-trend-h">Twelve months</h2><p>Billable calls of all clients, by API.</p></div>
+            <div className="gm-bars">
+              {trend.map((t: any) => {
+                const total = GM_APIS.reduce((s, x) => s + (t[x.sku] ?? 0), 0);
+                return (
+                  <button key={t.month} className={`gm-bar${t.month === month ? ' on' : ''}`} onClick={() => setMonth(t.month)} title={`${monthName(t.month)}: ${nn(total)} billable calls`} aria-label={`${monthName(t.month)}, ${nn(total)} billable calls`}>
+                    <span className="gm-stack" style={{ height: `${(total / peak) * 100}%` }}>
+                      {GM_APIS.map((x) => (t[x.sku] ? <i key={x.sku} style={{ flexGrow: t[x.sku], background: x.color }} /> : null))}
+                    </span>
+                    <small>{new Date(t.month + '-01T00:00:00').toLocaleDateString('en-IN', { month: 'short' })}</small>
+                  </button>
+                );
+              })}
+            </div>
+            <ul className="gm-key">{GM_APIS.map((x) => <li key={x.sku}><i style={{ background: x.color }} />{x.name}<b>{nn(d.apis.find((y: any) => y.sku === x.sku)?.units ?? 0)}</b></li>)}</ul>
+          </section>
+
+          <section className="gm-panel" aria-labelledby="gm-clients-h">
+            <div className="gm-head gm-head-row"><h2 id="gm-clients-h">Clients</h2><input type="search" placeholder="Find a client" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find a client" /></div>
+            {!active.filter(match).length && <p className="gm-empty">{q ? 'No client with Google calls matches that name.' : 'No client called Google Maps this month.'}</p>}
+            <ol className="gm-clients">
+              {[...active.filter(match), ...(idle || q ? quiet.filter(match) : [])].map((x: any) => (
+                <li key={`${x.type}-${x.id}`}>
+                  <button onClick={() => setOpen(x)}>
+                    <span className="gm-c-name"><strong>{x.name}{!x.maps_enabled && <span className="gm-off">Maps off</span>}</strong>
+                      <span>{x.type === 'onprem' ? 'On-premises' : x.slug}{x.demo ? ', demo' : ''} · {x.billed_by === 'ametecs' ? "Ametecs's Google account" : 'own Google account'}</span></span>
+                    <span className="gm-c-bar"><i style={{ width: `${(x.requests / maxReq) * 100}%` }} /></span>
+                    <span className="gm-c-num"><strong>{nn(x.requests)}</strong><span>{x.failed ? `${nn(x.failed)} failed` : 'calls'}</span></span>
+                    <span className="gm-c-cost">{x.cost.usd > 0 ? usdInr(x.cost) : 'free'}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+            {!q && quiet.length > 0 && <button className="gm-more" onClick={() => setIdle(!idle)}>{idle ? 'Hide' : 'Show'} {quiet.length} {quiet.length === 1 ? 'client' : 'clients'} with no Google calls</button>}
+          </section>
         </div>
-        <div className="grid2">
-          <Card title="By Google API (this month)"><Table rows={d.apis.map((x: any) => ({ ...x, id: x.sku }))} columns={[
-            { key: 'api', label: 'API', render: (x: any) => <><strong>{x.api}</strong><div className="muted small">{x.label}</div></> },
-            { key: 'units', label: 'Billable', align: 'right', render: (x: any) => <>{nn(x.units)}<div className="muted small">{x.unit}</div></> },
-            { key: 'usd', label: 'Estimate', align: 'right', render: (x: any) => `$${x.usd.toFixed(2)}` }]} /></Card>
-          <Card title="Last 12 months, all companies (billable units)"><UsageBars items={d.trend.map((t: any) => { const u = SKU_ORDER.reduce((s, k) => s + t[k], 0); return { label: t.month.slice(2), value: u, title: `${t.month}: ${nn(u)} billable, ${nn(t.requests)} requests` }; })} /></Card>
-        </div>
-        <Card title="Companies — highest estimated cost first">
-          <Table rows={d.rows.map((x: any) => ({ ...x, eid: x.id, id: `${x.type}-${x.id}` }))} onRow={(x: any) => setOpen(x)} empty="No companies." columns={[
-            { key: 'name', label: 'Company', render: (x: any) => <><strong>{x.name}</strong><div className="muted small">{x.type === 'onprem' ? 'On-premises' : `Cloud · ${x.slug}`}{x.demo ? ' · demo' : ''} · {x.billed_by === 'ametecs' ? "Ametecs's Google account" : 'own Google account'}</div></> },
-            { key: 'maps_enabled', label: 'Maps', render: (x: any) => x.maps_enabled ? <Badge value="ok" label="on" /> : <Badge value="bad" label="off" /> },
-            { key: 'requests', label: 'Requests', align: 'right', render: (x: any) => <>{nn(x.requests)}<div className="muted small">{nn(x.failed)} failed</div></> },
-            ...SKU_ORDER.map((k) => ({ key: k, label: APIS[k], align: 'right' as const, render: (x: any) => nn(x.units[k]) })),
-            { key: 'cost', label: 'Estimated cost', align: 'right', render: (x: any) => money(x.cost) },
-          ]} />
-        </Card>
+        <p className="gm-foot">Estimates from Google's India price list as of {d.prices.as_of} (<a href={d.prices.source} target="_blank" rel="noreferrer">source</a>). Google's bill counts its month from midnight US Pacific time, converts to rupees at its own rate and adds GST. Turn the service on or off for a client in Licences, Edit.</p>
       </>}
-      {open && <Modal title={`Google Maps usage · ${open.name}`} onClose={() => setOpen(null)}><MapsUsageReport path={`/maps/usage/${open.type}/${open.eid}`} /></Modal>}
+      {open && <Modal title={`Google Maps usage, ${open.name}`} onClose={() => setOpen(null)}><MapsUsageReport path={`/maps/usage/${open.type}/${open.id}`} /></Modal>}
       {prices && <MapsPrices can={canPrices} onClose={() => { setPrices(false); void r.reload(); }} />}
-    </Page>
+    </div>
   );
 }
 
