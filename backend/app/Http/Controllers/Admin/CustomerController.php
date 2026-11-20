@@ -90,13 +90,61 @@ final class CustomerController extends Controller
         if ($r->filled('recording_format') && \App\Services\RecordingName::find($r->input('recording_format'))) {
             $job->forceFill(['recording_format' => $r->input('recording_format')])->save();
         }
-        return response()->json($job->toArray() + ['fields' => self::mappingFields($job->portfolio_type)], 201);
+        return response()->json(self::jobPayload($job), 201);
+    }
+
+    /** An upload with what the Portfolios page needs to match its columns. */
+    private static function jobPayload(ImportJob $job): array
+    {
+        return $job->toArray() + ['fields' => self::mappingFields($job->portfolio_type),
+            'saved_mapping' => $job->import_mapping_id ? \App\Models\ImportMapping::query()->whereKey($job->import_mapping_id)->value('name') : null];
+    }
+
+    /** GET import-mappings — saved column mappings (one per bank / file format). */
+    public function mappings()
+    {
+        return response()->json(\App\Models\ImportMapping::query()->orderBy('name')->get(['id', 'name', 'portfolio_type', 'header_row', 'fields', 'last_used_at', 'created_at']));
+    }
+
+    /** POST imports/{id}/header-row — the row that holds the column names (0 = first row). */
+    public function headerRow(Request $r, int $id, ImportService $svc)
+    {
+        $data = $r->validate(['header_row' => 'required|integer|min:0|max:' . (\App\Domain\Customers\ImportHeaders::SCAN_ROWS - 1)]);
+        return response()->json(self::jobPayload($svc->setHeaderRow($this->job($r, $id), (int) $data['header_row'])));
+    }
+
+    /** POST imports/{id}/apply-mapping — use a saved mapping on this upload. */
+    public function applyMapping(Request $r, int $id, ImportService $svc)
+    {
+        $data = $r->validate(['mapping_id' => 'required|integer']);
+        return response()->json(self::jobPayload($svc->applyMapping($this->job($r, $id), \App\Models\ImportMapping::query()->findOrFail($data['mapping_id']))));
+    }
+
+    /** POST imports/{id}/save-mapping — remember this upload's column matching under a name (e.g. the bank's). */
+    public function saveMapping(Request $r, int $id, ImportService $svc)
+    {
+        $data = $r->validate(['name' => 'required|string|max:100', 'mapping' => 'required|array', 'keep_other_columns' => 'boolean',
+            'ignore_columns' => 'array|max:500', 'ignore_columns.*' => 'integer', 'on_existing' => 'in:update,skip']);
+        $job = $this->job($r, $id);
+        $svc->saveMapping($job, $data['mapping'], $data + (array) $job->options, $r->user());
+        $m = $svc->saveAs($job, $data['name'], $r->user());
+        return response()->json(['id' => $m->id, 'name' => $m->name]);
+    }
+
+    /** DELETE import-mappings/{id} */
+    public function deleteMapping(int $id)
+    {
+        $m = \App\Models\ImportMapping::query()->findOrFail($id);
+        \App\Support\Audit::record('import.mapping_deleted', $m, ['name' => $m->name]);
+        $m->delete();
+        return response()->json(['ok' => true]);
     }
 
     public function preview(Request $r, int $id, ImportService $svc)
     {
         $data = $r->validate(['mapping' => 'required|array', 'on_existing' => 'in:update,skip', 'allocation' => 'in:column,random',
-            'team_id' => 'nullable|integer', 'user_ids' => 'array|max:500', 'user_ids.*' => 'integer', 'keep_other_columns' => 'boolean']);
+            'team_id' => 'nullable|integer', 'user_ids' => 'array|max:500', 'user_ids.*' => 'integer', 'keep_other_columns' => 'boolean',
+            'ignore_columns' => 'array|max:500', 'ignore_columns.*' => 'integer']);
         return response()->json($svc->preview($this->job($r, $id), $data['mapping'], $data, $r->user()));
     }
 
@@ -155,7 +203,7 @@ final class CustomerController extends Controller
     public function importStatus(Request $r, int $id)
     {
         $job = $this->job($r, $id);
-        return response()->json($job->toArray() + ['fields' => self::mappingFields($job->portfolio_type), 'sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get(),
+        return response()->json(self::jobPayload($job) + ['sample_errors' => ImportRowError::query()->where('import_job_id', $id)->orderBy('row_number')->limit(50)->get(),
             'geo' => $job->status === 'completed' ? \App\Services\AutoGeocode::progress($job->id) : null]);
     }
 

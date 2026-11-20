@@ -25,9 +25,11 @@ final class ImportValidator
     public const STATUSES = ['new', 'in_progress', 'follow_up', 'closed', 'do_not_call'];
 
     private const SYNONYMS = [
-        'customer_ref' => ['customer id', 'customer_id', 'cust id', 'id', 'account', 'account no', 'loan no', 'ref', 'consignee id', 'lead id', 'contact id', 'patient id', 'case id', 'reference id'],
-        'name' => ['customer name', 'name', 'full name', 'borrower', 'consignee name', 'consignee', 'lead name', 'contact name', 'contact person', 'patient name', 'patient / doctor name', 'doctor / patient name'],
-        'phone' => ['phone', 'phone number', 'mobile', 'mobile number', 'contact', 'number'],
+        'customer_ref' => ['customer id', 'customer_id', 'cust id', 'id', 'account', 'account no', 'loan no', 'ref', 'consignee id', 'lead id', 'contact id', 'patient id', 'case id', 'reference id',
+            'loan account no', 'loan account no.', 'loan account number', 'loan a/c no', 'account number', 'account no.', 'agreement no', 'agreement number', 'lan', 'lan no', 'loan no.', 'card no', 'card number'],
+        'name' => ['customer name', 'name', 'full name', 'borrower', 'consignee name', 'consignee', 'lead name', 'contact name', 'contact person', 'patient name', 'patient / doctor name', 'doctor / patient name',
+            'borrower name', 'borrower full name', 'customer full name', 'applicant name', 'cardholder name', 'card holder name'],
+        'phone' => ['phone', 'phone number', 'mobile', 'mobile number', 'contact', 'number', 'mobile no', 'mobile no.', 'contact no', 'contact no.', 'contact number', 'cell', 'cell no', 'registered mobile', 'customer mobile'],
         'alt_phone' => ['alternate number', 'alternate', 'alt phone', 'alt mobile', 'phone 2', 'secondary'],
         'campaign' => ['campaign', 'portfolio', 'bucket'],
         'assigned_employee' => ['caller id', 'caller', 'telecaller id', 'telecaller', 'assigned employee', 'employee', 'agent', 'employee code', 'agent id', 'user id'],
@@ -38,7 +40,7 @@ final class ImportValidator
         'area' => ['area', 'locality', 'zone', 'region', 'branch'],
         'pincode' => ['pincode', 'pin code', 'pin', 'zip', 'postal code'],
         'email' => ['email', 'email id', 'e-mail', 'mail id'],
-        'address' => ['address', 'residential address', 'full address', 'customer address', 'current address', 'address line 1'],
+        'address' => ['address', 'residential address', 'full address', 'customer address', 'current address', 'address line 1', 'residence address', 'resi address', 'permanent address', 'communication address', 'mailing address'],
         'state' => ['state'],
         'preferred_time' => ['preferred time', 'preferred contact time', 'best time to call', 'contact time'],
         'follow_up_date' => ['follow-up date', 'follow up date', 'followup', 'follow_up', 'ptp date', 'next action'],
@@ -94,7 +96,7 @@ final class ImportValidator
         $seenRef = [];
         $seenPhone = [];
         foreach ($rows as $i => $raw) {
-            $n = $firstRowNumber + $i;
+            $n = isset($raw['__row']) ? (int) $raw['__row'] : $firstRowNumber + $i;   // row number in the file, as Excel shows it
             $rowErrors = [];
             $err = static function (string $field, string $code, string $message) use (&$rowErrors, $n): void {
                 $rowErrors[] = ['row' => $n, 'field' => $field, 'code' => $code, 'message' => $message];

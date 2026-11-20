@@ -10,7 +10,9 @@ use App\Domain\Portfolios\PortfolioTypes;
 use App\Jobs\ProcessImport;
 use App\Models\Customer;
 use App\Models\CustomerAssignment;
+use App\Domain\Customers\ImportHeaders;
 use App\Models\ImportJob;
+use App\Models\ImportMapping;
 use App\Models\ImportRowError;
 use App\Models\Team;
 use App\Models\User;
@@ -71,27 +73,117 @@ final class ImportService
             'portfolio_type' => PortfolioTypes::exists($type) ? $type : PortfolioTypes::DEFAULT,
         ]);
         try {
-            $headers = array_map(fn ($h) => trim((string) $h), $this->readRows($job, 1)[0] ?? []);
+            $top = $this->readRows($job, ImportHeaders::SCAN_ROWS);
         } catch (\Throwable $e) {
-            $headers = null;
+            $top = null;
         }
-        if (!$headers || implode('', $headers) === '') {
+        if (!$top || implode('', array_merge(...$top)) === '') {
             // Never leave a half-made upload behind (it would show as "not imported — click to finish" and could not be opened).
             \Illuminate\Support\Facades\Storage::disk('company_files')->delete($key);
             $job->delete();
-            throw new DomainException('empty_file', $headers === null ? 'We could not read this file. Save it again as .csv or .xlsx and retry.' : 'The file has no header row. The first row must hold the column names.');
+            throw new DomainException('empty_file', $top === null ? 'We could not read this file. Save it again as .csv or .xlsx and retry.' : 'The file has no header row. The first row must hold the column names.');
         }
-        $job->forceFill(['headers' => $headers, 'mapping' => ImportValidator::suggestMapping($headers, $job->portfolio_type)])->save();
-        Audit::record('import.uploaded', $job, ['name' => $job->original_name, 'sha256' => $job->sha256]);
+        // A saved mapping of this bank / file format (same column names) wins; else find the header row and guess.
+        if (!$this->applySaved($job, $top)) {
+            $this->useHeaderRow($job, $top, ImportHeaders::detect($top));
+        }
+        $job->save();
+        Audit::record('import.uploaded', $job, ['name' => $job->original_name, 'sha256' => $job->sha256, 'mapping' => $job->import_mapping_id]);
         return $job;
+    }
+
+    /** Column names from row $row of the file, a guessed mapping, every other column kept. */
+    private function useHeaderRow(ImportJob $job, array $top, int $row): void
+    {
+        $headers = ImportHeaders::unique($top[$row] ?? []);
+        $job->forceFill(['header_row' => $row, 'headers' => $headers, 'import_mapping_id' => null,
+            'mapping' => ImportValidator::suggestMapping($headers, $job->portfolio_type),
+            'options' => ['keep_other_columns' => true, 'ignore_columns' => []]]);
+    }
+
+    /** The best saved mapping of this company for this type whose every column is in the file. */
+    private function applySaved(ImportJob $job, array $top, ?ImportMapping $only = null): bool
+    {
+        $best = null;
+        $list = $only ? [$only] : ImportMapping::query()->where('portfolio_type', $job->portfolio_type)->latest('last_used_at')->get();
+        $detected = ImportHeaders::detect($top);
+        foreach ($list as $m) {
+            // The saved header row, or this file's own (the bank may add or drop a title line next month).
+            foreach (array_unique([$m->header_row, $detected]) as $row) {
+                $headers = ImportHeaders::unique($top[$row] ?? []);
+                $fit = ImportHeaders::fit((array) $m->fields, (array) $m->ignored, (array) $m->headers, $headers);
+                // ponytail: 60% of column names alike = same format; a stricter or looser bar is one number.
+                if ($fit && ($only || $fit['score'] >= 0.6) && (!$best || $fit['score'] > $best[1]['score'])) {
+                    $best = [$m, $fit, $headers, $row];
+                }
+            }
+        }
+        if (!$best) {
+            return false;
+        }
+        [$m, $fit, $headers, $row] = $best;
+        $job->forceFill(['header_row' => $row, 'headers' => $headers, 'import_mapping_id' => $m->id,
+            'mapping' => array_replace(array_fill_keys(ImportValidator::fieldsFor($job->portfolio_type), null), array_intersect_key($fit['mapping'], array_flip(ImportValidator::fieldsFor($job->portfolio_type)))),
+            'options' => ['keep_other_columns' => $m->keep_other_columns, 'ignore_columns' => $fit['ignore']]]);
+        $m->forceFill(['last_used_at' => now()])->save();
+        return true;
+    }
+
+    /** "Column names are on row N" (Portfolios page): re-reads the names and guesses the mapping again. */
+    public function setHeaderRow(ImportJob $job, int $row): ImportJob
+    {
+        $this->editable($job);
+        $top = $this->readRows($job, ImportHeaders::SCAN_ROWS);
+        if (!isset($top[$row]) || implode('', $top[$row]) === '') {
+            throw new DomainException('invalid_header_row', 'That row is empty. Choose the row that holds the column names.');
+        }
+        $this->useHeaderRow($job, $top, $row);
+        $job->forceFill(['status' => 'uploaded'])->save();
+        return $job;
+    }
+
+    /** Use a saved mapping on this upload (chosen by hand). */
+    public function applyMapping(ImportJob $job, ImportMapping $m): ImportJob
+    {
+        $this->editable($job);
+        if ($m->portfolio_type !== $job->portfolio_type) {
+            throw new DomainException('mapping_other_type', 'This saved mapping is for another type of portfolio.');
+        }
+        if (!$this->applySaved($job, $this->readRows($job, ImportHeaders::SCAN_ROWS), $m)) {
+            throw new DomainException('mapping_not_fit', "This file does not have every column of “{$m->name}”. Match the columns by hand, then save a new mapping.");
+        }
+        $job->forceFill(['status' => 'uploaded'])->save();
+        return $job;
+    }
+
+    /** Save the upload's current mapping under a name (same name = replaced), by column name. */
+    public function saveAs(ImportJob $job, string $name, User $actor): ImportMapping
+    {
+        $h = (array) $job->headers;
+        $m = ImportMapping::query()->firstOrNew(['name' => mb_substr(trim($name), 0, 100)]);
+        $m->fill(['portfolio_type' => $job->portfolio_type, 'header_row' => $job->header_row, 'headers' => array_map([ImportHeaders::class, 'norm'], $h),
+            'fields' => array_map(fn ($i) => $i === null ? null : ($h[$i] ?? null), (array) $job->mapping),
+            'ignored' => array_values(array_filter(array_map(fn ($i) => $h[$i] ?? null, (array) ($job->options['ignore_columns'] ?? [])))),
+            'keep_other_columns' => (bool) ($job->options['keep_other_columns'] ?? true), 'created_by' => $m->created_by ?? $actor->id, 'last_used_at' => now()])->save();
+        $job->forceFill(['import_mapping_id' => $m->id])->save();
+        Audit::record('import.mapping_saved', $m, ['name' => $m->name]);
+        return $m;
+    }
+
+    private function editable(ImportJob $job): void
+    {
+        if (!in_array($job->status, ['uploaded', 'ready'], true)) {
+            throw new DomainException('import_locked');
+        }
     }
 
     public function preview(ImportJob $job, array $mapping, array $options, ?User $actor = null): array
     {
         $this->saveMapping($job, $mapping, $options, $actor);
-        $rows = array_slice($this->readRows($job, self::PREVIEW_ROWS + 1), 1);
+        $rows = $this->dataRows($job, self::PREVIEW_ROWS);
         $callers = User::query()->whereIn('id', $job->options['user_ids'] ?? [])->orderBy('name')->get(['id', 'name', 'employee_code']);
-        return ['mapping' => $job->mapping, 'result' => $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job)), 'callers' => $callers];
+        return ['mapping' => $job->mapping, 'result' => $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job)), 'callers' => $callers,
+            'sample' => array_map(fn ($r) => array_map(fn ($i) => $r[$i] ?? '', array_keys((array) $job->headers)), array_slice($rows, 0, 5))];
     }
 
     /**
@@ -143,9 +235,11 @@ final class ImportService
         } elseif ($allocation === 'column' && $clean['assigned_employee'] === null) {
             throw new DomainException('mapping_incomplete', 'Caller ID-wise allocation: map the Caller ID column (Assigned employee), or choose Random allocation.');
         }
+        $ignore = array_values(array_unique(array_filter(array_map('intval', (array) ($options['ignore_columns'] ?? $job->options['ignore_columns'] ?? [])),
+            fn ($i) => $i >= 0 && $i < count($job->headers ?? []))));
         $job->forceFill(['mapping' => $clean, 'options' => ['on_existing' => ($options['on_existing'] ?? 'update') === 'skip' ? 'skip' : 'update',
             'allocation' => $allocation, 'team_id' => $teamId, 'user_ids' => $userIds, 'scope' => $scope,
-            'keep_other_columns' => (bool) ($options['keep_other_columns'] ?? true)]])->save();
+            'keep_other_columns' => (bool) ($options['keep_other_columns'] ?? true), 'ignore_columns' => $ignore]])->save();
     }
 
     /** Background step 1: validate every row and store row errors. */
@@ -153,7 +247,7 @@ final class ImportService
     {
         $job->forceFill(['status' => 'validating', 'started_at' => now()])->save();
         ImportRowError::query()->where('import_job_id', $job->id)->delete();
-        $rows = array_slice($this->readRows($job), 1);
+        $rows = $this->dataRows($job);
         $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job));
         foreach (array_chunk($r['errors'], 500) as $chunk) {
             ImportRowError::query()->insert(array_map(fn ($e) => [
@@ -169,7 +263,7 @@ final class ImportService
     public function commit(ImportJob $job, User $actor): void
     {
         $job->forceFill(['status' => 'committing'])->save();
-        $rows = array_slice($this->readRows($job), 1);
+        $rows = $this->dataRows($job);
         $r = $this->validateRows($job, $this->mapRows($rows, $job->mapping, $job));
         $users = User::query()->pluck('id', 'employee_code');
         $teams = self::teamLookup();
@@ -301,7 +395,7 @@ final class ImportService
     /** Mapped fields, plus `__extra` = the file's other columns (header => value), kept under their own names. */
     private function mapRows(array $rows, array $mapping, ?ImportJob $job = null): array
     {
-        $used = array_flip(array_filter($mapping, fn ($i) => $i !== null));
+        $used = array_flip(array_filter($mapping, fn ($i) => $i !== null)) + array_flip((array) ($job?->options['ignore_columns'] ?? []));   // ignored = never kept
         $extra = [];
         if ($job && ($job->options['keep_other_columns'] ?? true)) {
             foreach ((array) $job->headers as $i => $h) {
@@ -312,7 +406,7 @@ final class ImportService
             }
         }
         return array_map(function (array $row) use ($mapping, $extra) {
-            $out = [];
+            $out = isset($row['__row']) ? ['__row' => $row['__row']] : [];
             foreach ($mapping as $field => $idx) {
                 $out[$field] = $idx === null ? null : (isset($row[$idx]) ? trim((string) $row[$idx]) : null);
             }
@@ -321,6 +415,26 @@ final class ImportService
             }
             return $out;
         }, $rows);
+    }
+
+    /**
+     * The rows under the header row, without fully blank lines, each with its row number in the file (`__row`, as Excel shows it).
+     * @return list<array>
+     */
+    private function dataRows(ImportJob $job, ?int $limit = null): array
+    {
+        $start = (int) $job->header_row + 1;
+        $out = [];
+        foreach (array_slice($this->readRows($job, $limit === null ? null : $start + $limit * 3), $start) as $i => $r) {   // *3: room for blank lines
+            if (implode('', array_map(fn ($v) => trim((string) $v), $r)) === '') {
+                continue;
+            }
+            $out[] = $r + ['__row' => $start + $i + 1];
+            if ($limit !== null && count($out) >= $limit) {
+                break;
+            }
+        }
+        return $out;
     }
 
     /** @return list<list<string>> */

@@ -276,6 +276,11 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::post('imports/{id}/validate', [Admin\CustomerController::class, 'validateImport'])->middleware('perm:customers.import');
         Route::post('imports/{id}/commit', [Admin\CustomerController::class, 'commit'])->middleware('perm:customers.import');
         Route::patch('imports/{id}', [Admin\CustomerController::class, 'renameImport'])->middleware('perm:customers.import');
+        Route::post('imports/{id}/header-row', [Admin\CustomerController::class, 'headerRow'])->middleware('perm:customers.import');
+        Route::post('imports/{id}/apply-mapping', [Admin\CustomerController::class, 'applyMapping'])->middleware('perm:customers.import');
+        Route::post('imports/{id}/save-mapping', [Admin\CustomerController::class, 'saveMapping'])->middleware('perm:customers.import');
+        Route::get('import-mappings', [Admin\CustomerController::class, 'mappings'])->middleware('perm:customers.import');
+        Route::delete('import-mappings/{id}', [Admin\CustomerController::class, 'deleteMapping'])->whereNumber('id')->middleware('perm:customers.import');
         Route::get('portfolios', [Admin\CustomerController::class, 'portfolios'])->middleware('perm:customers.view');
         Route::get('imports/{id}', [Admin\CustomerController::class, 'importStatus'])->middleware('perm:customers.import');
         Route::get('imports/{id}/errors.csv', [Admin\CustomerController::class, 'errorReport'])->middleware('perm:customers.import');

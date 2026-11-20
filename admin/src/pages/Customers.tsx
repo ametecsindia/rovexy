@@ -37,6 +37,9 @@ export function ImportsPage() {
   const [mapping, setMapping] = useState<Record<string, number | null>>({});
   const [onExisting, setOnExisting] = useState('update');
   const [preview, setPreview] = useState<any | null>(null);
+  const [ignore, setIgnore] = useState<number[]>([]);   // other columns of the file the client chose not to keep
+  const [saveName, setSaveName] = useState('');
+  const saved = useAsync(() => get<any[]>('/import-mappings'));
   const a = useAction();
 
   useEffect(() => {
@@ -53,7 +56,7 @@ export function ImportsPage() {
   const open = async (j: any) => {
     const full = j.fields ? j : await get(`/imports/${j.id}`);   // the field list of its portfolio type
     setJob(full); setName(full.portfolio ?? ''); setRecFormat(full.recording_format ?? ''); setMapping(full.mapping ?? {}); setPreview(null); setPtype(full.portfolio_type ?? 'collections');
-    setKeepOther(full.options?.keep_other_columns ?? true);
+    setKeepOther(full.options?.keep_other_columns ?? true); setIgnore(full.options?.ignore_columns ?? []); setSaveName(full.saved_mapping ?? '');
   };
   const [renaming, setRenaming] = useState<{ id: number; name: string } | null>(null);
   const MAX_MB = 20;   // = config ammp.uploads.import_max_mb
@@ -71,12 +74,23 @@ export function ImportsPage() {
   });
   const check = () => a.run(async () => {
     if ((name.trim() && name.trim() !== job.portfolio) || (recFormat || null) !== (job.recording_format ?? null)) await api('PATCH', `/imports/${job.id}`, { ...(name.trim() ? { portfolio: name.trim() } : {}), recording_format: recFormat || null });
-    setPreview((await post(`/imports/${job.id}/preview`, { mapping, on_existing: onExisting, keep_other_columns: keepOther })).result);
+    setPreview(await post(`/imports/${job.id}/preview`, { mapping, on_existing: onExisting, keep_other_columns: keepOther, ignore_columns: ignore }));
     await post(`/imports/${job.id}/validate`);
     setJob(await get(`/imports/${job.id}`));
   });
-  const commit = () => a.run(async () => { await post(`/imports/${job.id}/commit`); setJob(await get(`/imports/${job.id}`)); });
+  const commit = () => a.run(async () => { await post(`/imports/${job.id}/commit`); setJob(await get(`/imports/${job.id}`)); void imports.reload(); void portfolios.reload(); });
   const busyJob = job && ['validating', 'committing'].includes(job.status);
+  const headerRow = (row: number) => a.run(async () => open(await post(`/imports/${job.id}/header-row`, { header_row: row })));
+  const useSaved = (id: number) => a.run(async () => open(await post(`/imports/${job.id}/apply-mapping`, { mapping_id: id })));
+  const saveMap = () => a.run(async () => {
+    if (!saveName.trim()) throw new Error('Give the mapping a name, e.g. the bank and file (HDFC — monthly allocation).');
+    await post(`/imports/${job.id}/save-mapping`, { name: saveName.trim(), mapping, keep_other_columns: keepOther, ignore_columns: ignore, on_existing: onExisting });
+    await saved.reload(); setJob(await get(`/imports/${job.id}`));
+  });
+  const used = new Set(Object.values(mapping).filter((i) => i !== null && i !== undefined) as number[]);
+  const otherCols = ((job?.headers ?? []) as string[]).map((h, i) => ({ h, i })).filter((c) => !used.has(c.i));
+  const missing = ((job?.fields ?? []) as MapField[]).filter((f) => f.required && (mapping[f.key] ?? null) === null);
+  const fieldOf = (i: number) => ((job?.fields ?? []) as MapField[]).find((f) => mapping[f.key] === i)?.label;
 
   return (
     <Page title="Portfolios" subtitle="Each uploaded lead file is a portfolio. Upload it here, then give its cases to a group and its employees under Assignment."
@@ -122,9 +136,21 @@ export function ImportsPage() {
             <div className="form-grid">
               <Field label="2. Portfolio name" hint="e.g. HDFC Oct-2026 Bucket 1. Leave blank to use the file name."><input value={name} onChange={(e) => setName(e.target.value)} /></Field>
               <RecFormatField formats={formats.data?.formats} value={recFormat} onChange={setRecFormat} label="3. Recording file names" />
-              <Field label="4. File (.csv or .xlsx)" hint={ptype ? `Up to ${MAX_MB} MB. Needs Customer ID, name and Phone number columns — see the sample file.` : 'Choose the type of portfolio first.'}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
+              <Field label="4. File (.csv or .xlsx)" hint={ptype ? `Up to ${MAX_MB} MB. Your bank's file as it is — any column names and order, title lines on top are fine. It needs a Customer ID, a name and a phone number column.` : 'Choose the type of portfolio first.'}><input type="file" accept=".csv,.xlsx" disabled={a.busy} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void upload(f); }} aria-label="Lead file" /></Field>
               {a.busy && <Notice tone="info">Uploading and reading the file…</Notice>}
             </div>
+            {(saved.data ?? []).length > 0 && <>
+              <h3 style={{ margin: '14px 0 4px' }}>Saved column mappings</h3>
+              <p className="muted small" style={{ marginTop: 0 }}>A file with the same columns as a saved mapping is matched by itself on upload.</p>
+              <Table rows={saved.data} columns={[
+                { key: 'name', label: 'Mapping' },
+                { key: 'portfolio_type', label: 'Type', render: (m: any) => typeOf(m.portfolio_type)?.label ?? m.portfolio_type },
+                { key: 'header_row', label: 'Column names on row', align: 'right', render: (m: any) => m.header_row + 1 },
+                { key: 'last_used_at', label: 'Last used', render: (m: any) => m.last_used_at ? fmtDate(m.last_used_at) : '—' },
+                { key: 'del', label: '', render: (m: any) => <button className="ghost small" disabled={a.busy}
+                    onClick={() => { if (confirm(`Delete the saved mapping “${m.name}”? Portfolios already imported are not changed.`)) void a.run(async () => { await api('DELETE', `/import-mappings/${m.id}`); await saved.reload(); }); }}>Delete</button> },
+              ]} />
+            </>}
             </>
           ) : (
             <>
@@ -134,7 +160,19 @@ export function ImportsPage() {
               </div>
               <p className="small" style={{ margin: '4px 0' }}>Type: <span className="tag">{typeOf(job.portfolio_type)?.label}</span></p>
               <h3 style={{ marginBottom: 4 }}>Match the columns of your file</h3>
-              <p className="muted" style={{ marginTop: 0 }}>Most are matched automatically. * = required. A <b>Caller ID</b> column gives a lead straight to that employee; leave it out to assign later.</p>
+              {job.saved_mapping && job.status !== 'completed' && <Notice tone="ok">Matched with your saved mapping <b>{job.saved_mapping}</b>. Check the columns below and press Check file.</Notice>}
+              <p className="muted" style={{ marginTop: 0 }}>Only the fields marked * are needed — leave the rest as “not in file”. A <b>Caller ID</b> column gives a lead straight to that employee; leave it out to assign later.</p>
+              {job.status !== 'completed' && <div className="form-grid">
+                <Field label="Column names are on row" hint="Bank files often have title lines on top. Change this if the columns below look wrong.">
+                  <select value={job.header_row ?? 0} disabled={a.busy} onChange={(e) => void headerRow(Number(e.target.value))}>
+                    {Array.from({ length: 30 }, (_, i) => <option key={i} value={i}>Row {i + 1}</option>)}
+                  </select></Field>
+                <Field label="Use a saved mapping" hint="For a file format you have imported before (e.g. the same bank's monthly file).">
+                  <select value={job.import_mapping_id ?? ''} disabled={a.busy} onChange={(e) => e.target.value && void useSaved(Number(e.target.value))}>
+                    <option value="">— match by hand —</option>
+                    {(saved.data ?? []).filter((m: any) => m.portfolio_type === job.portfolio_type).map((m: any) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select></Field>
+              </div>}
               <div className="form-grid">
                 {((job.fields ?? []) as MapField[]).map(({ key: f, label, required: req }) => (
                   <Field key={f} label={`${label}${req ? ' *' : ''}`}>
@@ -144,13 +182,38 @@ export function ImportsPage() {
                   </Field>
                 ))}
                 <Field label="If a Customer ID already exists"><select value={onExisting} onChange={(e) => setOnExisting(e.target.value)}><option value="update">Update it</option><option value="skip">Skip the row</option></select></Field>
-                <Field label="Other columns of the file" hint="Columns not matched above are kept with their own names and shown on the case.">
+                <Field label="Other columns of the file" hint="Columns not matched above (Reference 1, Reference 2, Branch…) are kept with their own names, shown on the case and in the Customers report.">
                   <label className="row" style={{ gap: 6 }}><input type="checkbox" checked={keepOther} disabled={job.status === 'completed'} onChange={(e) => { setKeepOther(e.target.checked); setPreview(null); }} /> Keep them</label></Field>
               </div>
+              {keepOther && otherCols.length > 0 && job.status !== 'completed' && (
+                <div style={{ margin: '4px 0 10px' }}>
+                  <p className="small" style={{ margin: '0 0 4px' }}>Other columns to keep ({otherCols.filter((c) => !ignore.includes(c.i)).length} of {otherCols.length}) — untick the ones you don't need:</p>
+                  <div className="row" style={{ flexWrap: 'wrap', gap: '4px 14px' }}>
+                    {otherCols.map((c) => <label key={c.i} className="row small" style={{ gap: 4 }}>
+                      <input type="checkbox" checked={!ignore.includes(c.i)} onChange={(e) => { setIgnore(e.target.checked ? ignore.filter((x) => x !== c.i) : [...ignore, c.i]); setPreview(null); }} />{c.h}</label>)}
+                  </div>
+                </div>)}
+              {missing.length > 0 && job.status !== 'completed' && <Notice tone="warn">Still to match (required): {missing.map((f) => f.label).join(', ')}.</Notice>}
               <div className="row">
-                <button className={job.status === 'ready' ? 'secondary' : undefined} disabled={a.busy || busyJob || job.status === 'completed'} onClick={check}>Check file</button>
+                <button className={job.status === 'ready' ? 'secondary' : undefined} disabled={a.busy || busyJob || job.status === 'completed' || missing.length > 0} onClick={check}>Check file</button>
                 <button disabled={a.busy || busyJob || job.status !== 'ready' || !job.valid_rows} onClick={commit}>Import {job.valid_rows ? `${job.valid_rows} leads` : ''} into “{name || job.portfolio}”</button>
               </div>
+              {job.status !== 'completed' && missing.length === 0 && (
+                <div className="row" style={{ margin: '10px 0', gap: 6 }}>
+                  <input value={saveName} onChange={(e) => setSaveName(e.target.value)} maxLength={100} placeholder="Name, e.g. HDFC — monthly allocation" aria-label="Mapping name" style={{ maxWidth: 300 }} />
+                  <button className="secondary" disabled={a.busy} onClick={saveMap}>{job.saved_mapping && job.saved_mapping === saveName.trim() ? 'Update saved mapping' : 'Save this mapping'}</button>
+                  <small className="muted">Next time a file with these columns is matched by itself.</small>
+                </div>)}
+              {preview?.sample?.length > 0 && job.status !== 'completed' && <>
+                <h3 style={{ margin: '12px 0 4px' }}>Preview — first rows of your file</h3>
+                <div className="table-wrap">
+                  <table className="small"><thead><tr>{(job.headers as string[]).map((h, i) => {
+                    const f = fieldOf(i); const kept = !f && keepOther && !ignore.includes(i);
+                    return <th key={i} style={{ whiteSpace: 'nowrap', opacity: f || kept ? 1 : 0.45 }}>{h}<br />
+                      {f ? <span className="badge ok">{f}</span> : kept ? <span className="badge info">kept as is</span> : <span className="badge muted">ignored</span>}</th>; })}</tr></thead>
+                  <tbody>{preview.sample.map((r: string[], ri: number) => <tr key={ri}>{r.map((v, i) => <td key={i} style={{ whiteSpace: 'nowrap', opacity: fieldOf(i) || (keepOther && !ignore.includes(i)) ? 1 : 0.45 }}>{v}</td>)}</tr>)}</tbody></table>
+                </div>
+              </>}
               {a.busy && !busyJob && <Notice tone="info">Working…</Notice>}
               {busyJob && <Notice tone="info">{job.status === 'validating' ? 'Checking every row…' : 'Importing… this page updates by itself.'}</Notice>}
               {job.status === 'uploaded' && !a.busy && <p className="muted">Next: press <b>Check file</b>. Nothing is imported until you press Import.</p>}
@@ -164,7 +227,7 @@ export function ImportsPage() {
                   {job.geo.no_address > 0 && <> · {job.geo.no_address} without an address</>}</p>
               )}
               {job.status === 'failed' && <Notice tone="bad">Import failed: {job.failure}</Notice>}
-              {preview && preview.errors.length > 0 && <Table rows={preview.errors.slice(0, 20).map((e: any, i: number) => ({ id: i, ...e }))} columns={[{ key: 'row', label: 'Row' }, { key: 'field', label: 'Column' }, { key: 'message', label: 'Problem' }]} />}
+              {preview && preview.result.errors.length > 0 && <Table rows={preview.result.errors.slice(0, 20).map((e: any, i: number) => ({ id: i, ...e }))} columns={[{ key: 'row', label: 'Row' }, { key: 'field', label: 'Column', render: (e: any) => ((job.fields ?? []) as MapField[]).find((f) => f.key === e.field)?.label ?? e.field }, { key: 'message', label: 'Problem' }]} />}
             </>
           )}
         </Card>

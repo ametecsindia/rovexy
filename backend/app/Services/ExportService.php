@@ -189,11 +189,22 @@ final class ExportService
         $one = count($types) === 1 ? $types[0] : null;
         $fields = $one ? array_values(array_filter(\App\Domain\Portfolios\PortfolioTypes::fields($one), fn ($f) => $f['key'] !== 'dpd')) : [];
         $head = ['Customer ID', 'Name', 'Phone', 'Portfolio', 'Type', 'Status', 'Employee code', 'Employee', 'Address', 'Area', 'City', 'Pincode', 'Latitude', 'Longitude', 'Pin'];
-        $head = $one ? [...$head, ...array_column($fields, 'label'), 'Other columns'] : [...$head, 'Amount', 'Amount to collect', 'Scheduled date', 'Details'];
-        return [$head, $this->customers($one, $fields)];
+        // The bank file's own columns (Reference 1, Reference 2, Branch code…): one column each, in the order first met.
+        $own = [];
+        foreach ($this->customerQuery()->whereNotNull('details')->select(['id', 'details'])->lazyById(2000) as $c) {
+            foreach (array_keys((array) $c->details) as $k) {
+                if (str_starts_with((string) $k, 'x:') && count($own) < 100) {   // ponytail: 100 own columns max; the rest still show on the case
+                    $own[$k] = true;
+                }
+            }
+        }
+        $own = array_keys($own);
+        $labels = array_map(fn ($k) => mb_substr($k, 2), $own);
+        $head = $one ? [...$head, ...array_column($fields, 'label'), ...$labels] : [...$head, 'Amount', 'Amount to collect', 'Scheduled date', 'Details', ...$labels];
+        return [$head, $this->customers($one, $fields, $own)];
     }
 
-    private function customers(?string $one, array $fields): \Generator
+    private function customers(?string $one, array $fields, array $own = []): \Generator
     {
         $names = ImportJob::query()->get(['id', 'portfolio', 'original_name'])->mapWithKeys(fn ($j) => [$j->id => $j->portfolio ?: pathinfo((string) $j->original_name, PATHINFO_FILENAME)]);
         $pin = ['google' => 'from address', 'approx' => 'approximate (area)', 'verified' => 'verified at the door', 'phone' => 'from address', 'file' => 'from address'];
@@ -201,12 +212,13 @@ final class ExportService
             $base = [$c->customer_ref, $c->name, $c->phone, $c->last_import_id ? ($names[$c->last_import_id] ?? "Import #{$c->last_import_id}") : 'Added by hand',
                 \App\Domain\Portfolios\PortfolioTypes::of($c->portfolio_type)['label'], $c->status,
                 $c->assignee?->employee_code, $c->assignee?->name, $c->address, $c->area, $c->city, $c->pincode, $c->lat, $c->lng, $pin[$c->geo_status] ?? $c->geo_status];
-            $extra = collect(\App\Domain\Portfolios\PortfolioTypes::present($c))->filter(fn ($x) => str_starts_with($x['key'], 'x:'))->map(fn ($x) => "{$x['label']}: {$x['text']}")->implode('; ');
+            $d = (array) $c->details;
+            $mine = array_map(fn ($k) => isset($d[$k]) && $d[$k] !== '' ? $d[$k] : null, $own);
             if ($one) {
-                yield [...$base, ...array_map(fn ($f) => \App\Domain\Portfolios\PortfolioTypes::valueOf($c, $f), $fields), $extra ?: null];
+                yield [...$base, ...array_map(fn ($f) => \App\Domain\Portfolios\PortfolioTypes::valueOf($c, $f), $fields), ...$mine];
             } else {
-                $all = collect(\App\Domain\Portfolios\PortfolioTypes::present($c))->map(fn ($x) => "{$x['label']}: {$x['text']}")->implode('; ');
-                yield [...$base, $c->outstanding, $c->overdue_amount, $c->due_date?->format('Y-m-d'), $all ?: null];
+                $all = collect(\App\Domain\Portfolios\PortfolioTypes::present($c))->reject(fn ($x) => str_starts_with($x['key'], 'x:'))->map(fn ($x) => "{$x['label']}: {$x['text']}")->implode('; ');
+                yield [...$base, $c->outstanding, $c->overdue_amount, $c->due_date?->format('Y-m-d'), $all ?: null, ...$mine];
             }
         }
     }
