@@ -22,6 +22,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->guardProductionConfig();
+        \App\Services\SmartDcm\SmartDcmOutbox::register();   // ROVEXY results on SmartDCM cases → SmartDCM (outbox)
         // Live numbers: any change to a case, outcome/payment, callback or assignment tells open consoles to refresh
         // (dashboard, reports, payments, customers). IDs only; screens re-fetch through their own APIs.
         // ponytail: one broadcast per company per type per second, so a 10k-row import is one ping, not 10k.

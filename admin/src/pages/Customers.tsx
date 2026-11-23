@@ -7,6 +7,7 @@ import { AddressHistory, ChangeDetail } from './AddressReport';
 import { api, get, post, fmtDate, fmtSeconds, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { Badge, Card, ErrorBox, Field, Notice, Page, RecordingPlayer, Stat, Table, useAction, useAsync } from '../components/ui';
+import { SmartDcmHistory } from './SmartDcm';
 
 type MapField = { key: string; label: string; required: boolean; kind: string };
 type PType = { type: string; label: string; hint: string; case: string; value: string; due: string; date: string; amount: string; success: string; fields: { key: string; label: string; kind: string; options: string[] | null }[] };
@@ -364,7 +365,7 @@ export function CustomersPage() {
   );
 }
 
-const TABS = ['Overview', 'Customer details', 'Loan & dues', 'Payments', 'Calls & recordings', 'Follow-ups & commitments', 'Address & map'] as const;
+const TABS = ['Overview', 'Customer details', 'Loan & dues', 'Payments', 'Calls & recordings', 'Follow-ups & commitments', 'Address & map', 'SmartDCM'] as const;
 const PROMISE_TONE: Record<string, string> = { kept: 'verified', broken: 'failed', open: 'pending' };
 
 /** Full case profile for supervisors: dues, address + map, activity, payments, calls with recordings (if allowed), follow-ups. */
@@ -408,7 +409,7 @@ export function CustomerDetailPage() {
             <Stat label={`${lb.amount} (verified)`} value={inr(d.activity.collected_verified)} />
             <Stat label="Next action" value={d.next_action ? fmtDate(d.next_action.due_at, tz) : '—'} />
           </div>
-          <div className="tabs" role="tablist">{TABS.map((t) => <button key={t} role="tab" className={`tab${tab === t ? ' on' : ''}`} onClick={() => setTab(t)}>{tabName(t)}</button>)}</div>
+          <div className="tabs" role="tablist">{TABS.filter((t) => t !== 'SmartDCM' || d.smartdcm_case_id).map((t) => <button key={t} role="tab" className={`tab${tab === t ? ' on' : ''}`} onClick={() => setTab(t)}>{tabName(t)}</button>)}</div>
 
           {tab === 'Overview' && (
             <div className="grid2">
@@ -521,6 +522,8 @@ export function CustomerDetailPage() {
               </Card>
             </div>
           )}
+
+          {tab === 'SmartDCM' && d.smartdcm_case_id && <SmartDcmHistory customerId={d.id} />}
 
           {tab === 'Address & map' && (
             <>

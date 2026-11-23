@@ -29,6 +29,7 @@ final class ConsoleCallController extends Controller
         $page->getCollection()->transform(fn ($c) => $c->only(['id', 'customer_ref', 'name', 'status', 'follow_up_on', 'overdue_amount', 'outstanding', 'city'])
             + ['phone' => self::mask($c->phone), 'has_alternate' => filled($c->alt_phone)]);
         return response()->json(['can_call' => in_array('server', CallService::routes($r->user()), true) && Click2CallSettings::allows($r->user(), 'click2call'),
+            'can_webrtc' => self::webrtc($r) !== null,
             'work_number' => self::mask(Click2CallSettings::agentNumber($r->user()))] + $page->toArray());
     }
 
@@ -38,6 +39,22 @@ final class ConsoleCallController extends Controller
         abort_unless(Click2CallSettings::allows($r->user(), 'click2call'), 403, 'Click2Call is not enabled for you.');
         $call = $svc->start($r->user(), null, $id, $d['which'], null, 'server', $d['vmn'] ?? null);
         return response()->json($this->body($call), 201);
+    }
+
+    /** SmartDCM WebRTC: the call is placed through the client's SmartDCM and the telecaller talks in the browser. */
+    public function webrtcCall(Request $r, int $id, CallService $svc)
+    {
+        $d = $r->validate(['which' => 'required|in:primary,alternate']);
+        $conn = self::webrtc($r) ?? abort(403, 'Browser calling through SmartDCM is not enabled for you.');
+        [$call, $sip] = $svc->startWebrtc($r->user(), $id, $d['which'], new \App\Telephony\SmartDcmWebrtcAdapter($conn));
+        return response()->json($this->body($call) + ['sip' => $sip], 201);
+    }
+
+    /** People allowed Click2Call may also call in the browser, when the company's SmartDCM offers WebRTC. */
+    private static function webrtc(Request $r): ?\App\Models\IntegrationConnection
+    {
+        return app(\App\Services\Platform\Licensing::class)->has('smartdcm') && Click2CallSettings::allows($r->user(), 'click2call')
+            ? \App\Telephony\SmartDcmWebrtcAdapter::connection() : null;
     }
 
     public function show(Request $r, string $uuid, CallService $svc)

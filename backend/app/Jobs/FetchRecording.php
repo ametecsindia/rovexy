@@ -42,7 +42,7 @@ final class FetchRecording extends TenantJob
         $disk = Storage::disk(config('ammp.recordings.disk'));
         $rec->increment('attempts');
 
-        $bytes = $this->readSource((string) $rec->source_path);
+        $bytes = $this->readSource((string) $rec->source_path, $rec->call_id);
         if ($bytes === null || strlen($bytes) < 44) { // smaller than a WAV header: nothing recorded
             $rec->forceFill(['last_error' => 'source file missing or empty'])->save();
             if ($this->attempts() >= $this->tries) {
@@ -91,10 +91,12 @@ final class FetchRecording extends TenantJob
         });
     }
 
-    private function readSource(string $relative): ?string
+    private function readSource(string $relative, ?int $callId = null): ?string
     {
-        if (str_starts_with($relative, 'https://')) {   // provider-hosted recording (Exotel / Click2Call)
-            $adapter = app(\App\Telephony\TelephonyManager::class)->adapter();
+        if (str_starts_with($relative, 'https://') || (str_starts_with($relative, 'http://') && app()->environment('local', 'testing'))) {   // provider-hosted recording (Exotel / Click2Call / SmartDCM)
+            $call = $callId ? \App\Models\Call::query()->find($callId) : null;
+            $tm = app(\App\Telephony\TelephonyManager::class);
+            $adapter = $call ? $tm->forCall($call) : $tm->adapter();
             return $adapter instanceof \App\Telephony\PolledTelephony ? $adapter->fetchRecording($relative) : null;
         }
         if ($relative === '' || str_contains($relative, '..')) {

@@ -7,7 +7,7 @@ namespace App\Models;
 use App\Support\BelongsToCompany;
 use Illuminate\Database\Eloquent\Model;
 
-/** A company's connection to SmartPRS2 or SmartEPT (base URL + API key issued by that system). */
+/** A company's connection to SmartPRS2, SmartEPT or SmartDCM (base URL + API key issued by that system). */
 class IntegrationConnection extends Model
 {
     use BelongsToCompany;
@@ -16,13 +16,19 @@ class IntegrationConnection extends Model
 
     protected $table = 'integration_connections';
 
-    protected $fillable = ['system', 'base_url', 'api_key', 'enabled', 'enforce_geofence', 'last_status', 'last_ok_at'];
+    protected $fillable = ['system', 'base_url', 'api_key', 'enabled', 'enforce_geofence', 'last_status', 'last_ok_at', 'uuid', 'inbound_secret', 'options', 'state'];
 
-    protected $hidden = ['api_key'];
+    protected $hidden = ['api_key', 'inbound_secret'];
 
     protected function casts(): array
     {
-        return ['api_key' => 'encrypted', 'enabled' => 'boolean', 'enforce_geofence' => 'boolean', 'last_ok_at' => 'datetime'];
+        return ['api_key' => 'encrypted', 'inbound_secret' => 'encrypted', 'enabled' => 'boolean', 'enforce_geofence' => 'boolean', 'last_ok_at' => 'datetime',
+            'options' => 'array', 'state' => 'array'];
+    }
+
+    public function option(string $key, mixed $default = null): mixed
+    {
+        return $this->options[$key] ?? $default;
     }
 
     public function url(string $path): string

@@ -35,6 +35,7 @@ final class Licensing
         'live_map' => 'Live map of all employees and day routes',
         'media' => 'Live screen and camera sessions',
         'integrations' => 'SmartPRS / SmartEPT integration',
+        'smartdcm' => 'SmartDCM integration: portfolios, allocation, users, calling and results shared with SmartDCM',
     ];
 
     private ?array $memo = null;

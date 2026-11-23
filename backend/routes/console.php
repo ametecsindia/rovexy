@@ -54,6 +54,12 @@ Schedule::call(function () {
     Company::query()->where('status', 'active')->each(fn (Company $c) => $ff->flushCompany($c));
 })->everyMinute()->name('integrations:flush')->withoutOverlapping();
 
+Schedule::call(function () {
+    // SmartDCM: read what changed (cases, allocation, users, calling) every 5 minutes; SmartDCM's webhook makes it sooner.
+    app(CurrentCompany::class)->withoutScope(fn () => \App\Models\IntegrationConnection::query()->where('system', 'smartdcm')->where('enabled', true)->pluck('company_id'))
+        ->each(fn ($cid) => \App\Jobs\SyncSmartDcm::dispatch((int) $cid));
+})->everyFiveMinutes()->name('smartdcm:sync')->withoutOverlapping();
+
 Schedule::command('ammp:reminders')->hourly()->name('platform:reminders')->withoutOverlapping();
 
 // G20: nightly database backup on every install (7 copies kept; result shown in System health).

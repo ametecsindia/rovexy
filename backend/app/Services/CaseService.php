@@ -194,6 +194,7 @@ final class CaseService
             'portfolio_type' => $c->portfolio_type, 'labels' => \App\Domain\Portfolios\PortfolioTypes::labels($c->portfolio_type),
             'details' => \App\Domain\Portfolios\PortfolioTypes::present($c),
             'pin' => $c->lat !== null ? ($c->geo_status === 'approx' ? 'approximate' : ($c->geo_status === 'verified' ? 'verified' : 'address')) : null,
+            'smartdcm_case_id' => \App\Models\ExternalRef::remoteFor('smartdcm', 'case', $c->id),   // the case in SmartDCM (history tab)
             'installments' => null,   // ponytail: the lead file has one row per case, so no instalment schedule exists to show.
             'activity' => $act,
             'payments' => $pay->reverse()->values()->map(fn ($d) => ['call_id' => $d->call_id, 'amount' => (float) $d->amount, 'mode' => $d->payment_mode,

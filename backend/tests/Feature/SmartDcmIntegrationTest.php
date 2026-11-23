@@ -1,0 +1,258 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use App\Models\C2c\Vmn;
+use App\Models\Call;
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\ExternalRef;
+use App\Models\ImportJob;
+use App\Models\IntegrationConnection;
+use App\Models\Role;
+use App\Models\Smart31Number;
+use App\Models\Team;
+use App\Models\User;
+use App\Support\CurrentCompany;
+use Database\Seeders\CompanyDefaults;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
+use Tests\TestCase;
+
+/** SmartDCM ⇄ ROVEXY: pull (calling, teams, users, portfolios, cases), push back (results), webhook, recordings, WebRTC. */
+final class SmartDcmIntegrationTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Company $a;
+    private array $u = [];
+    /** What the fake SmartDCM answers; tests change it between syncs. */
+    private array $dcm = [];
+    private array $posted = [];
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        config(['ammp.sessions.admin_mfa_required' => false]);
+        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
+        $this->a = Company::query()->create(['slug' => 'alpha', 'name' => 'Alpha', 'timezone' => 'Asia/Kolkata', 'default_country' => 'IN']);
+        $this->in(function () {
+            CompanyDefaults::apply($this->a);
+            $mk = function (string $code, string $role, ?string $email) {
+                $u = User::query()->create(['employee_code' => $code, 'name' => $code, 'email' => $email, 'phone' => '+919811111111', 'password' => 'Secret-123456', 'status' => 'active', 'mfa_enabled_at' => now()]);
+                $u->roles()->attach(Role::query()->where('key', $role)->value('id'), ['company_id' => $this->a->id]);
+                return $u;
+            };
+            $this->u = ['admin' => $mk('admin', 'company_admin', 'admin@alpha.test'), 'emp' => $mk('EMP1', 'employee', 'emp1@alpha.test')];
+            $this->u['emp']->roles()->attach(Role::query()->where('key', 'telecaller')->value('id'), ['company_id' => $this->a->id]);
+        });
+        $this->dcm = [
+            'ping' => ['ok' => true, 'company_name' => 'Alpha Recoveries (CRM 1133)', 'crm_id' => '1133'],
+            'telephony' => ['crm_id' => '1133', 'c2c' => ['enabled' => true, 'gateway_secret' => 'gw-secret'],
+                'numbers' => [['number' => '918040001111', 'click2call' => true, 'webrtc' => true, 'team_ids' => [7], 'expires_on' => '2027-12-31']],
+                'smart31' => ['enabled' => true, 'numbers' => [['number' => '8040002222', 'group' => 'Pool A', 'team_ids' => [7]]]],
+                'webrtc' => ['enabled' => true, 'wss_url' => 'wss://sip.telozar.test:7443', 'sip_domain' => 'sip.telozar.test']],
+            'teams' => ['data' => [['id' => 7, 'name' => 'Hyderabad Team', 'branch' => ['id' => 2, 'name' => 'Hyderabad']]]],
+            'users' => ['data' => [
+                ['id' => 101, 'employee_code' => 'EMP1', 'name' => 'Emp One', 'email' => 'emp1@alpha.test', 'mobile' => '9811111111', 'role' => 'telecaller', 'team_ids' => [7], 'active' => true, 'updated_at' => '2026-11-20T10:00:00+05:30'],
+                ['id' => 102, 'employee_code' => 'FOS9', 'name' => 'Field Nine', 'email' => 'fos9@alpha.test', 'mobile' => '9822222222', 'role' => 'fos', 'team_ids' => [7], 'active' => true,
+                    'password_hash' => Hash::make('Dcm-pass-123'), 'updated_at' => '2026-11-20T10:00:00+05:30'],
+                ['id' => 103, 'employee_code' => 'ADM', 'name' => 'Dcm Admin', 'role' => 'admin', 'active' => true, 'updated_at' => '2026-11-20T10:00:00+05:30'],
+            ], 'next' => null],
+            'portfolios' => ['data' => [['id' => 55, 'name' => 'HDFC Nov-26', 'bank' => 'HDFC', 'updated_at' => '2026-11-21T09:00:00+05:30']], 'next' => null],
+            'cases' => ['data' => [
+                ['id' => 9001, 'portfolio_id' => 55, 'account_no' => 'LN001', 'customer_name' => 'Ravi Kumar', 'mobile' => '9876543210', 'address' => '5 Lake Road', 'city' => 'Hyderabad',
+                    'pos' => 12500, 'overdue_amount' => 3000, 'dpd' => 45, 'bucket' => 'B2', 'assigned_user_id' => 101, 'team_id' => 7, 'status' => 'open', 'extra' => ['Ref 1' => 'R-1'],
+                    'updated_at' => '2026-11-22T09:00:00+05:30'],
+                ['id' => 9002, 'portfolio_id' => 55, 'account_no' => 'LN002', 'customer_name' => 'Sita Devi', 'mobile' => '9876543211', 'assigned_user_id' => 102, 'status' => 'ptp',
+                    'updated_at' => '2026-11-22T09:01:00+05:30'],
+            ], 'next' => null],
+        ];
+        Http::fake(function (HttpRequest $r) {
+            $path = parse_url($r->url(), PHP_URL_PATH);
+            if (!str_starts_with($r->url(), 'https://dcm.test/api/rovexy/v1/')) {
+                return Http::response('', 404);
+            }
+            if (($r->header('X-Api-Key')[0] ?? null) !== 'dcm-key') {
+                return Http::response(['message' => 'bad key'], 401);
+            }
+            $p = substr($path, strlen('/api/rovexy/v1/'));
+            if ($r->method() === 'POST') {
+                $this->posted[$p][] = $r->data();
+                if ($p === 'webrtc/calls') {
+                    return Http::response(['dial' => '7001234', 'sip' => ['wss_url' => 'wss://sip.telozar.test:7443', 'domain' => 'sip.telozar.test', 'username' => '1133_101', 'password' => 'pw', 'display_name' => 'Emp One']]);
+                }
+                return Http::response(['accepted' => count($r->data()['items'] ?? [])]);
+            }
+            if (preg_match('#^webrtc/calls/([0-9a-f-]{36})$#', $p)) {
+                return Http::response(['state' => 'completed', 'talk_seconds' => 42, 'ring_seconds' => 5, 'recording_url' => 'https://dcm.test/rec/x.mp3']);
+            }
+            if (preg_match('#^cases/(\d+)/trail$#', $p, $m)) {
+                return Http::response(['case_url' => 'https://dcm.test/cases/' . $m[1], 'data' => [['at' => '2026-11-01T10:00:00+05:30', 'type' => 'call', 'code' => 'PTP', 'by' => 'Old caller']]]);
+            }
+            return Http::response($this->dcm[$p] ?? ['data' => [], 'next' => null]);
+        });
+    }
+
+    private function in(callable $fn): mixed
+    {
+        return app(CurrentCompany::class)->run($this->a, $fn);
+    }
+
+    private function as(string $who)
+    {
+        return $this->actingAs($this->u[$who], 'web')->withSession(['mfa_verified_at' => time(), 'auth_started_at' => time()])
+            ->withHeaders(['X-Workspace' => 'alpha', 'Referer' => 'http://localhost/']);
+    }
+
+    private function connect(): array
+    {
+        return $this->as('admin')->putJson('/api/admin/integrations/smartdcm', ['base_url' => 'https://dcm.test/', 'api_key' => 'dcm-key', 'enabled' => true])->assertOk()->json();
+    }
+
+    public function test_connect_pulls_calling_teams_users_portfolios_and_cases(): void
+    {
+        $r = $this->connect();
+        $this->assertTrue($r['ok']);
+        $this->assertSame(48, strlen($r['inbound_secret']));   // shown once
+        $this->in(function () {
+            $team = Team::query()->where('name', 'Hyderabad Team')->firstOrFail();
+            $this->assertSame('Hyderabad', $team->branch->name);
+            // EMP1 already existed → linked, not duplicated; FOS9 created with SmartDCM's password; the SmartDCM admin is not created.
+            $this->assertSame(1, User::query()->where('employee_code', 'EMP1')->count());
+            $fos = User::query()->where('employee_code', 'FOS9')->firstOrFail();
+            $this->assertTrue(Hash::check('Dcm-pass-123', $fos->password));
+            $this->assertTrue($fos->roles()->where('key', 'employee')->exists());
+            $this->assertNull(User::query()->where('employee_code', 'ADM')->first());
+            $this->assertEqualsCanonicalizing([$team->id], $fos->teams()->pluck('teams.id')->all());
+            // portfolio + cases with allocation
+            $job = ImportJob::query()->where('format', 'smartdcm')->firstOrFail();
+            $this->assertSame('HDFC Nov-26', $job->portfolio);
+            $c = Customer::query()->where('customer_ref', 'LN001')->firstOrFail();
+            $this->assertSame([$this->u['emp']->id, $team->id, $job->id, '+919876543210', 12500.0, 'B2', 'R-1'],
+                [$c->assigned_user_id, $c->assigned_team_id, $c->last_import_id, $c->phone, (float) $c->outstanding, $c->details['x:Bucket'], $c->details['x:Ref 1']]);
+            $this->assertSame('follow_up', Customer::query()->where('customer_ref', 'LN002')->value('status'));
+            // one telephony account: CRM id, gateway secret, numbers for the team, Smart31 pool
+            $this->assertSame('1133', $this->a->fresh()->setting('click2call.crm_id'));
+            $this->assertSame('choice', $this->a->fresh()->setting('click2call.mode'));
+            $v = Vmn::query()->firstOrFail();
+            $this->assertSame(['8040001111', [$team->id], true], [$v->virtual_number, $v->team_ids, $v->webrtc]);
+            $this->assertSame('smartdcm', Smart31Number::query()->value('source'));
+        });
+        $show = $this->as('admin')->getJson('/api/admin/integrations/smartdcm')->assertOk();
+        $this->assertSame(['teams' => 1, 'users' => 2, 'portfolios' => 1, 'cases' => 2], $show->json('linked'));
+        $this->assertTrue($show->json('webrtc'));
+        $this->assertSame('Dcm Admin', $show->json('unmatched_users.0.name'));
+
+        // Next sync asks only for what changed; a withdrawn case is withdrawn, and nothing is echoed back to SmartDCM.
+        $this->dcm['cases'] = ['data' => [['id' => 9002, 'account_no' => 'LN002', 'withdrawn' => true, 'updated_at' => '2026-11-23T09:00:00+05:30']], 'next' => null];
+        $this->as('admin')->postJson('/api/admin/integrations/smartdcm/sync')->assertOk()->assertJsonPath('ok', true);
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/cases?') && str_contains(urldecode($r->url()), 'updated_since=2026-11-22T09:01:00+05:30') && str_contains($r->url(), 'after_id=9002'));
+        $this->in(fn () => $this->assertNotNull(Customer::query()->where('customer_ref', 'LN002')->value('withdrawn_at')));
+        $this->assertSame(0, DB::table('integration_outbox')->where('system', 'smartdcm')->count());
+    }
+
+    public function test_results_in_rovexy_go_back_to_smartdcm(): void
+    {
+        $this->connect();
+        $id = $this->in(fn () => Customer::query()->where('customer_ref', 'LN001')->value('id'));
+        $own = $this->in(fn () => Customer::query()->create(['customer_ref' => 'OWN1', 'name' => 'Own', 'phone' => '+919800000001', 'status' => 'new'])->id);
+        $this->as('admin')->postJson("/api/admin/customers/{$id}/status", ['status' => 'closed'])->assertOk();
+        $this->as('admin')->postJson("/api/admin/customers/{$own}/status", ['status' => 'closed'])->assertOk();   // not a SmartDCM case: stays here
+        $this->as('admin')->postJson('/api/admin/customers/assign', ['customer_ids' => [$id], 'user_id' => $this->in(fn () => User::query()->where('employee_code', 'FOS9')->value('id'))])->assertOk();
+        $this->in(fn () => app(\App\Services\FieldForceIntegration::class)->flushCompany($this->a));
+        $events = collect($this->posted['case-events'] ?? [])->flatMap(fn ($b) => $b['items']);
+        $this->assertSame(['status', 'allocation'], $events->pluck('type')->all());
+        $this->assertSame(['9001', 'closed', 'new'], [$events[0]['case_id'], $events[0]['status'], $events[0]['previous_status']]);
+        $this->assertSame(['102', 'FOS9'], [$events[1]['assigned_user_id'], $events[1]['assigned_employee_code']]);
+        $this->assertSame(2, DB::table('integration_outbox')->where('system', 'smartdcm')->where('status', 'sent')->count());
+
+        // A field entry with a PTP (no call) → a disposition for the SmartDCM case.
+        $this->in(function () use ($id) {
+            $call = Call::query()->create(['uuid' => (string) \Illuminate\Support\Str::uuid(), 'provider' => 'manual', 'user_id' => $this->u['emp']->id, 'customer_id' => $id,
+                'destination' => '+919876543210', 'which_number' => 'primary', 'calling_mode' => 'field_entry', 'agent_leg' => 'none', 'state' => 'completed',
+                'initiated_at' => now(), 'ended_at' => now(), 'talk_seconds' => 0, 'recording_status' => 'not_required']);
+            \App\Models\CallDisposition::query()->create(['call_id' => $call->id, 'user_id' => $this->u['emp']->id, 'code' => 'PTP', 'notes' => 'Will pay Friday',
+                'follow_up_at' => now()->addDays(3), 'submitted_at' => now(), 'amount' => 3000]);
+            app(\App\Services\FieldForceIntegration::class)->flushCompany($this->a);
+        });
+        $d = $this->posted['dispositions'][0]['items'][0];
+        $this->assertSame(['9001', 'LN001', '101', 'field_visit', 'PTP', 3000.0], [$d['case_id'], $d['account_no'], $d['user_id'], $d['channel'], $d['code'], (float) $d['ptp']['amount']]);
+
+        // The customer page shows the case's SmartDCM history, read live.
+        $this->as('admin')->getJson("/api/admin/customers/{$id}/smartdcm")->assertOk()->assertJsonPath('case_url', 'https://dcm.test/cases/9001')->assertJsonPath('data.0.code', 'PTP');
+        $this->as('admin')->getJson("/api/admin/customers/{$own}/smartdcm")->assertOk()->assertJsonPath('linked', false);
+    }
+
+    public function test_webhook_needs_the_signature_and_recordings_need_the_secret(): void
+    {
+        $secret = $this->connect()['inbound_secret'];
+        $uuid = $this->in(fn () => IntegrationConnection::query()->where('system', 'smartdcm')->value('uuid'));
+        $body = json_encode(['event' => 'case.allocated', 'ids' => [9001]]);
+        $ts = (string) time();
+        $this->call('POST', "/api/integrations/smartdcm/{$uuid}/webhook", [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_X_ROVEXY_TIMESTAMP' => $ts, 'HTTP_X_ROVEXY_SIGNATURE' => 'bad'], $body)->assertStatus(401);
+        $this->call('POST', "/api/integrations/smartdcm/{$uuid}/webhook", [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_X_ROVEXY_TIMESTAMP' => $ts,
+            'HTTP_X_ROVEXY_SIGNATURE' => hash_hmac('sha256', $ts . '.' . $body, $secret)], $body)->assertStatus(202);
+        $this->call('POST', '/api/integrations/smartdcm/00000000-0000-0000-0000-000000000000/webhook')->assertNotFound();
+
+        $call = $this->in(fn () => Call::query()->create(['uuid' => (string) \Illuminate\Support\Str::uuid(), 'provider' => 'click2call', 'user_id' => $this->u['emp']->id,
+            'destination' => '+919876543210', 'which_number' => 'primary', 'agent_leg' => 'pstn_callback', 'state' => 'completed', 'initiated_at' => now(), 'recording_status' => 'pending']));
+        $this->in(fn () => \App\Models\Recording::query()->create(['call_id' => $call->id, 'status' => 'pending']));
+        $this->getJson("/api/integrations/smartdcm/{$uuid}/recordings/{$call->uuid}", ['X-Api-Key' => 'wrong'])->assertStatus(401);
+        $this->getJson("/api/integrations/smartdcm/{$uuid}/recordings/{$call->uuid}", ['X-Api-Key' => $secret])->assertNotFound()->assertJsonPath('status', 'pending');
+    }
+
+    public function test_telecaller_calls_in_the_browser_through_smartdcm_webrtc(): void
+    {
+        $this->connect();
+        $this->in(function () {
+            $p = \App\Models\PolicyProfile::query()->first();
+            $v = \App\Models\PolicyVersion::query()->where('profile_id', $p->id)->first();
+            $v->forceFill(['settings' => $v->settings + ['calling.hours' => ['days' => [1, 2, 3, 4, 5, 6, 7], 'start' => '00:00', 'end' => '23:59']]])->save();
+            $this->a->forceFill(['settings' => array_replace_recursive($this->a->fresh()->settings ?? [], ['calling_access' => ['click2call' => 'everyone']])])->save();
+        });
+        $id = $this->in(fn () => Customer::query()->where('customer_ref', 'LN001')->value('id'));
+        $list = $this->as('emp')->getJson('/api/admin/my/customers')->assertOk()->assertJsonPath('can_webrtc', true);
+        $this->assertStringStartsWith('••••••', $list->json('data.0.phone'));
+        $r = $this->as('emp')->postJson("/api/admin/my/customers/{$id}/webrtc", ['which' => 'primary'])->assertCreated()->json();
+        $this->assertSame(['7001234', '1133_101'], [$r['sip']['dial'], $r['sip']['username']]);   // the browser gets a dial code, not the number
+        $sent = $this->posted['webrtc/calls'][0];
+        $this->assertSame([$r['call_id'], '101', '+919876543210', '9001'], [$sent['ref'], $sent['user_id'], $sent['customer_number'], $sent['case_id']]);
+        $this->assertContains($sent['caller_id'], ['8040002222', '8040001111']);   // Smart31 pool, else the WebRTC number
+        // SmartDCM reports the end: talk time and its recording link (fetched from SmartDCM only).
+        $this->as('emp')->getJson("/api/admin/my/calls/{$r['call_id']}")->assertOk()->assertJsonPath('state', 'completed')->assertJsonPath('talk_seconds', 42);
+        $this->in(fn () => $this->assertSame('https://dcm.test/rec/x.mp3', \App\Models\Recording::query()->where('call_id', Call::query()->where('uuid', $r['call_id'])->value('id'))->value('source_path')));
+    }
+
+    public function test_bad_data_never_blocks_the_sync_and_admins_are_never_changed(): void
+    {
+        // A duplicate number (two spellings), a hand-added Smart31 number SmartDCM also sends, an over-long account no., a bad date,
+        // and a SmartDCM user with the ROVEXY admin's e-mail and a password of their own.
+        $this->in(fn () => Smart31Number::query()->create(['number' => '8040002222', 'source' => 'admin', 'active' => true]));
+        $this->dcm['telephony']['numbers'][] = ['number' => '8040001111', 'click2call' => true];
+        $this->dcm['telephony']['smart31']['numbers'][] = ['number' => '8040009999', 'group' => 'Pool A', 'team_ids' => [7]];
+        $this->dcm['users']['data'][] = ['id' => 104, 'employee_code' => 'X9', 'name' => 'Imposter', 'email' => 'admin@alpha.test', 'role' => 'manager', 'active' => false,
+            'password_hash' => Hash::make('Taken-over-1'), 'updated_at' => '2026-11-20T10:00:00+05:30'];
+        $this->dcm['cases']['data'][] = ['id' => 9003, 'account_no' => str_repeat('A', 90), 'customer_name' => 'Long', 'mobile' => '9876543212', 'due_date' => 'tomorrow',
+            'city' => str_repeat('C', 300), 'updated_at' => '2026-11-22T09:02:00+05:30'];
+        $this->connect();
+        $this->in(function () {
+            $this->assertSame(1, Vmn::query()->count());
+            $this->assertSame('admin', Smart31Number::query()->where('number', '8040002222')->value('source'));   // the admin's own number stays
+            $admin = $this->u['admin']->fresh();
+            $this->assertSame(['admin', 'active'], [$admin->name, $admin->status]);
+            $this->assertTrue(Hash::check('Secret-123456', $admin->password));
+            $this->assertSame(3, Customer::query()->count());   // the long account no. is cut, not a failure
+            $this->assertNull(Customer::query()->where('customer_ref', str_repeat('A', 64))->value('due_date'));
+            // Smart31 rotation survives the next sync
+            Smart31Number::query()->where('source', 'smartdcm')->update(['calls' => 7]);
+        });
+        $this->as('admin')->postJson('/api/admin/integrations/smartdcm/sync')->assertOk();
+        $this->in(fn () => $this->assertSame(7, (int) Smart31Number::query()->where('number', '8040009999')->value('calls')));
+    }
+}

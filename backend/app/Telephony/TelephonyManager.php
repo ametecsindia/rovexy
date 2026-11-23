@@ -29,6 +29,18 @@ final class TelephonyManager
         };
     }
 
+    /** The adapter that placed this call (a SmartDCM WebRTC call is read back from SmartDCM, whatever the company's Click2Call is). */
+    public function forCall(\App\Models\Call $call): TelephonyAdapter
+    {
+        if ($call->provider === SmartDcmWebrtcAdapter::PROVIDER && !$this->swapped) {
+            $conn = \App\Models\IntegrationConnection::query()->where('system', 'smartdcm')->first();
+            if ($conn) {
+                return new SmartDcmWebrtcAdapter($conn);
+            }
+        }
+        return $this->adapter();
+    }
+
     public function swap(?TelephonyAdapter $adapter): void
     {
         $this->swapped = $adapter;

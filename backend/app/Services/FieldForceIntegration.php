@@ -39,6 +39,10 @@ final class FieldForceIntegration
         'smartprs.attendance' => ['/api/v1/fieldforce/attendance', 'events'],
         'smartept.punch' => ['/api/v1/attendance/punches', 'punches'],
         'smartept.location' => ['/api/v1/fieldforce/locations', 'locations'],
+        // SmartDCM (23 Nov 2026): results on SmartDCM cases, queued by SmartDcm\SmartDcmOutbox.
+        'smartdcm.disposition' => ['/api/rovexy/v1/dispositions', 'items'],
+        'smartdcm.visit' => ['/api/rovexy/v1/visits', 'items'],
+        'smartdcm.event' => ['/api/rovexy/v1/case-events', 'items'],
     ];
 
     public function __construct(private readonly CurrentCompany $ctx)
@@ -133,6 +137,11 @@ final class FieldForceIntegration
                     if ($system !== $conn->system) {
                         continue;
                     }
+                    // SmartDCM: visits and events (e.g. a payment review) only after every outcome they refer to has gone.
+                    if ($system === 'smartdcm' && $kind !== 'disposition' && DB::table('integration_outbox')->where('company_id', $company->id)
+                        ->where('system', 'smartdcm')->where('kind', 'disposition')->where('status', 'pending')->exists()) {
+                        continue;
+                    }
                     $rows = DB::table('integration_outbox')->where('company_id', $company->id)->where('system', $system)->where('kind', $kind)
                         ->where('status', 'pending')->where(fn ($q) => $q->whereNull('next_attempt_at')->orWhere('next_attempt_at', '<=', now()))
                         ->orderBy('id')->limit(self::BATCH)->get();
@@ -148,7 +157,7 @@ final class FieldForceIntegration
     public function test(IntegrationConnection $conn): array
     {
         try {
-            $res = $this->http($conn)->get($conn->url('/api/v1/ping'));
+            $res = $this->http($conn)->get($conn->url($conn->system === 'smartdcm' ? '/api/rovexy/v1/ping' : '/api/v1/ping'));
             $ok = $res->successful();
             $detail = $ok ? (string) ($res->json('company_name') ?? $res->json('company.name') ?? 'connected') : $res->status() . ' ' . mb_substr((string) ($res->json('error.message') ?? $res->body()), 0, 150);
         } catch (\Throwable $e) {

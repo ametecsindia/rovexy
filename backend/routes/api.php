@@ -310,6 +310,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::prefix('my')->middleware('perm:calls.console')->group(function () {
             Route::get('customers', [Admin\ConsoleCallController::class, 'customers']);
             Route::post('customers/{id}/call', [Admin\ConsoleCallController::class, 'call'])->whereNumber('id')->middleware('throttle:calls');
+            Route::post('customers/{id}/webrtc', [Admin\ConsoleCallController::class, 'webrtcCall'])->whereNumber('id')->middleware('throttle:calls');
             Route::get('calls/{uuid}', [Admin\ConsoleCallController::class, 'show']);
             Route::post('calls/{uuid}/hangup', [Admin\ConsoleCallController::class, 'hangup']);
         });
@@ -366,6 +367,14 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('health', [Admin\SettingsController::class, 'health'])->middleware('perm:system.health');
         // SmartPRS2 / SmartEPT field-force integration (6 Oct 2026).
         Route::get('integrations', [Admin\IntegrationController::class, 'index'])->middleware('perm:system.health');
+        // SmartDCM two-way integration (23 Nov 2026).
+        Route::get('integrations/smartdcm', [Admin\SmartDcmController::class, 'show'])->middleware('perm:system.health');
+        Route::put('integrations/smartdcm', [Admin\SmartDcmController::class, 'save'])->middleware('perm:telephony.configure');
+        Route::post('integrations/smartdcm/test', [Admin\SmartDcmController::class, 'test'])->middleware('perm:system.health');
+        Route::post('integrations/smartdcm/sync', [Admin\SmartDcmController::class, 'sync'])->middleware(['perm:telephony.configure', 'feature:smartdcm']);
+        Route::post('integrations/smartdcm/resync', [Admin\SmartDcmController::class, 'resync'])->middleware(['perm:telephony.configure', 'feature:smartdcm']);
+        Route::post('integrations/smartdcm/secret', [Admin\SmartDcmController::class, 'secret'])->middleware('perm:telephony.configure');
+        Route::get('customers/{id}/smartdcm', [Admin\SmartDcmController::class, 'trail'])->whereNumber('id')->middleware('perm:calls.view');
         Route::prefix('calling')->middleware('perm:telephony.configure')->group(function () {
             $cc = Admin\CallingConfigController::class;
             Route::get('access', [$cc, 'access']);
@@ -480,6 +489,10 @@ $c2cWebhook = function (\Illuminate\Http\Request $r, \App\Services\CallService $
     return response()->json(['status' => 'success', 'call_state' => $call->state]);
 };
 Route::match(['get', 'post'], 'telephony/v1/click2call', $c2cWebhook)->name('telephony.click2call')->middleware('throttle:telephony');
+
+// SmartDCM → ROVEXY (23 Nov 2026): "something changed" webhook (signed) and call recordings (secret key). No session.
+Route::post('integrations/smartdcm/{uuid}/webhook', [\App\Http\Controllers\Integrations\SmartDcmHookController::class, 'webhook'])->name('smartdcm.webhook')->middleware('throttle:telephony');
+Route::get('integrations/smartdcm/{uuid}/recordings/{call}', [\App\Http\Controllers\Integrations\SmartDcmHookController::class, 'recording'])->name('smartdcm.recording')->middleware('throttle:telephony');
 Route::match(['get', 'post'], 'click2call/webhook', $c2cWebhook)->name('click2call.webhook')->middleware('throttle:telephony');
 Route::post('telephony/webhook', $c2cWebhook)->name('telephony.webhook')->middleware('throttle:telephony');   // LeadGER's call-end URL (OBD guide 4.1)
 // AMAPI Pub/Sub push notifications (OIDC-verified).

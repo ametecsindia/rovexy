@@ -17,6 +17,7 @@ import { CallingOptionsPage, CallingSetupPage, CompanyNumbersPage, PeopleAccessP
 import { LocationPage, MediaPage, ChatPage } from './pages/Supervision';
 import { AuditPage, BrandingPage, HealthPage, ReportsPage, RetentionPage } from './pages/Settings';
 import { IntegrationsPage } from './pages/Integrations';
+import { SmartDcmPage } from './pages/SmartDcm';
 import { PaymentsPage } from './pages/Payments';
 import { AllocationPage } from './pages/Allocation';
 import { PortfolioReportsPage } from './pages/PortfolioReports';
@@ -64,6 +65,7 @@ export const NAV: NavItem[] = [
   { to: '/retention', icon: 'clock', label: 'Storage & retention', perm: 'settings.storage', group: 'Administration' },
   { to: '/audit', icon: 'check', label: 'Audit logs', perm: 'audit.view', group: 'Administration' },
   { to: '/integrations', icon: 'settings', label: 'Integrations (PRS / EPT / Maps)', perm: 'system.health', group: 'Administration' },
+  { to: '/smartdcm', icon: 'settings', label: 'SmartDCM', perm: 'system.health', group: 'Administration' },
   { to: '/health', icon: 'warning', label: 'System health', perm: 'system.health', group: 'Administration' },
 ];
 const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', Reports: 'chart', Administration: 'settings' };
@@ -321,6 +323,7 @@ export function App() {
           <Route path="/retention" element={<RetentionPage />} />
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
+          <Route path="/smartdcm" element={<SmartDcmPage />} />
           <Route path="/health" element={<HealthPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

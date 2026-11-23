@@ -13,7 +13,7 @@ use App\Models\Call;
 interface PolledTelephony extends TelephonyAdapter
 {
     /** Call.provider values handled this way (used by the poll queries). */
-    public const PROVIDERS = ['exotel', 'click2call'];
+    public const PROVIDERS = ['exotel', 'click2call', 'smartdcm_webrtc'];
 
     /**
      * Current state of a call from the provider, normalised. Null when the provider cannot be asked right now.
