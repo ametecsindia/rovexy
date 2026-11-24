@@ -234,6 +234,10 @@ final class SmartDcmSync
                     continue;
                 } else {
                     $u->fill(array_filter(['name' => filled($r['name'] ?? null) ? mb_substr((string) $r['name'], 0, 150) : null, 'phone' => $phone], fn ($v) => $v !== null));
+                    // Sign-in e-mail follows SmartDCM, so people use the same e-mail + password in ROVEXY (unless another person has it).
+                    if ($email && mb_strtolower((string) $u->email) !== $email && !User::query()->whereRaw('lower(email) = ?', [$email])->whereKeyNot($u->id)->exists()) {
+                        $u->email = $email;
+                    }
                     if (!$active && $u->status === 'active') {
                         $u->status = 'suspended';   // left SmartDCM → can't sign in to ROVEXY either
                     }

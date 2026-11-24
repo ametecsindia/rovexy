@@ -157,6 +157,33 @@ final class SmartDcmIntegrationTest extends TestCase
         $this->assertSame(0, DB::table('integration_outbox')->where('system', 'smartdcm')->count());
     }
 
+    public function test_people_sign_in_to_the_app_with_their_smartdcm_email_and_password(): void
+    {
+        // EMP1 is in ROVEXY as emp1@alpha.test; in SmartDCM it is ravi@agency.in with its own password.
+        $this->dcm['users']['data'][0] += ['password_hash' => Hash::make('Ravi-dcm-77')];
+        $this->dcm['users']['data'][0]['email'] = 'Ravi@Agency.in';
+        $this->connect();
+        $this->in(fn () => $this->assertSame('ravi@agency.in', $this->u['emp']->fresh()->email));
+
+        $m = new \Tests\Support\MobileClient($this, 'alpha');
+        $code = $m->register()->assertCreated()->json('approval_code');
+        $device = app(CurrentCompany::class)->withoutScope(fn () => \App\Models\ManagedDevice::query()->where('installation_id', $m->installationId)->firstOrFail());
+        $this->as('admin')->postJson("/api/admin/devices/{$device->id}/approve", ['code' => $code, 'user_id' => $this->u['emp']->id])->assertOk();
+        $m->deviceToken = $m->signed('POST', '/api/mobile/v1/device/session')->assertOk()->json('device_token');
+
+        $login = fn (string $id, string $pw) => $m->deviceCall('POST', '/api/mobile/v1/auth/login', ['employee_code' => $id, 'password' => $pw]);
+        $login(' RAVI@agency.in ', 'Ravi-dcm-77')->assertOk()->assertJsonPath('employee.employee_code', 'EMP1');   // SmartDCM e-mail + password
+        $login('EMP1', 'Ravi-dcm-77')->assertOk();                                                                  // employee code still works
+        $login('ravi@agency.in', 'Secret-123456')->assertStatus(422);                                              // old ROVEXY password is gone
+        $login('emp1@alpha.test', 'Ravi-dcm-77')->assertStatus(422);                                               // old e-mail is gone
+        $login('fos9@alpha.test', 'Dcm-pass-123')->assertOk()->assertJsonPath('employee.employee_code', 'FOS9');   // created from SmartDCM
+
+        // An e-mail another ROVEXY person already uses is never taken over.
+        $this->dcm['users']['data'][1]['email'] = 'admin@alpha.test';
+        $this->as('admin')->postJson('/api/admin/integrations/smartdcm/resync')->assertOk();
+        $this->in(fn () => $this->assertSame('fos9@alpha.test', User::query()->where('employee_code', 'FOS9')->value('email')));
+    }
+
     public function test_results_in_rovexy_go_back_to_smartdcm(): void
     {
         $this->connect();

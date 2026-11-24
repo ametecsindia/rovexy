@@ -878,6 +878,65 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(3, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->count()));
     }
 
+    public function test_voucher_daily_sync_and_smart31_group_teams(): void
+    {
+        config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);
+        app(TelephonyManager::class)->swap(null);
+        $today = now(\App\Support\CurrentCompany::tz())->toDateString();
+        $voucher = ['status' => 200, 'data' => ['click2call_did' => '8047000101,8047000102', 'expiry' => now()->addMonth()->toDateString(), 'smart_groups' => [
+            ['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'type' => '1600', 'group_name' => 'S31-A'],
+            ['vmn' => '8040001111', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-B'],
+        ]]];
+        $daily = ['vmn_details' => [
+            ['vmn' => '8040001111', 'usage_date' => $today, 'c2c' => 1, 'webrtc' => 0, 'group_name' => 'S31-B'],
+            ['vmn' => '8040002222', 'usage_date' => $today . ' 00:00:00', 'c2c' => 1, 'webrtc' => 1, 'group_name' => 'S31-A'],   // new number in group A
+            ['vmn' => '8040003333', 'usage_date' => $today, 'c2c' => 0, 'webrtc' => 1, 'group_name' => 'S31-A'],                // WebRTC only: not for Click2Call
+        ]];
+        \Illuminate\Support\Facades\Http::fake([
+            'lc.ametecsindia.com/api/did_voucher/GOOD1/CRM77' => \Illuminate\Support\Facades\Http::response($voucher),
+            'lc.ametecsindia.com/api/did_voucher_used/*' => \Illuminate\Support\Facades\Http::response(['status' => 200]),
+            'lc.ametecsindia.com/api/did_voucher_validate/GOOD1/CRM77' => fn ($req) => $req->header('Secret-Key')[0] === 'lic-secret'
+                ? \Illuminate\Support\Facades\Http::response(['status' => 200, 'deleted' => ['918047000102']]) : \Illuminate\Support\Facades\Http::response([], 401),
+            'lc.ametecsindia.com/api/smart31-details/CRM77' => \Illuminate\Support\Facades\Http::response($daily),
+        ]);
+        $adm = $this->admin('alpha');
+        $team = app(CurrentCompany::class)->run($this->a, fn () => \App\Models\Team::query()->create(['code' => 'S1', 'name' => 'Smart team']));
+        $adm->postJson('/api/admin/calling/vouchers/sync')->assertStatus(422);   // no CRM id / secret yet
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '8047000999', 'gateway_secret' => 'gw', 'crm_id' => 'CRM77', 'lc_secret' => 'lic-secret'])->assertOk();
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->assertJsonPath('smart31_from_voucher', 2);
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '8040009999', 'team_ids' => []])->assertOk();   // added by hand: never touched
+
+        // The company gives Smart31 group S31-A to a team: every number of the group gets it.
+        $pool = fn () => collect($adm->getJson('/api/admin/calling/smart31')->json('numbers'))->keyBy('number');
+        $adm->putJson('/api/admin/calling/smart31/groups', ['group_name' => 'S31-A', 'team_ids' => [$team->id]])->assertOk();
+        $this->assertSame([$team->id], $pool()['1600222001']['team_ids']);
+
+        // Daily check: the withdrawn number leaves (kept in history); today's Smart31 list replaces the voucher numbers,
+        // the new S31-A number inherits the group's team, the WebRTC-only one is skipped, the hand-added one stays.
+        $res = $adm->postJson('/api/admin/calling/vouchers/sync')->assertOk()->json();
+        $this->assertSame(['8047000101'], collect($res['numbers'])->pluck('virtual_number')->all());
+        $this->assertStringContainsString('1 number(s) removed, 2 Smart31 number(s) for today', $res['message']);
+        $this->assertTrue($res['last_sync']['ok']);
+        $p = $pool();
+        $this->assertSame(['8040001111', '8040002222', '8040009999'], $p->keys()->map(fn ($k) => (string) $k)->sort()->values()->all());
+        $this->assertSame([$team->id], $p['8040002222']['team_ids']);
+        $this->assertSame('admin', $p['8040009999']['source']);
+        app(CurrentCompany::class)->withoutScope(function () {
+            $this->assertSame(1, \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->where('virtual_number', '8047000102')->count());
+            $this->assertSame(1, \Illuminate\Support\Facades\DB::table('smart31_history')->where('number', '1600222001')->count());
+        });
+
+        // A new voucher brings S31-A back: it still has the team (inherited from the pool / history).
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk();
+        $this->assertSame([$team->id], $pool()['1600222001']['team_ids']);
+
+        // Licence server down: nothing changes, the console says so.
+        \Illuminate\Support\Facades\Http::fake(['lc.ametecsindia.com/*' => fn () => throw new \Illuminate\Http\Client\ConnectionException('down')]);
+        $before = $pool()->keys()->all();
+        $this->assertFalse($adm->postJson('/api/admin/calling/vouchers/sync')->assertOk()->json('last_sync.ok'));
+        $this->assertSame($before, $pool()->keys()->all());
+    }
+
     public function test_click2call_leg_results(): void
     {
         $s = fn (array $cdr) => [\App\Telephony\Click2CallAdapter::legState($cdr['A'] ?? null), \App\Telephony\Click2CallAdapter::legState($cdr['B'] ?? null)];

@@ -110,7 +110,17 @@ final class CallingConfigController extends Controller
             ]),
             'vouchers' => \App\Models\C2c\Voucher::query()->latest('id')->limit(10)->get(),
             'smart31_from_voucher' => Smart31Number::query()->where('source', 'voucher')->count(),
+            'last_sync' => app(CurrentCompany::class)->get()->setting('click2call.voucher_sync'),
         ]);
+    }
+
+    /** "Sync with Ametecs CRM": the daily voucher check + today's Smart31 numbers, now (LeadGER users/license/sync-did). */
+    public function syncVouchers(\App\Telephony\VoucherService $vouchers)
+    {
+        abort_if(!\App\Telephony\VoucherService::crmId() || !\App\Telephony\VoucherService::licenceSecret(), 422, 'Enter the CRM id and CRM secret key in Calling options first.');
+        $res = $vouchers->syncDaily();
+        Audit::record('c2c.voucher_synced', null, ['ok' => $res['ok'], 'message' => $res['message']]);
+        return response()->json(['message' => $res['message']] + $this->numbers()->getData(true));
     }
 
     public function addVoucher(Request $r, \App\Telephony\VoucherService $vouchers)
@@ -250,6 +260,18 @@ final class CallingConfigController extends Controller
         $d = $r->validate(['enabled' => 'required|boolean']);
         $this->setSetting('smart31.enabled', $d['enabled']);
         Audit::record('smart31.switched', null, ['enabled' => $d['enabled']]);
+        return $this->smart31();
+    }
+
+    /** Give a whole Smart31 group (all its numbers, today's and future days') to teams (LeadGER smart31-group/update). */
+    public function setSmart31Group(Request $r)
+    {
+        $d = $r->validate(['group_name' => 'required|string|max:100', 'team_ids' => 'present|array', 'team_ids.*' => 'integer']);
+        $ids = $this->clean(['team_ids' => $d['team_ids']])['team_ids'];
+        $n = Smart31Number::query()->where('group_name', $d['group_name'])->get();
+        abort_if($n->isEmpty(), 404, 'No Smart31 numbers in this group.');
+        $n->each(fn ($x) => $x->forceFill(['team_ids' => $ids])->save());
+        Audit::record('smart31.group_assigned', null, ['group' => $d['group_name'], 'team_ids' => $ids]);
         return $this->smart31();
     }
 

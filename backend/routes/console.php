@@ -78,6 +78,18 @@ Schedule::call(function () {
     }
 })->dailyAt('01:30')->name('geocode:nightly')->withoutOverlapping();
 
+// Click2Call vouchers (LeadGER daily check): remove numbers the Ametecs licence server deleted and load today's Smart31
+// numbers, for every company with a CRM id, CRM secret key and a voucher. 06:10 IST, before calling hours start.
+Schedule::call(function () {
+    foreach (Company::query()->where('status', 'active')->get() as $c) {
+        app(\App\Support\CurrentCompany::class)->run($c, function () {
+            if (\App\Telephony\VoucherService::crmId() && \App\Telephony\VoucherService::licenceSecret() && \App\Models\C2c\Voucher::query()->exists()) {
+                rescue(fn () => app(\App\Telephony\VoucherService::class)->syncDaily());
+            }
+        });
+    }
+})->dailyAt('06:10')->timezone('Asia/Kolkata')->name('vouchers:daily')->withoutOverlapping();
+
 // On-prem install: check the licence with the licence server every night (keeps the last verdict when it can't be reached).
 Schedule::call(fn () => app(\App\Services\Licensing\LicenceClient::class)->check())
     ->dailyAt('01:00')->name('licence:check')->withoutOverlapping()->when(fn () => \App\Services\Licensing\LicenceClient::isClient());

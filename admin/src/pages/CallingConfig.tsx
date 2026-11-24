@@ -373,6 +373,13 @@ function VoucherNumbers() {
         </div>
         {msg && <Notice tone="ok">{msg}</Notice>}
         {d?.vouchers?.length > 0 && <p className="muted" style={{ marginTop: 8 }}>Latest: {d.vouchers.slice(0, 3).map((v: any) => `${v.voucher_code} · ${v.numbers} numbers · ${new Date(v.created_at).toLocaleDateString()}`).join('  |  ')}</p>}
+        {d?.vouchers?.length > 0 && (
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+            <button className="secondary" disabled={a.busy} onClick={() => a.run(async () => { const r = await post('/calling/vouchers/sync', {}); setMsg(r.message); await s.reload(); })}>Sync with Ametecs CRM</button>
+            <small className="muted">Checked every day at 6:10 am: numbers withdrawn by Ametecs are removed and today's Smart31 numbers are loaded.
+              {d.last_sync ? ` Last check ${new Date(d.last_sync.at).toLocaleString()}: ${d.last_sync.message}` : ' Not checked yet.'}</small>
+          </div>
+        )}
       </Card>
       {d && (
         <Card title={`Your numbers (${d.numbers.length})`} actions={d.numbers.length > 0 && t.length > 0 ? <GroupPicker teams={t} have={[]} onAdd={giveAll} label="Give all Click2Call numbers to…" /> : undefined}>
@@ -410,12 +417,13 @@ function Smart31Pool() {
       {!d.in_plan && <NotInPlan what="Smart31" />}
       <section className={`cc-opt ${d.enabled ? 'on' : ''}`} style={{ marginBottom: 16 }}>
         <header><h3>Smart31 rotation</h3><Switch on={!!d.enabled} disabled={a.busy || !d.in_plan} onChange={(on) => a.run(async () => { await put('/calling/smart31', { enabled: on }); await s.reload(); })} label={d.enabled ? 'On' : 'Off'} /></header>
-        <p>Each Click2Call call uses the next number below, one after another, so no single number is marked as spam. The employee doesn't choose a number. Numbers from your voucher appear here automatically.</p>
+        <p>Each Click2Call call uses the next number below, one after another, so no single number is marked as spam. The employee doesn't choose a number. Numbers from your voucher appear here automatically and are refreshed every morning; a Smart31 group keeps the groups you gave it.</p>
         {d.in_plan && !d.click2call_on && <Notice tone="warn">Smart31 works with Click2Call. <Link to="/calling/options">Switch on Click2Call</Link>.</Notice>}
       </section>
       <Card title={`Rotation numbers (${d.numbers.length})`}>
         <Table rows={d.numbers} empty="No numbers yet." columns={[
-          { key: 'n', label: 'Number', render: (x: any) => <><strong>+91 {x.number}</strong>{x.type === '1600' && <> <Badge value="pending" label="1600" /></>}<br /><small className="muted">{x.source === 'voucher' ? `From voucher${x.group_name ? ` · ${x.group_name}` : ''}` : (x.label || 'Added here')}</small></> },
+          { key: 'n', label: 'Number', render: (x: any) => <><strong>+91 {x.number}</strong>{x.type === '1600' && <> <Badge value="pending" label="1600" /></>}<br /><small className="muted">{x.source === 'voucher' ? `From voucher${x.group_name ? ` · ${x.group_name}` : ''}` : (x.label || 'Added here')}</small>
+            {x.source === 'voucher' && x.group_name && d.in_plan && t.length > 0 && <div style={{ marginTop: 4 }}><GroupPicker teams={t} have={x.team_ids ?? []} label={`Give group ${x.group_name} to…`} onAdd={(id) => a.run(async () => { await put('/calling/smart31/groups', { group_name: x.group_name, team_ids: [...new Set([...(x.team_ids ?? []), id])] }); await s.reload(); })} /></div>}</> },
           { key: 'g', label: 'Groups', render: (x: any) => (
             <div className="cc-chips">
               {!(x.team_ids ?? []).length && <span className="muted">All groups</span>}

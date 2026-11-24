@@ -32,12 +32,16 @@ final class SessionService
     /** $lat/$lng: the phone's position at sign-in, checked against the SmartPRS geofence when that integration is on. */
     public function login(ManagedDevice $device, string $employeeCode, string $password, ?float $lat = null, ?float $lng = null, ?float $accuracy = null): array
     {
-        $user = User::query()->where('employee_code', $employeeCode)->first();
+        // 24-Nov-2026: the e-mail address works too — the same e-mail and password as in SmartDCM (synced users).
+        $id = trim($employeeCode);
+        $user = str_contains($id, '@')
+            ? User::query()->whereRaw('lower(email) = ?', [mb_strtolower($id)])->first()
+            : User::query()->where('employee_code', $id)->first();
         // Constant work whether or not the user exists.
         $ok = Hash::check($password, $user?->password ?? '$2y$12$toXeR8UVhISFlgJi7YZfQ.yBvmaMJCYf2mhgfvO19HZEYqRmZ4dWm');
         if ($user === null || !$ok) {
-            Audit::record('mobile.login_failed', $device, ['employee_code' => mb_substr($employeeCode, 0, 64)]);
-            throw new DomainException('invalid_credentials', 'User ID or password is incorrect.');
+            Audit::record('mobile.login_failed', $device, ['employee_code' => mb_substr($id, 0, 190)]);
+            throw new DomainException('invalid_credentials', 'E-mail / User ID or password is incorrect.');
         }
         if (!$user->isActive() || !$user->hasPermission('mobile.work')) {
             throw new DomainException('forbidden', 'This account cannot use the mobile app.');

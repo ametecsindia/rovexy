@@ -384,6 +384,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
             Route::put('sim', [$cc, 'setSim']);
             Route::get('numbers', [$cc, 'numbers']);
             Route::post('vouchers', [$cc, 'addVoucher'])->middleware(['feature:click2call', 'throttle:20,1']);
+            Route::post('vouchers/sync', [$cc, 'syncVouchers'])->middleware(['feature:click2call', 'throttle:10,1']);
             Route::patch('numbers/{id}', [$cc, 'updateNumberVmn'])->whereNumber('id');
             Route::post('numbers/bulk', [$cc, 'bulkNumbers']);
             Route::delete('numbers/{id}', [$cc, 'deleteVmn'])->whereNumber('id');
@@ -393,6 +394,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
             Route::put('smart31', [$cc, 'setSmart31'])->middleware('feature:smart31');
             Route::post('smart31/numbers', [$cc, 'addNumber'])->middleware('feature:smart31');
             Route::patch('smart31/numbers/{id}', [$cc, 'updateNumber'])->whereNumber('id')->middleware('feature:smart31');
+            Route::put('smart31/groups', [$cc, 'setSmart31Group'])->middleware('feature:smart31');
             Route::delete('smart31/numbers/{id}', [$cc, 'deleteNumber'])->whereNumber('id');
         });
         Route::get('calling/click2call', [Admin\IntegrationController::class, 'click2call'])->middleware('perm:telephony.configure');

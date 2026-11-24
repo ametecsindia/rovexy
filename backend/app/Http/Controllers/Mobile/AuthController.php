@@ -13,7 +13,8 @@ final class AuthController extends Controller
 {
     public function login(Request $r, SessionService $svc)
     {
-        $data = $r->validate(['employee_code' => 'required|string|max:64', 'password' => 'required|string|max:200',
+        // employee_code = the employee code or the e-mail address (24-Nov-2026)
+        $data = $r->validate(['employee_code' => 'required|string|max:190', 'password' => 'required|string|max:200',
             'lat' => 'nullable|numeric|between:-90,90', 'lng' => 'nullable|numeric|between:-180,180', 'accuracy_m' => 'nullable|numeric|min:0']);
         $f = fn (string $k) => isset($data[$k]) ? (float) $data[$k] : null;
         return response()->json($svc->login($this->device($r), $data['employee_code'], $data['password'], $f('lat'), $f('lng'), $f('accuracy_m')));

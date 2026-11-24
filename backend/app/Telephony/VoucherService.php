@@ -19,7 +19,10 @@ use Illuminate\Support\Facades\Log;
  *  3. One transaction: the company's numbers go to c2c_vmn_history and are REPLACED by the voucher's
  *     (click2call_did / obd_did / webrtc_did / tc_verified, expiry). Groups start empty; the admin assigns them.
  *     Today's smart_groups numbers replace the previous voucher's Smart31 numbers in the existing Smart31 pool
- *     (numbers the admin added by hand stay).
+ *     (numbers the admin added by hand stay); a Smart31 group keeps the teams the company gave it (inheritAssignments).
+ * Daily (scheduler, and "Sync with Ametecs CRM"), LeadGER dailyValidations:
+ *  4. GET {licence_url}/api/did_voucher_validate/{code}/{crm_id} → numbers in deleted[] are removed (kept in history)
+ *  5. GET {licence_url}/api/smart31-details/{crm_id} → today's Smart31 numbers replace the voucher numbers in the pool
  */
 final class VoucherService
 {
@@ -99,32 +102,124 @@ final class VoucherService
         $all = array_values(array_unique(array_merge($c2c, $obd, $webrtc)));
         $expiry = !empty($data['expiry']) ? date('Y-m-d', strtotime((string) $data['expiry'])) : null;
         $now = now();
-        $cid = app(CurrentCompany::class)->id();
 
-        Vmn::query()->orderBy('id')->get()->each(fn (Vmn $v) => DB::table('c2c_vmn_history')->insert([
-            'company_id' => $cid, 'virtual_number' => $v->virtual_number, 'click2call' => $v->click2call, 'webrtc' => $v->webrtc, 'obd' => $v->obd,
-            'tc_verified' => $v->tc_verified, 'team_ids' => json_encode($v->team_ids ?? []), 'expires_at' => $v->expires_at,
-            'voucher_id' => $v->voucher_id, 'replaced_at' => $now, 'created_at' => $v->created_at, 'updated_at' => $now,
-        ]));
+        $this->archiveVmns(Vmn::query()->orderBy('id')->get(), $now);
         Vmn::query()->delete();
-        Smart31Number::query()->where('source', 'voucher')->delete();
 
-        $today = $now->toDateString();
-        $smart = collect((array) ($data['smart_groups'] ?? []))->map(fn ($g) => (array) $g)
-            ->filter(fn ($g) => ($g['usage_date'] ?? null) === $today && !empty($g['vmn']) && !empty($g['c2c']));   // today's, Click2Call-capable
-        $voucher = Voucher::query()->create(['voucher_code' => $code, 'numbers' => count($all), 'smart31_numbers' => $smart->count(), 'expires_at' => $expiry, 'created_by' => $userId]);
+        $voucher = Voucher::query()->create(['voucher_code' => $code, 'numbers' => count($all), 'smart31_numbers' => 0, 'expires_at' => $expiry, 'created_by' => $userId]);
         foreach ($all as $n) {
             Vmn::query()->create(['virtual_number' => $n, 'click2call' => in_array($n, $c2c, true), 'obd' => in_array($n, $obd, true),
                 'webrtc' => in_array($n, $webrtc, true), 'tc_verified' => in_array($n, $verified, true), 'team_ids' => [], 'expires_at' => $expiry, 'voucher_id' => $voucher->id]);
         }
-        foreach ($smart as $g) {
-            $n = Click2CallAdapter::normalize($g['vmn']);
-            if (Smart31Number::query()->where('number', $n)->exists()) {
-                continue;   // the admin already has it in the pool
-            }
-            Smart31Number::query()->create(['number' => $n, 'source' => 'voucher', 'type' => $g['type'] ?? null, 'group_name' => $g['group_name'] ?? null,
-                'usage_date' => $today, 'label' => $g['group_name'] ?? null, 'team_ids' => [], 'active' => true]);
-        }
+        $voucher->forceFill(['smart31_numbers' => $this->replaceSmart31((array) ($data['smart_groups'] ?? []))])->save();
         return $voucher;
+    }
+
+    /**
+     * Daily check with the licence server (LeadGER dailyValidations, steps 2–3): numbers the server lists as deleted
+     * leave the company's numbers, and today's Smart31 numbers replace the voucher ones in the pool. A server that
+     * can't be reached changes nothing. The verdict is kept in click2call.voucher_sync for the console.
+     * @return array{ok: bool, message: string, removed: int, smart31: ?int}
+     */
+    public function syncDaily(): array
+    {
+        if (!self::crmId() || !self::licenceSecret()) {
+            return ['ok' => false, 'message' => 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null];
+        }
+        $removed = 0;
+        $problems = [];
+        if ($voucher = Voucher::query()->latest('id')->first()) {
+            $json = $this->get('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
+            if ($json === null) {
+                $problems[] = 'voucher check failed';
+            } else {
+                $gone = collect((array) ($json['deleted'] ?? $json['data']['deleted'] ?? []))
+                    ->map(fn ($n) => Click2CallAdapter::normalize(is_array($n) ? ($n['virtual_number'] ?? $n['vmn'] ?? '') : (string) $n))->filter()->unique()->values()->all();
+                $removed = $gone ? DB::transaction(function () use ($gone) {
+                    $rows = Vmn::query()->whereIn('virtual_number', $gone)->get();
+                    $this->archiveVmns($rows, now());
+                    Vmn::query()->whereIn('id', $rows->pluck('id'))->delete();
+                    return $rows->count();
+                }) : 0;
+            }
+        }
+        $smart = null;
+        $json = $this->get('/api/smart31-details/' . rawurlencode((string) self::crmId()));
+        $list = is_array($json) ? ($json['vmn_details'] ?? $json['data']['vmn_details'] ?? null) : null;
+        if (is_array($list)) {
+            $smart = DB::transaction(fn () => $this->replaceSmart31($list));
+        } else {
+            $problems[] = 'Smart31 numbers not received';
+        }
+        $ok = !$problems;
+        $message = ($ok ? 'Checked with Ametecs CRM' : 'Partly checked (' . implode(', ', $problems) . ')')
+            . ": {$removed} number(s) removed" . ($smart !== null ? ", {$smart} Smart31 number(s) for today" : '') . '.';
+        $c = app(CurrentCompany::class)->get();
+        $s = $c->settings ?? [];
+        data_set($s, 'click2call.voucher_sync', ['at' => now()->toIso8601String(), 'ok' => $ok, 'message' => $message]);
+        $c->forceFill(['settings' => $s])->save();
+        return ['ok' => $ok, 'message' => $message, 'removed' => $removed, 'smart31' => $smart];
+    }
+
+    private function get(string $path): ?array
+    {
+        try {
+            $json = $this->licence()->get($path)->json();
+            return is_array($json) ? $json : null;
+        } catch (\Throwable $e) {
+            Log::warning('[Click2Call] licence server unreachable: ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    private function archiveVmns($rows, $now): void
+    {
+        $cid = app(CurrentCompany::class)->id();
+        $rows->each(fn (Vmn $v) => DB::table('c2c_vmn_history')->insert([
+            'company_id' => $cid, 'virtual_number' => $v->virtual_number, 'click2call' => $v->click2call, 'webrtc' => $v->webrtc, 'obd' => $v->obd,
+            'tc_verified' => $v->tc_verified, 'team_ids' => json_encode($v->team_ids ?? []), 'expires_at' => $v->expires_at,
+            'voucher_id' => $v->voucher_id, 'replaced_at' => $now, 'created_at' => $v->created_at, 'updated_at' => $now,
+        ]));
+    }
+
+    /**
+     * Today's Click2Call-capable Smart31 numbers (smart_groups / vmn_details rows) become the voucher numbers in the
+     * existing Smart31 pool. A number staying in the list keeps its groups, switch and rotation count; a new number gets
+     * the teams its Smart31 group had before (current rows, else smart31_history — LeadGER inheritAssignments).
+     * Numbers the admin added, or that came from SmartDCM, are never touched. Returns how many voucher numbers are in the pool.
+     */
+    private function replaceSmart31(array $rows): int
+    {
+        $today = now(CurrentCompany::tz())->toDateString();
+        $want = collect($rows)->map(fn ($g) => (array) $g)
+            ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']))
+            ->keyBy(fn ($g) => Click2CallAdapter::normalize($g['vmn']));
+        $cid = app(CurrentCompany::class)->id();
+        $old = Smart31Number::query()->where('source', 'voucher')->get()->keyBy('number');
+        $groupTeams = DB::table('smart31_history')->where('company_id', $cid)->whereNotNull('group_name')->orderBy('id')->get(['group_name', 'team_ids'])
+            ->merge($old->map(fn ($n) => (object) ['group_name' => $n->group_name, 'team_ids' => json_encode($n->team_ids ?? [])])->values())
+            ->reduce(function (array $m, $r) {
+                $ids = json_decode((string) $r->team_ids, true) ?: [];
+                return $ids && $r->group_name ? [$r->group_name => $ids] + $m : $m;   // latest non-empty wins
+            }, []);
+        foreach ($old->except($want->keys()->all()) as $n) {
+            DB::table('smart31_history')->insert(['company_id' => $cid, 'number' => $n->number, 'group_name' => $n->group_name, 'type' => $n->type,
+                'team_ids' => json_encode($n->team_ids ?? []), 'usage_date' => $n->usage_date, 'calls' => $n->calls, 'replaced_at' => now(), 'created_at' => now(), 'updated_at' => now()]);
+            $n->delete();
+        }
+        $count = 0;
+        foreach ($want as $number => $g) {
+            $attrs = ['type' => $g['type'] ?? null, 'group_name' => $g['group_name'] ?? null, 'label' => $g['group_name'] ?? null, 'usage_date' => $today];
+            if ($row = $old->get($number)) {
+                $row->fill($attrs + (empty($row->team_ids) && isset($groupTeams[$attrs['group_name']]) ? ['team_ids' => $groupTeams[$attrs['group_name']]] : []))->save();
+            } elseif (Smart31Number::query()->where('number', $number)->exists()) {
+                continue;   // the admin (or SmartDCM) already has it in the pool
+            } else {
+                Smart31Number::query()->create($attrs + ['number' => $number, 'source' => 'voucher', 'active' => true,
+                    'team_ids' => $groupTeams[$attrs['group_name']] ?? []]);
+            }
+            $count++;
+        }
+        return $count;
     }
 }

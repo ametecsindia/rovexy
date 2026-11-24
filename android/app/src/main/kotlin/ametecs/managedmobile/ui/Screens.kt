@@ -244,12 +244,12 @@ fun AuthLayout(vm: AppViewModel, mode: String) {
                 }
                 Spacer(Modifier.height(14.dp))
                 Text(if (login) "Welcome back" else "Connect this phone", color = navy, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold)
-                Text(if (login) "Use the User ID and password from your office." else "Enter the server address your office gave you.",
+                Text(if (login) "Use your e-mail (or User ID) and password from your office." else "Enter the server address your office gave you.",
                     color = Ds.Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
                 Field(server, { server = it }, "Server URL", enabled = !locked, type = KeyboardType.Uri, leading = AmmpIcons.Shield)
                 if (mode == "connect" && !locked) Field(workspace, { workspace = it }, "Company workspace (if given)", leading = AmmpIcons.People)
                 if (login) {
-                    Field(user, { user = it }, "User ID", leading = AmmpIcons.People)
+                    Field(user, { user = it }, "E-mail or User ID", type = KeyboardType.Email, leading = AmmpIcons.People)
                     Field(pass, { pass = it }, "Password", password = true, leading = AmmpIcons.Shield, reveal = reveal,
                         trailing = { TextButton(onClick = { reveal = !reveal }) { Text(if (reveal) "Hide" else "Show", color = navyBrand, fontWeight = FontWeight.SemiBold, fontSize = 13.sp) } })
                 }
