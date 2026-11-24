@@ -230,6 +230,24 @@ final class AcceptanceTest extends TestCase
         $this->assertSame('919876543210', ltrim($this->tel->originated[0]['customer_e164'], '+'));
     }
 
+    public function test_shared_phone_still_saves_the_previous_persons_sim_call(): void
+    {
+        config(['ammp.telephony.route' => 'sim']);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary'])->assertCreated()->json('call_id');
+        $this->login($m, 'EMP2');   // someone else signs in before the call was saved
+        $m->work('POST', "/api/mobile/v1/calls/{$uuid}/sim-result", ['talk_seconds' => 30])->assertOk()->assertJsonPath('talk_seconds', 30);
+        $this->assertSame($this->users['alpha']['emp']->id, app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->value('user_id')));
+        // Feedback stays the caller's own; an unknown call gets a plain message, not "No query results for model".
+        $m->work('POST', "/api/mobile/v1/calls/{$uuid}/disposition", ['code' => 'PTP'])->assertStatus(404);
+        $this->assertStringContainsString('no longer on the server', (string) $m->work('POST', '/api/mobile/v1/calls/00000000-0000-0000-0000-000000000000/sim-result', ['talk_seconds' => 1])
+            ->assertStatus(404)->json('message'));
+    }
+
     public function test_sim_route_call_result_and_phone_recording_upload(): void
     {
         config(['ammp.telephony.route' => 'sim']);

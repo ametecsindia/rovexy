@@ -40,7 +40,8 @@ final class CallController extends Controller
     {
         $d = $r->validate(['talk_seconds' => 'required|integer|min:0|max:14400', 'ring_seconds' => 'nullable|integer|min:0|max:600',
             'started_at' => 'nullable|date', 'recording_found' => 'nullable|boolean', 'diagnostics' => 'nullable|array|max:10', 'diagnostics.*' => 'nullable|max:500']);
-        $call = $svc->simResult($this->own($r, $uuid), $r->user(), (int) $d['talk_seconds'], isset($d['ring_seconds']) ? (int) $d['ring_seconds'] : null,
+        $call = $this->ownOrThisPhone($r, $uuid);
+        $call = $svc->simResult($call, $call->user, (int) $d['talk_seconds'], isset($d['ring_seconds']) ? (int) $d['ring_seconds'] : null,
             $d['started_at'] ?? null, isset($d['recording_found']) ? (bool) $d['recording_found'] : null,
             array_map(fn ($v) => is_scalar($v) ? mb_substr((string) $v, 0, 500) : null, $d['diagnostics'] ?? []));
         return response()->json($this->body($call));
@@ -50,7 +51,8 @@ final class CallController extends Controller
     public function recording(Request $r, string $uuid, CallService $svc)
     {
         $d = $r->validate(['file' => 'required|file|max:51200', 'duration_seconds' => 'nullable|integer|min:0|max:14400', 'manual' => 'nullable|boolean']);
-        $call = $svc->storeSimRecording($this->own($r, $uuid), $r->user(), $d['file'], isset($d['duration_seconds']) ? (int) $d['duration_seconds'] : null, (bool) ($d['manual'] ?? false));
+        $call = $this->ownOrThisPhone($r, $uuid);
+        $call = $svc->storeSimRecording($call, $call->user, $d['file'], isset($d['duration_seconds']) ? (int) $d['duration_seconds'] : null, (bool) ($d['manual'] ?? false));
         return response()->json($this->body($call));
     }
 
@@ -67,7 +69,22 @@ final class CallController extends Controller
 
     private function own(Request $r, string $uuid): Call
     {
-        return Call::query()->where('uuid', $uuid)->where('user_id', $r->user()->id)->firstOrFail();
+        return Call::query()->where('uuid', $uuid)->where('user_id', $r->user()->id)->first() ?? $this->gone();
+    }
+
+    /**
+     * 24-Nov-2026: a shared phone. The call log / recording of a SIM call belongs to the phone that dialled it, so that phone
+     * may still save it after someone else signed in; the call stays under the person who made it. Feedback stays theirs only.
+     */
+    private function ownOrThisPhone(Request $r, string $uuid): Call
+    {
+        return Call::query()->where('uuid', $uuid)
+            ->where(fn ($q) => $q->where('user_id', $r->user()->id)->orWhere('device_id', $this->device($r)->id))->first() ?? $this->gone();
+    }
+
+    private function gone(): never
+    {
+        abort(404, 'This call is no longer on the server (it was removed, or made by another person on another phone).');
     }
 
     private function body(Call $c): array
