@@ -147,6 +147,8 @@ html.is-embed,html.is-embed body{background:transparent}
 .opt.on{border-color:var(--navy);background:rgba(31,58,95,.06)}
 .radio{width:18px;height:18px;border-radius:50%;border:2px solid var(--line);flex:none;position:relative}
 .on .radio{border-color:var(--navy)}.on .radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--navy)}
+.recstat{margin:0 0 12px;padding:12px;border-radius:12px;background:var(--bg);font-size:13px;line-height:19px}
+.col-btns{display:flex;flex-direction:column;gap:8px;margin-top:4px}.obtn.full{width:100%}
 .recbox{display:flex;align-items:center;gap:8px;margin-top:12px;padding:10px;border-radius:12px;font-size:13px;font-weight:500}
 .okbox{display:flex;align-items:center;gap:8px;padding:10px;border-radius:12px;background:rgba(22,163,74,.08);color:var(--green);font-size:13px;font-weight:500}
 .okbox.big{margin-top:14px;padding:14px;border-radius:14px;gap:10px}.okbox.big b{font-weight:600;font-size:14px}

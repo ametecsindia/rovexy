@@ -81,6 +81,7 @@ function fresh(start) {
     call: null, dialer: null, chat: D.sampleChat(), chatOpen: null, unread: false, notif: null,
     pendingMedia: null, activeMedia: null, sys: null, toast: null,
     perms: true, recordingOn: true, recordingGate: false, recordingProven: true, locPerm: true,
+    recFolder: 'Internal storage › Recordings › Call', recLast: 'yesterday 6:12 pm', manualRec: false, recMissing: null,
     fix: { ...D.HOME_FIX, time: Date.now() }, failPolicy: false, done: {}, panel: false,
   };
 }
@@ -370,6 +371,7 @@ function Dashboard() {
       </div>
       <div class="today-wrap"><${TodayCard} t=${{ ...S.today, followUpsDue }}/></div>
       <div class="alerts">
+        ${S.recMissing != null && html`<${Banner} n="Mic" tint=${Ds.Amber} title="Call recording missing" body="Select your last call's recording file from this phone." action="Select" onClick=${pickRecording}/>`}
         ${missing.length > 0 && html`<${Banner} n="Warning" tint=${Ds.Amber} title="Finish call setup" body=${'Still needed: ' + missing.join(', ')} action="Fix" onClick=${askPermissions}/>`}
         ${S.error && html`<${Banner} n="Warning" tint=${Ds.Red} title="Something went wrong" body=${S.error}/>`}
         ${S.unread && html`<${Banner} n="People" tint=${Ds.Blue} title="New message" body="Your supervisor sent you a message." action="Open" onClick=${openChat}/>`}
@@ -524,12 +526,28 @@ function DisclosureDialog({ onClose }) {
     confirm=${html`<${TextBtn} onClick=${onClose}>OK<//>`}>${lines.map((l) => html`<p class="body-m">${l}</p>`)}<//>`;
 }
 
-function RecordingGateDialog() {
+function RecordingGateDialog() {   // Screens.kt RecordingGateDialog
   const close = () => set({ recordingGate: false });
+  const check = () => {
+    if (S.recordingOn) { set({ recordingGate: false, recordingProven: true, recLast: S.recLast || 'today ' + hm(new Date()) }); toast('Recording found — calls unlocked'); }
+    else toast('No call recording found yet');
+  };
+  const manual = () => { set({ recordingGate: false, recordingProven: true, manualRec: true }); toast('Select the recording file after each call'); };
   return html`<${Dialog} icon=${html`<${IconTile} n="Mic" tint=${Ds.Red} size=${48}/>`} title="Turn on call recording" onDismiss=${close}
     confirm=${html`<${PrimaryButton} text="Open call settings" onClick=${() => set({ recordingGate: false, sys: { kind: 'callsettings' } })}/>`}
     dismiss=${html`<${TextBtn} onClick=${close}>Not now<//>`}>
-    <p class="body-m pre">${'Company calls must be recorded. Calls are blocked until your Phone app records them.\n\n1. Tap Open call settings.\n2. Open Record calls (Samsung: Record calls → Auto record calls; OPPO/OnePlus: Call recording → Auto-record all calls).\n3. Switch auto-recording ON for all calls.\n4. Make one short test call from your Phone app (any number that answers).\n5. Come back and tap Call again.\n\nCalling unlocks as soon as the recording of that test call is found on the phone.'}</p><//>`;
+    <p class="body-m">Company calls must be recorded. SIM calls stay blocked until ROVEXY finds a recording made by your Phone app.</p>
+    <div class="recstat"><div style=${{ color: S.recFolder ? Ds.Green : Ds.Amber }}>${S.recFolder ? '✓ Recordings folder: ' + S.recFolder : '✗ Recordings folder: not chosen'}</div>
+      <div style=${{ color: S.recLast ? Ds.Green : Ds.Red }}>${S.recLast ? '✓ Last recording found: ' + S.recLast : '✗ No call recording found yet'}</div></div>
+    <p class="body-m pre">${'1. Tap Open call settings and switch auto call recording ON for all calls (Samsung: Record calls → Auto record calls; OPPO/OnePlus/Realme: Call recording → Auto-record all calls; Vivo: Call recording → Record all calls).\n2. Tap Choose recordings folder and pick the folder your Phone app saves recordings in, then Allow.\n3. Make one short test call from the Phone app to any number that answers.\n4. Come back and tap Check again.'}</p>
+    <div class="col-btns"><${OutBtn} onClick=${() => { set({ recFolder: 'Internal storage › Recordings › Call' }); toast('Recordings folder chosen'); }}>${S.recFolder ? 'Change recordings folder' : 'Choose recordings folder'}<//>
+      <${OutBtn} onClick=${check}>Check again<//><${OutBtn} onClick=${manual}>No auto recording? Select the file after each call<//></div><//>`;
+}
+/** No auto recording on this phone: the employee picks the last call's recording file (copyPicked / recordingFilePicked). */
+function pickRecording() {
+  const i = document.createElement('input'); i.type = 'file'; i.accept = 'audio/*';
+  i.onchange = () => { if (!i.files[0]) return; set({ recMissing: null, call: S.call ? { ...S.call, recording: 'available' } : null }); toast('Recording attached to the call'); };
+  i.click();
 }
 
 // ───────────────────────────── calls (AppViewModel.placeCall + SIM route) ─────────────────────────────
@@ -550,7 +568,9 @@ function endSimCall() {
   if (!d || !call) return;
   const talk = d.answeredAt ? Math.max(1, Math.round((Date.now() - d.answeredAt) / 1000)) : 0;
   set({ dialer: null, call: { ...call, state: 'saving' } });
-  later(1300, () => S.call && set({ call: { ...S.call, state: talk > 0 ? 'completed' : 'no_answer', talk, recording: talk > 0 ? 'available' : 'not_required' } }));
+  const manual = S.manualRec && talk > 0;
+  later(1300, () => S.call && set({ call: { ...S.call, state: talk > 0 ? 'completed' : 'no_answer', talk, recording: manual ? 'failed' : talk > 0 ? 'available' : 'not_required' },
+    ...(manual ? { recMissing: call.customerId } : {}) }));
 }
 function hangup() {   // before the Phone app took over
   if (!S.call) return;
@@ -599,7 +619,7 @@ function CallPanel() {
   const headline = { dialing: 'Calling…', on_sim_call: 'On call', saving: 'Saving the call…', completed: `Call completed · ${mmss(c.talk)}`, no_answer: 'Not answered' }[c.state]
     || cap(c.state.replace(/_/g, ' ')) + (c.talk > 0 ? ` · ${mmss(c.talk)}` : '');
   const rec = c.recording && c.recording !== 'not_required' && (c.recording === 'available' ? ['Check', Ds.Green, 'Recording saved']
-    : c.recording === 'failed' ? ['Warning', Ds.Red, 'Recording not saved — auto call recording is OFF. Calls are blocked until it is switched on.'] : ['Mic', Ds.Amber, 'Recording: ' + c.recording.replace(/_/g, ' ')]);
+    : c.recording === 'failed' ? ['Warning', Ds.Red, S.recMissing === c.customerId ? 'No recording found for this call. Select its file from this phone.' : 'Recording not saved — auto call recording is OFF.'] : ['Mic', Ds.Amber, 'Recording: ' + c.recording.replace(/_/g, ' ')]);
   const amt = (v) => setAmount(v.replace(/[^\d.]/g, '').slice(0, 11));
   const save = () => {
     const err = saveFeedback(c, { code, notes, followUp, amount: captures !== 'none' ? Number(amount) : null, mode: captures === 'payment' ? mode : null,
@@ -614,6 +634,7 @@ function CallPanel() {
       <div style=${{ color: c.state === 'completed' ? Ds.Green : Ds.Muted, fontSize: 13, fontWeight: 500 }}>${headline}</div></div>${!ended && html`<${Spinner}/>`}</div>
     ${c.state === 'dialing' && html`<div class="small" style=${{ marginTop: 8 }}>Opening your Phone app…</div>`}
     ${rec && html`<div class="recbox" style=${{ color: rec[1], background: alpha(rec[1], 0.08) }}><${Icon} n=${rec[0]} s=${18}/>${rec[2]}</div>`}
+    ${S.recMissing === c.customerId && html`<${OutBtn} cls="full" style=${{ marginTop: 8 }} onClick=${pickRecording}>Select recording file<//>`}
     ${ended && html`
       <div class="lab-s" style=${{ marginTop: 16 }}>CALL FEEDBACK</div>
       ${D.OUTCOMES.map((o) => html`<button type="button" class=${'opt' + (code === o.code ? ' on' : '')} onClick=${() => setCode(o.code)}><i class="radio"></i>${o.label}</button>`)}
@@ -726,7 +747,7 @@ function SystemDialog({ d }) {
     return html`<div class="sysdlg-scrim"><div class="sysdlg wide"><div class="sys-src">Phone app settings (simulated)</div><b>Record calls</b>
       <label class="sw-row"><span class="grow">Auto record calls<small>Record all calls automatically</small></span><input type="checkbox" class="sw" checked=${on} onChange=${(e) => set({ recordingOn: e.target.checked })}/></label>
       <p class="small">Then make one short test call; ROVEXY unlocks calling when it finds that recording.</p>
-      <div class="sys-a"><button type="button" onClick=${() => { set({ sys: null, recordingProven: S.recordingOn }); if (S.recordingOn) toast('Recording found — calls unlocked'); }}>${on ? 'Make test call & return' : 'Back'}</button></div></div></div>`;
+      <div class="sys-a"><button type="button" onClick=${() => { set({ sys: null, recordingProven: S.recordingOn, ...(S.recordingOn ? { recLast: 'today ' + hm(new Date()), manualRec: false } : {}) }); if (S.recordingOn) toast('Recording found — calls unlocked'); }}>${on ? 'Make test call & return' : 'Back'}</button></div></div></div>`;
   }
   const t = { perms: ['Allow ROVEXY to make and manage phone calls, read your call log and access music and audio?', 'Allow', () => set({ sys: null, perms: true, error: null })],
     screen: ['Start recording or casting with ROVEXY?', 'Start now', () => set({ sys: null, activeMedia: { kind: 'screen' } })],
@@ -903,14 +924,13 @@ function AddressBlock({ c }) {
 }
 function AddressTab({ r }) {
   const c = r.c;
-  const [update, setUpdate] = useState(false);
+  const pinNote = c.pin === 'approximate' ? 'Approximate pin: only the area of this address was found. Check in at the door and the pin moves to the exact spot.'
+    : c.pin === 'verified' ? 'Pin verified at the door. Tap the pin or Distance & route for the road route.' : 'Pin found from the address. Tap the pin or Distance & route for the road route.';
   return html`<${Section} title="Address"><${AddressBlock} c=${c}/><//>
-    <${Section} title="Map">${c.lat != null ? html`<${MiniMap} c=${c}/><div class="small" style=${{ paddingTop: 6 }}>Pin saved on this case. Tap the pin or Distance & route for the road route.</div>`
-      : html`<div class="small">Location unavailable — no map coordinates are saved for this customer. Directions use the address instead.</div>`}
-      <div class="row" style=${{ paddingTop: 10, gap: 8 }}>${c.lat != null && html`<button type="button" class="fbtn" onClick=${() => openFieldMap(c.id)}>Distance & route</button>`}
-        <${OutBtn} onClick=${() => setUpdate(true)}>${c.lat == null ? 'Add location' : 'Update location'}<//></div><//>
-    <${Section} title="Address history"><${AddressHistory} items=${c.addressHistory}/><//>
-    ${update && html`<${UpdateLocationDialog} c=${c} onDone=${() => setUpdate(false)}/>`}`;
+    <${Section} title="Map">${c.lat != null ? html`<${MiniMap} c=${c}/><div class="small" style=${{ paddingTop: 6, color: c.pin === 'approximate' ? Ds.Amber : undefined }}>${pinNote}</div>`
+      : html`<div class="small">No map pin yet — it is found from the address automatically. Directions use the address meanwhile.</div>`}
+      ${c.lat != null && html`<div class="row" style=${{ paddingTop: 10, gap: 8 }}><button type="button" class="fbtn" onClick=${() => openFieldMap(c.id)}>Distance & route</button></div>`}<//>
+    <${Section} title="Address history"><${AddressHistory} items=${c.addressHistory}/><//>`;
 }
 function AddressHistory({ items }) {
   if (!items.length) return html`<div class="small">No changes since this case was uploaded.</div>`;
@@ -998,40 +1018,6 @@ function EntryDialog({ r, kind, onDismiss }) {
 }
 
 /** Set a case's map pin: GPS at the customer's door, or the match for the case address. */
-const AREA_CENTRE = { Lingampally: [17.4943, 78.3192], Serilingampally: [17.4859, 78.3164] };
-function UpdateLocationDialog({ c, onDone }) {
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState(null);
-  const [found, setFound] = useState(null);
-  const run = (fn) => { setBusy(true); setMsg(null); later(900, () => { setBusy(false); fn(); }); };
-  const gps = () => run(() => {
-    const f = fixOrNull();
-    if (!f) return setMsg('Your location could not be detected. Turn on GPS and try again.');
-    setFound({ lat: f.lat, lng: f.lng, label: `Your position (±${Math.round(f.acc)} m)`, source: 'gps', acc: f.acc });
-  });
-  const geo = () => run(() => {
-    const centre = c.lat != null ? [c.lat + 0.0006, c.lng - 0.0004] : AREA_CENTRE[c.area] || [17.45, 78.36];
-    setFound({ lat: centre[0], lng: centre[1], label: addressOf(c), source: 'address' });
-    if (c.lat == null) setMsg('Google matched only the area, not the building. Prefer your GPS at the door.');
-  });
-  const save = () => run(() => {
-    updateCase(c.id, (k) => {
-      const old = k.lat != null ? { lat: k.lat, lng: k.lng } : null;
-      return { ...k, lat: found.lat, lng: found.lng, locIssue: null,
-        addressHistory: [{ what: 'pin', at: Date.now(), by: D.EMPLOYEE.name, source: found.source === 'gps' ? 'GPS at the door' : 'Address lookup', oldPin: old, newPin: { lat: found.lat, lng: found.lng },
-          moved: old ? Math.round(distM(old, found)) : null }, ...k.addressHistory],
-        timeline: [{ type: 'location', at: Date.now(), by: D.EMPLOYEE.name, notes: found.source === 'gps' ? `Pin set at the customer's door (GPS ±${Math.round(found.acc)} m)` : 'Pin set from the case address' }, ...k.timeline] };
-    });
-    onDone();
-  });
-  return html`<${Dialog} title=${'Update location · ' + c.name} onDismiss=${onDone} confirm=${html`<${TextBtn} disabled=${!found || busy} onClick=${save}>Save pin<//>`}
-    dismiss=${html`<${TextBtn} onClick=${onDone}>Cancel<//>`}>
-    <div class="small">Use your GPS when you are at the customer's door, or look up the case address.</div>
-    <div class="row" style=${{ paddingTop: 10, gap: 8 }}><${OutBtn} disabled=${busy} onClick=${gps}>My location<//><${OutBtn} disabled=${busy || !c.address} onClick=${geo}>From address<//></div>
-    ${busy && html`<div style=${{ paddingTop: 10 }}><${Spinner} s=${18}/></div>`}
-    ${found && html`<div style=${{ paddingTop: 10, fontSize: 13 }}>${found.label}<br/>${found.lat.toFixed(5)}, ${found.lng.toFixed(5)}</div>`}
-    ${msg && html`<div style=${{ paddingTop: 8, fontSize: 13, color: Ds.Amber }}>${msg}</div>`}<//>`;
-}
 
 // ───────────────────────────── maps (Leaflet + OpenStreetMap in place of Google Maps) ─────────────────────────────
 const THEME = { normal: { bg: '#FFFFFF', fg: '#15202E', dot: '#DC2626', bd: '#D3DAE3' }, nearest: { bg: '#C9A35E', fg: '#13243B', dot: '#13243B', bd: '#A9843F' },
@@ -1089,7 +1075,7 @@ function straightRoute(points) {
 }
 
 const RADII = [[0, 'All'], [1, '1 km'], [2, '2 km'], [5, '5 km'], [10, '10 km'], [25, '25 km']];
-const FAR = 300000, MAX_STOPS = 10, ARRIVE = 100;
+const FAR = 300000, MAX_STOPS = 10, ARRIVE = 100, APPROX_ARRIVE = 3000;   // = FieldMap.kt
 
 function FieldMapScreen({ rows }) {
   const fix = fixOrNull();
@@ -1104,7 +1090,6 @@ function FieldMapScreen({ rows }) {
   const [note, setNote] = useState(online ? null : 'No connection — straight-line distance is shown.');
   const [planning, setPlanning] = useState(false);
   const [picked, setPicked] = useState([]);
-  const [fixCase, setFixCase] = useState(null);
   const [visits, setVisits] = useState({});
   const [checkBusy, setCheckBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -1125,7 +1110,10 @@ function FieldMapScreen({ rows }) {
   const nearest = fix ? nearby[0] : null;
   const sel = selected != null ? (nearby.find((n) => n.r.c.id === selected) || (() => { const r = pinned.find((x) => x.c.id === selected); return r && { r, straight: fix ? distM(fix, r) : null, road: null }; })()) : null;
   const hero = sel || nearest;
-  const arrived = hero?.straight != null && hero.straight <= ARRIVE;
+  const arrived = hero?.straight != null && hero.straight <= (hero.r.c.pin === 'approximate' ? APPROX_ARRIVE : ARRIVE);
+  // Today's route published by the office (no Google call); stops tick off as the agent checks in.
+  const plan = useMemo(() => { const st = D.TODAY_ROUTE.map((id) => pinned.find((r) => r.c.id === id)).filter(Boolean);
+    return st.length ? { ...straightRoute(st.map((r) => ({ lat: r.lat, lng: r.lng }))), order: st.map((r) => r.c.id) } : null; }, [pinned.length]);
 
   const fit = (pts) => {
     const m = mapRef.current; if (!m || !pts.length) return;
@@ -1171,7 +1159,8 @@ function FieldMapScreen({ rows }) {
       if (!online) return setNote('No connection — straight-line distance is shown.');
       const d = Math.round(distM(fix, r));
       setVisits({ ...visits, [r.c.id]: hm(new Date()) });
-      updateCase(r.c.id, (k) => ({ ...k, timeline: [{ type: 'visit', at: Date.now(), by: D.EMPLOYEE.name, notes: `Reached the customer (${d} m from the pin)` }, ...k.timeline] }));
+      // A check-in with a good GPS fix becomes the customer's exact pin (FieldMapController::VERIFY_ACCURACY_M).
+      updateCase(r.c.id, (k) => ({ ...k, ...(fix.acc <= 30 ? { lat: fix.lat, lng: fix.lng, pin: 'verified' } : {}), timeline: [{ type: 'visit', at: Date.now(), by: D.EMPLOYEE.name, notes: `Reached the customer (${d} m from the pin)` }, ...k.timeline] }));
       mark('checkin');
     });
   };
@@ -1209,7 +1198,7 @@ function FieldMapScreen({ rows }) {
     if (fix) { L.circle([fix.lat, fix.lng], { radius: fix.acc, color: '#2563EB', opacity: 0.25, weight: 1, fillColor: '#2563EB', fillOpacity: 0.10, interactive: false }).addTo(g.me);
       L.marker([fix.lat, fix.lng], { icon: meIcon(), interactive: false, zIndexOffset: 5000 }).addTo(g.me); }
     if (hero) { const c = arrived ? '#16A34A' : '#C9A35E';
-      L.circle([hero.r.lat, hero.r.lng], { radius: ARRIVE, color: c, opacity: 0.9, weight: 1.5, fillColor: c, fillOpacity: arrived ? 0.16 : 0.08, interactive: false }).addTo(g.zone); }
+      L.circle([hero.r.lat, hero.r.lng], { radius: hero.r.c.pin === 'approximate' ? APPROX_ARRIVE : ARRIVE, color: c, opacity: 0.9, weight: 1.5, fillColor: c, fillOpacity: arrived ? 0.16 : 0.08, interactive: false }).addTo(g.zone); }
     if (route) { const ll = route.points.map((p) => [p.lat, p.lng]);
       L.polyline(ll, { color: '#0F2A57', opacity: 0.9, weight: 10, interactive: false }).addTo(g.route);
       L.polyline(ll, { color: '#3B82F6', weight: 6, interactive: false }).addTo(g.route);
@@ -1250,7 +1239,7 @@ function FieldMapScreen({ rows }) {
             route=${route && route.order.length === 1 && route.order[0] === hero.r.c.id ? route : null} routeBusy=${routeBusy} callEnabled=${!S.busy && !S.call}
             onNavigate=${() => navigate([hero.r])} onRoute=${() => { setSelected(hero.r.c.id); loadRoute([hero.r.c.id], false); }}
             onCall=${() => placeCall(hero.r.c, 'primary')} onCollect=${() => { set({ fieldOpen: false }); openProfile(hero.r.c.id, 'payment'); }}
-            onView=${() => { set({ fieldOpen: false }); openProfile(hero.r.c.id); }} onFix=${() => setFixCase(hero.r.c)}
+            onView=${() => { set({ fieldOpen: false }); openProfile(hero.r.c.id); }}
             arrived=${arrived} checkedIn=${visits[hero.r.c.id]} checkBusy=${checkBusy} onCheckIn=${() => checkIn(hero.r)}
             onClose=${sel ? () => { setSelected(null); setRoute(null); } : null}/>`
           : html`<${LocationPrompt} state=${locState} noPins=${pinned.length === 0} noCases=${rows.length === 0}/>`}
@@ -1260,6 +1249,8 @@ function FieldMapScreen({ rows }) {
           <${TextBtn} color=${Ds.Navy} onClick=${refreshFix}>Refresh<//>
           <button type="button" class="gold-btn" disabled=${roadBusy || routeBusy || !fix} onClick=${findNearest}>Find nearest</button></div>
         ${note && html`<div class="noteline"><${Icon} n="Warning" s=${16}/>${note}</div>`}
+        ${plan && html`<${TodayRoute} r=${plan} pinned=${pinned} done=${visits} onShow=${() => { setSelected(null); setRoute(plan); setExpanded(false); fit([...(fix ? [fix] : []), ...plan.points]); mark('route'); }}
+          onNavigate=${() => navigate(plan.order.filter((id) => !visits[id]).map((id) => pinned.find((r) => r.c.id === id)).filter(Boolean).slice(0, MAX_STOPS))}/>`}
         <div class="hscroll" style=${{ padding: '6px 16px', gap: 6 }}>${[['', 'All cases'], ...STATUS].map(([k, l]) => html`<${Pill} text=${l} selected=${filter.status === k} onClick=${() => setFilter({ ...filter, status: k })}/>`)}</div>
         <div style=${{ padding: '4px 16px' }}>
           <div class="row-c"><span class="grow t-s">${planning ? `Tick up to ${MAX_STOPS} customers below` : `Customers ${radius === 0 ? 'by distance' : `within ${radius} km`} · ${nearby.length}`}</span>
@@ -1273,14 +1264,12 @@ function FieldMapScreen({ rows }) {
         ${nearby.map((n, i) => html`<${NearRow} key=${n.r.c.id} no=${i + 1} n=${n} highlighted=${n.r.c.id === selected} nearest=${n.r.c.id === nearest?.r.c.id} planning=${planning}
           picked=${picked.includes(n.r.c.id)} onPick=${(on) => setPicked(on ? [...picked, n.r.c.id].slice(0, MAX_STOPS) : picked.filter((x) => x !== n.r.c.id))} onClick=${() => selectAndRoute(n.r.c.id)}/>`)}
         ${(unpinned.length > 0 || far.length > 0) && html`<div style=${{ padding: '10px 16px' }}><div class="t-s">Location unavailable · ${unpinned.length + far.length}</div>
-          ${[...unpinned.map((r) => [r, r.c.locIssue === 'invalid' ? 'Wrong coordinates in the file' : 'No map location']), ...far.map((r) => [r, 'Pin is over 300 km away — check it'])].map(([r, why]) => html`
+          ${[...unpinned.map((r) => [r, 'Map pin not found yet — looked up from the address']), ...far.map((r) => [r, 'Pin is over 300 km away — check it'])].map(([r, why]) => html`
             <div class="row-c" style=${{ padding: '6px 0' }}><i class="dot" style=${{ background: Ds.Amber }}></i><div class="grow ell" style=${{ marginLeft: 10 }}>
-              <div class="ell" style=${{ fontWeight: 500 }}>${r.c.name}</div><div class="small clamp2">${why} · ${addressOf(r.c)}</div></div>
-              <${TextBtn} color=${Ds.Navy} onClick=${() => setFixCase(r.c)}>Set pin<//></div>`)}</div>`}
+              <div class="ell" style=${{ fontWeight: 500 }}>${r.c.name}</div><div class="small clamp2">${why} · ${addressOf(r.c)}</div></div></div>`)}</div>`}
         <div style=${{ height: 40 }}></div>
       </div>
     </div>
-    ${fixCase && html`<${UpdateLocationDialog} c=${caseById(fixCase.id)} onDone=${() => setFixCase(null)}/>`}
   </div>`;
 }
 const RoundBtn = ({ n, label, onClick }) => html`<button type="button" class="round" aria-label=${label} title=${label} onClick=${onClick}><${Icon} n=${n} s=${22} c=${Ds.Navy}/></button>`;
@@ -1292,12 +1281,12 @@ function MapProblem({ err, stage }) {
 }
 function LocationPrompt({ state, noPins, noCases }) {
   const [t, b] = state === 'denied' ? ['Turn on location', 'Allow location so the app can show where you are and which customers are nearest.']
-    : noCases ? ['No customers yet', 'Customers appear here once your supervisor assigns them.'] : noPins ? ['No customer has a map location', 'Open a customer below and use Set pin when you are at their address.']
+    : noCases ? ['No customers yet', 'Customers appear here once your supervisor assigns them.'] : noPins ? ['No customer has a map location', 'Map pins are found from the customers\' addresses automatically. Check back shortly.']
     : ['Finding your location…', 'This takes a few seconds outdoors.'];
   return html`<div class="shcard"><div class="t-m">${t}</div><div class="small" style=${{ paddingTop: 4 }}>${b}</div>
     ${state === 'denied' && html`<button type="button" class="fbtn full" style=${{ marginTop: 12 }} onClick=${() => set({ locPerm: true })}>Allow location</button>`}</div>`;
 }
-function CustomerSheetCard({ n, label, route, routeBusy, callEnabled, onNavigate, onRoute, onCall, onCollect, onView, onFix, arrived, checkedIn, checkBusy, onCheckIn, onClose }) {
+function CustomerSheetCard({ n, label, route, routeBusy, callEnabled, onNavigate, onRoute, onCall, onCollect, onView, arrived, checkedIn, checkBusy, onCheckIn, onClose }) {
   const r = n.r, today = todayIso(), gold = label.startsWith('NEAREST');
   const rt = route ? { meters: route.meters, seconds: route.seconds } : n.road;
   return html`<div class="shcard" style=${{ borderColor: gold ? Ds.Gold : Ds.Blue }}>
@@ -1317,7 +1306,7 @@ function CustomerSheetCard({ n, label, route, routeBusy, callEnabled, onNavigate
     <div class="row" style=${{ paddingTop: 10, gap: 8 }}>
       <${SheetAction} n="Route" label=${routeBusy ? 'Routing…' : 'Route'} enabled=${!routeBusy} onClick=${onRoute}/><${SheetAction} n="Call" label="Call" enabled=${callEnabled} onClick=${onCall}/>
       <${SheetAction} n="Check" label="Collect" onClick=${onCollect}/><${SheetAction} n="People" label="Details" onClick=${onView}/></div>
-    <button type="button" class="lnk" style=${{ paddingTop: 10, fontSize: 12 }} onClick=${onFix}>Pin in the wrong place? Set pin</button></div>`;
+    <div class="small" style=${{ paddingTop: 10 }}>Pin in the wrong place? Check in at the customer's door — the pin moves to your exact spot.</div></div>`;
 }
 const SheetAction = ({ n, label, enabled = true, onClick }) => html`<button type="button" class="sact" disabled=${!enabled} onClick=${onClick}><${Icon} n=${n} s=${20} c=${enabled ? Ds.Navy : Ds.Muted}/><span>${label}</span></button>`;
 function NearRow({ no, n, highlighted, nearest, planning, picked, onPick, onClick }) {
@@ -1327,6 +1316,15 @@ function NearRow({ no, n, highlighted, nearest, planning, picked, onPick, onClic
     <div class="grow ell" style=${{ marginLeft: 12 }}><div class="ell" style=${{ fontWeight: 600, fontSize: 15 }}>${n.r.c.name}</div><div class="small">Overdue ${money(n.r.overdue)}</div></div>
     <div style=${{ textAlign: 'right' }}><div style=${{ fontWeight: 600, fontSize: 14 }}>${n.road ? km(n.road.meters) : n.straight != null ? '≈ ' + km(n.straight) : '—'}</div>
       <div class="small">${n.road ? eta(n.road.seconds) : n.straight != null ? 'straight line' : ''}</div></div></div>`;
+}
+function TodayRoute({ r, pinned, done, onShow, onNavigate }) {   // FieldMap.kt TodayRoute: the office's plan for today
+  const n = r.order.filter((id) => done[id]).length;
+  return html`<div class="shcard" style=${{ borderColor: Ds.Gold, margin: '6px 16px' }}><div class="lab-s" style=${{ color: Ds.Gold }}>TODAY'S ROUTE · ${n} OF ${r.order.length} DONE</div>
+    <div style=${{ fontWeight: 600, fontSize: 16 }}>${r.meters > 0 ? `${km(r.meters)} · ${eta(r.seconds)} by bike` : 'Visit in this order'}</div>
+    ${r.order.map((id, i) => { const ok = !!done[id]; return html`<div class="row-c" style=${{ paddingTop: 6 }}><span class="stopno" style=${{ background: ok ? Ds.Green : Ds.Gold }}>${ok ? '✓' : i + 1}</span>
+      <span class="grow ell" style=${{ marginLeft: 8, fontSize: 14, color: ok ? Ds.Muted : Ds.Ink }}>${pinned.find((x) => x.c.id === id)?.c.name || '#' + id}</span></div>`; })}
+    <div class="row" style=${{ paddingTop: 10, gap: 8 }}><${OutBtn} onClick=${onShow}>Show on map<//>
+      ${r.order.some((id) => !done[id]) && html`<button type="button" class="fbtn" style=${{ background: Ds.Gold, color: Ds.NavyInk }} onClick=${onNavigate}>Navigate</button>`}</div></div>`;
 }
 function RouteSummary({ r, pinned }) {
   return html`<div class="shcard" style=${{ borderColor: Ds.Blue, margin: '6px 0' }}><div class="lab-s" style=${{ color: Ds.Blue }}>ROUTE · ${r.order.length} STOPS</div>
@@ -1358,10 +1356,10 @@ const ACTIONS = [
 ];
 const TOGGLES = [['online', 'Internet connection', () => S.sync.online, (v) => set({ sync: { ...S.sync, online: v, pending: v ? 0 : S.sync.pending, last: v ? Date.now() : S.sync.last }, error: null })],
   ['perms', 'Call permissions granted', () => S.perms, (v) => set({ perms: v })],
-  ['rec', 'Auto call recording on', () => S.recordingProven, (v) => set({ recordingProven: v, recordingOn: v })],
+  ['rec', 'Auto call recording on', () => S.recordingProven, (v) => set({ recordingProven: v, recordingOn: v, manualRec: false, recMissing: null, recLast: v ? S.recLast || 'today ' + hm(new Date()) : null })],
   ['loc', 'Location permission', () => S.locPerm, (v) => set({ locPerm: v })]];
 const TRY = [['connect', 'Connect the phone and wait for approval'], ['signin', 'Sign in (password: demo)'], ['tile', 'Filter with a priority tile'], ['call', 'Call a customer from the list'],
-  ['feedback', 'Save the call feedback'], ['profile', 'Open a case and look through the tabs'], ['payment', 'Record a payment with a slip'], ['map', 'Open Customers near me'],
+  ['feedback', 'Save the call feedback'], ['profile', 'Open a case and look through the tabs'], ['payment', 'Record a payment with a slip'], ['map', 'Open Customers near me'], ['route', 'See today\'s route from the office'],
   ['checkin', 'Check in at Suresh Babu (62 m away)'], ['chat', 'Read a message from your supervisor']];
 
 function Panel() {
@@ -1460,7 +1458,7 @@ const SCENES = [
     [3950, () => set({ cases: D.sampleCases(), notif: null })]] },
   { len: 8500, set: () => ({ screen: 'connect', company: 'ROVEXY' }), run: [   // Approve the company phone
     [1300, () => tap('.pbtn', 'Connect')], [4600, () => approvePhone()], [6200, () => tap('.pbtn', 'Sign in')]] },
-  { len: 9000, set: () => ({ recordingProven: false, recordingOn: false }), run: [   // Recording must be on
+  { len: 9000, set: () => ({ recordingProven: false, recordingOn: false, recFolder: null, recLast: null }), run: [   // Recording must be on
     [1200, () => tap('.call-fab')], [3300, () => tap('.pbtn', 'Open call settings')], [4900, () => tap('.sw-row input')], [6300, () => tap('.sys-a button')]] },
   { len: 11000, set: () => ({}), run: [   // Call the customer
     [1000, () => tap('.cc-name', 'Ravi Kumar')], [2500, () => tap('.achip', 'Call')], [3600, () => tap('.tbtn', 'Primary')]] },

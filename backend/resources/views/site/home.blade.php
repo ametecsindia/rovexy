@@ -295,12 +295,23 @@
 .close-stats b{flex:none;width:112px;color:#fff;font-size:1.6rem;font-weight:760;letter-spacing:-.02em;font-variant-numeric:tabular-nums}.close-stats span{font-size:.9rem;line-height:1.4}
 @media (max-width:520px){.close-stats li{flex-direction:column;align-items:flex-start;gap:2px}.close-stats b{width:auto}}
 @media (prefers-reduced-motion:reduce){.scr-img img,.scr-chip{animation:none}}
+/* everything in ROVEXY: grouped feature cards */
+.feat-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+@media (max-width:1000px){.feat-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:640px){.feat-grid{grid-template-columns:1fr}}
+.feat{background:#fff;border:1px solid var(--line);border-radius:18px;padding:26px 26px 18px;display:flex;flex-direction:column}
+.feat .tag{font-size:.74rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--brass);margin:0 0 6px}
+.feat h3{font-size:1.12rem;margin:0 0 8px}.feat > p{font-size:.93rem;color:var(--mute);margin:0 0 10px}
+.feat ul{list-style:none;margin:0;padding:0}.feat li{padding:8px 0 8px 24px;position:relative;font-size:.92rem;border-top:1px solid var(--line)}
+.feat li:before{content:"";position:absolute;left:3px;top:1.05em;width:9px;height:5px;border-left:2px solid var(--brass);border-bottom:2px solid var(--brass);transform:rotate(-45deg)}
+.feat li em{font-style:normal;font-size:.7rem;font-weight:700;color:var(--navy);background:var(--mist);border-radius:6px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.feat-for{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 36px;padding:0;list-style:none}
+.feat-for li{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font-size:.88rem;color:#3A4757}
 @endsection
 
 @section('head')
 <script type="application/ld+json">{!! json_encode(['@context' => 'https://schema.org', '@graph' => [
   ['@type' => 'SoftwareApplication', 'name' => 'ROVEXY', 'applicationCategory' => 'BusinessApplication', 'operatingSystem' => 'Android, Web',
-   'description' => 'Recorded calls, verified field visits and payment slips for collection teams.', 'publisher' => ['@type' => 'Organization', 'name' => 'Ametecs India Private Limited'],
+   'description' => 'Recorded calls, planned and verified field visits, payment slips and team reports for collection, recovery and field teams.', 'publisher' => ['@type' => 'Organization', 'name' => 'Ametecs India Private Limited'],
    'offers' => collect(['cloud-ametecs', 'cloud-own'])->map(fn ($c) => $cloud[$c] ?? null)->filter()->map(fn ($p) => ['@type' => 'Offer',
      'name' => 'ROVEXY Cloud — ' . $p->name . ' (per user per month, billed quarterly, from ' . $p->min_users . ' users, excluding GST)',
      'price' => (string) ($p->cloudTiers->first(fn ($t) => $t->max_users !== null && $t->rate_inr > 0)?->rate_inr + 0), 'priceCurrency' => 'INR'])->values()],
@@ -311,11 +322,15 @@
 @php
 $faqs = [
   ['Do we have to root the phones or buy special phones?', 'No. ROVEXY is an Android app on ordinary company phones of mixed brands (Xiaomi, Samsung, OPPO, Realme, Vivo, OnePlus, Pixel). You approve each phone from the console before it can be used for work.', 'setup'],
-  ['Do calls go out on our own SIM numbers?', 'Yes. Calls are placed through the phone\'s SIM and its own Phone app, so customers see your company number. Calls can also go through Exotel cloud telephony if you use it.', 'setup'],
-  ['Are both sides of every call recorded?', 'Yes. Calls are recorded from ringing to hang-up. The app won\'t start work until recording is on, and recordings upload to your console automatically.', 'setup'],
+  ['Is ROVEXY only for collection agencies?', 'No. It was built for collection and recovery, and each portfolio can also be Parcel delivery, Sales, Marketing, Health care, Nursing, Education, Service or a type of your own, with its own fields and call outcomes. One company can mix types.', 'setup'],
+  ['Do we have to reformat the bank\'s file before uploading?', 'No. Upload the .xlsx or .csv as the bank sends it. ROVEXY skips the title lines, matches the columns, keeps any extra columns you want, and remembers the layout so next month\'s file is matched by itself. Old .xls files need to be saved as .xlsx first.', 'setup'],
+  ['Can the office plan routes for field agents?', 'Yes. Give each field agent a circle, then plan and publish the day\'s route; the order can be optimised for two-wheelers. The agent sees today\'s route on the phone, and the office sees plan against actual through the day.', 'setup'],
+  ['Do calls go out on our own SIM numbers?', 'Yes. Calls are placed through the phone\'s SIM and its own Phone app, so customers see your company number. You can also use Click2Call with Smart31 number rotation, or Exotel cloud telephony, and office telecallers can call from the console.', 'setup'],
+  ['Are both sides of every call recorded?', 'Yes. Calls are recorded from ringing to hang-up. The app won\'t start work until recording is on, and recordings upload to your console automatically, even after the phone was offline. On phones without auto recording, the agent attaches the recording file after the call.', 'setup'],
   ['Is employee location tracked all day?', 'Only during a work session, between signing in and signing out on the app. Employees see a notice while it is on.', 'privacy'],
   ['Can a manager see other teams\' customers or calls?', 'No. Managers see only the people and cases of their own group. Only the company admin sees everything, and every sensitive action is written to the audit log.', 'privacy'],
-  ['Where is our data kept and for how long?', 'On ROVEXY\'s cloud servers run by Ametecs India, backed up daily. Each company\'s data is kept separate, and you decide how long recordings are kept from Storage & retention.', 'privacy'],
+  ['Where is our data kept and for how long?', 'With ROVEXY Cloud, on our cloud servers run by Ametecs India, backed up daily, with each company\'s data kept separate. With on-premises, everything stays on your own server. Either way, you decide how long recordings are kept from Storage & retention.', 'privacy'],
+  ['Can we install ROVEXY on our own server?', 'Yes. A one-click Windows installer sets up ROVEXY on your server with https through Let\'s Encrypt, your own certificate or a Cloudflare Tunnel, and activates your licence file. Running it again later upgrades ROVEXY and keeps your data.', 'setup'],
   ['How do we pay, and do we get a GST invoice?', 'Pay online by UPI, card or net banking through Razorpay, or ask us for a bank-transfer invoice. A GST tax invoice is issued for every payment and stays downloadable from your console.', 'billing'],
   ['How is ROVEXY Cloud billed?', 'Per user per month, paid quarterly in advance, from 5 users, with GST shown separately. Choose Google Maps managed by Ametecs, or your own Google Maps API project. Every feature is included; Click2Call and Smart31 are optional add-ons.', 'billing'],
   ['Who pays for Google Maps?', 'With Ametecs Google Maps, maps are provided through our managed API configuration under the service terms (fair-use limits apply; mapping is not unlimited). With your own Google Maps API, you create and maintain the Google project, enable the services, set billing, restrictions and quotas, and Google bills you directly. Google Maps API consumption charges are not included in the ROVEXY subscription and are billed separately by Google.', 'billing'],
@@ -324,30 +339,31 @@ $faqs = [
   ['Can we add users during the year?', 'Yes. Move to a bigger package from Administration → Plan & licence; the new user limit applies as soon as it\'s paid. Renewing early never loses days.', 'billing'],
   ['Is there a mobile app for managers and admins?', 'Yes. Staff use the ROVEXY app, and managers and admins can use the ROVEXY Admin app from Google Play: the full company console on an Android phone, including dashboards, calls and recordings, customers, field visits and reports. Sign in with the same console email and password.', 'setup'],
   ['Does it connect to our HR and payroll?', 'Yes, with SmartPRS (attendance and payroll) and SmartEPT (workplace compliance) from Ametecs. Field check-ins and work sessions flow across by employee code.', 'setup'],
+  ['We already use SmartDCM. Can ROVEXY work with it?', 'A SmartDCM connection is coming soon. Cases, assignments and users will come from SmartDCM, calls can use your SmartDCM calling account, and call results and visits are sent back to SmartDCM.', 'setup'],
 ];
 @endphp
 
     @php
       $tour = [
-        ['Office', 'Upload the portfolio', 'The office drops in the bank\'s Excel or CSV and assigns it to a group. Each phone gets its cases straight away, with a push alert.'],
+        ['Office', 'Upload the portfolio', 'The office drops in the bank\'s Excel or CSV as it is. ROVEXY matches the columns, places the map pins and assigns the cases to a team. Each phone gets its cases straight away, with a push alert.'],
         ['Office + phone', 'Approve the company phone', 'A new phone shows a code. The admin matches it in Devices & approvals and approves it. Unapproved phones cannot sign in.'],
         ['Phone', 'Recording must be on', 'Work cannot start until a test call proves auto call recording is on. An answered call without a recording blocks calling again.'],
-        ['Phone', 'Call the customer', 'Cases are sorted by days past due and amount. The call goes out on the company SIM and the recording uploads by itself.'],
+        ['Phone', 'Call the customer', 'Cases are sorted by days past due and amount. The call goes out on the company SIM or Click2Call, and the recording uploads by itself.'],
         ['Phone', 'Record the outcome', 'After every call: a promise with amount and date, a payment, or a callback. Promises and callbacks land on the follow-up list.'],
-        ['Phone', 'Visit and check in', 'Field agents see customers near them with road distance. "I\'ve reached" only counts within 100 m of the customer\'s pin.'],
+        ['Phone', 'Visit and check in', 'Field agents follow today\'s route planned by the office, or see customers near them with road distance. "I\'ve reached" only counts within 100 m of the customer\'s pin, and fake GPS is refused.'],
         ['Phone', 'Collect the payment', 'Mode, amount and a photo of the slip, on the spot. The office checks the payment before it reduces the balance.'],
         ['Office', 'Check and confirm', 'Managers see each slip next to the payment and confirm it or send it back with a note. The agent sees the result on the case.'],
-        ['Office', 'See the team live', 'The office sees who is on a call, who is working and who has gone quiet. Location is shared only during the work session.'],
+        ['Office', 'See the team live', 'The office sees who is on a call, who is off the plan and who has gone quiet, then the day\'s activity report. Location is shared only during the work session.'],
       ];
     @endphp
 <section class="hero"><div class="wrap hero-grid">
   <div class="hero-copy">
-    <p class="kicker">Calling, field visits and payments for collection teams</p>
+    <p class="kicker">Calling, field visits, payments and reports for collection and field teams</p>
     <h1>{{ $site['hero_title'] ?? 'Every call, visit and rupee your team collects — on record.' }}</h1>
-    <p class="lead">{{ $site['hero_text'] ?? 'ROVEXY turns company Android phones into managed work phones: recorded calls, verified field visits and payment slips, with your office watching it live from one console.' }}</p>
+    <p class="lead">{{ $site['hero_text'] ?? 'ROVEXY turns company Android phones into managed work phones: recorded calls, planned and verified field visits, and payment slips. Your office sees it all live, from the console or the ROVEXY Admin app.' }}</p>
     <div class="cta"><a class="btn gold" href="#trial">Start the {{ $trialDays }}-day free trial</a><a class="btn ghost" href="/explore-demo">Explore Demo</a><a class="play-badge light" href="/play/staff" aria-label="ROVEXY staff app on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M3.6 2.2 13 12l-9.4 9.8a1.5 1.5 0 0 1-.6-1.2V3.4c0-.5.2-.9.6-1.2z"/><path fill="#34A853" d="M3.6 2.2c.4-.3 1-.3 1.6 0L16.4 8.6 13 12z"/><path fill="#EA4335" d="M3.6 21.8 13 12l3.4 3.4-11.2 6.4c-.6.3-1.2.3-1.6 0z"/><path fill="#FBBC04" d="m16.4 8.6 3.8 2.2c1 .5 1 1.9 0 2.4l-3.8 2.2L13 12z"/></svg><span><small>STAFF APP · GET IT ON</small><b>Google Play</b></span></a><a class="play-badge" href="/play/admin" aria-label="ROVEXY Admin app on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M3.6 2.2 13 12l-9.4 9.8a1.5 1.5 0 0 1-.6-1.2V3.4c0-.5.2-.9.6-1.2z"/><path fill="#34A853" d="M3.6 2.2c.4-.3 1-.3 1.6 0L16.4 8.6 13 12z"/><path fill="#EA4335" d="M3.6 21.8 13 12l3.4 3.4-11.2 6.4c-.6.3-1.2.3-1.6 0z"/><path fill="#FBBC04" d="m16.4 8.6 3.8 2.2c1 .5 1 1.9 0 2.4l-3.8 2.2L13 12z"/></svg><span><small>ADMIN APP · GET IT ON</small><b>Google Play</b></span></a></div>
-    <div class="links"><a href="#pricing">View plans</a><a href="#how">See how it works</a></div>
-    <ul class="proof"><li>Recorded from ring to hang-up</li><li>Check-in within 100 m of the customer</li><li>Approved company phones only</li></ul>
+    <div class="links"><a href="#features">All features</a><a href="#pricing">View plans</a><a href="#how">See how it works</a></div>
+    <ul class="proof"><li>Recorded from ring to hang-up</li><li>Check-in within 100 m, fake GPS refused</li><li>Any bank file, any layout</li></ul>
   </div>
   @include('site.console')
 </div></section>
@@ -359,8 +375,8 @@ $faqs = [
     <p>ROVEXY keeps calls, visits, promises and payments on one record that stays with the company.</p>
   </div>
   <div class="ba">
-    <div class="old"><h3>What most floors have today</h3><ul><li>Calls from personal phones; no recording</li><li>Visit photos on WhatsApp, no proof of presence</li><li>Allocation in Excel, out of date by noon</li><li>Payments reported by phone; slips go missing</li></ul></div>
-    <div class="new"><h3>With ROVEXY</h3><ul><li>Approved company phones, every call recorded</li><li>Check-in only within 100 m of the customer</li><li>Portfolio assigned to phones in a minute</li><li>Slip photo on the case, checked by the office</li></ul></div>
+    <div class="old"><h3>What most floors have today</h3><ul><li>Calls from personal phones; no recording</li><li>Visit photos on WhatsApp, no proof of presence</li><li>Allocation in Excel, out of date by noon</li><li>Agents pick their own routes; nobody checks the km</li><li>Payments reported by phone; slips go missing</li><li>Bank reports built by hand every month</li></ul></div>
+    <div class="new"><h3>With ROVEXY</h3><ul><li>Approved company phones, every call recorded</li><li>Check-in only within 100 m of the customer</li><li>Bank file uploaded as it is, assigned in a minute</li><li>Day route planned by the office, plan vs actual live</li><li>Slip photo on the case, checked by the office</li><li>Activity, portfolio and audit reports ready to send</li></ul></div>
   </div>
 </div></section>
 
@@ -438,9 +454,69 @@ $faqs = [
     </div>
     @endforeach
   </div>
-  <p class="alsos"><b>Also included:</b> messages and internet voice calls between office and phone, live screen and camera sessions on request, push alerts, audit log and your company branding. <b>Works with</b> SmartPRS payroll, SmartEPT, Exotel, Google Maps and Excel/CSV.</p>
+  <p class="alsos"><b>Also included:</b> messages and internet voice calls between office and phone, live screen and camera sessions on request, push alerts, audit log, the ROVEXY Admin app and your company branding. <b>Works with</b> SmartPRS payroll, SmartEPT, Exotel, Google Maps and Excel/CSV, with SmartDCM coming soon.</p>
 </div></section>
 @endif
+
+@php
+  // [tag, heading, line, [points]]  —  'Soon' marks what is built but not yet switched on for clients
+  $features = [
+    ['Portfolios', 'Any bank file, as it comes', 'Upload the client\'s Excel or CSV without reformatting it first.', [
+      'Finds the real header row under bank title lines',
+      'Remembers each bank\'s column layout for next month',
+      'Keeps the bank\'s own columns: references, relatives, anything',
+      'Map pins placed from the address, automatically',
+      'Nine portfolio types, each with its own fields and outcomes',
+    ]],
+    ['Calling', 'Every call on record', 'Company SIM or cloud calling, recorded and filed by itself.', [
+      'SIM calls recorded on Xiaomi, Samsung, OPPO, Vivo and more',
+      'No auto recording? The agent attaches the file, checked for reuse',
+      'Click2Call with masked numbers, optional Smart31 number rotation',
+      'Office telecallers call from the console, no phone needed',
+      'RBI calling hours enforced by the server',
+      'Recording names in each bank\'s format; ZIP export by date or portfolio',
+    ]],
+    ['Field work', 'Plan the day, prove the visit', 'Every field agent works a planned route, and every visit is checked.', [
+      'Field circles and day routes planned by the office',
+      'Two-wheeler route order, optimised for up to 25 stops',
+      'Today\'s route on the phone with one-tap navigation',
+      'Check-in only near the customer; fake GPS refused',
+      'Plan vs actual: done, next stop, off-plan, gone quiet',
+      'All-day tracking with the direct app on your own server',
+    ]],
+    ['Reports', 'Answers for the bank review', 'Ready by portfolio, branch, team or person, for any period.', [
+      'Employee activity: login, logout, worked, idle, break, km',
+      'Attendance, late starts and early finishes, from work hours you set',
+      'Portfolio reports with weekly, monthly and yearly trends',
+      'Formatted Excel exports of customers, calls, visits and payments',
+      'Audit pack: every record, recording and slip with checksums',
+    ]],
+    ['Organisation', 'Built for branches and teams', 'Run one floor or many branches from the same console.', [
+      'Branch, team and people, with one filter on every screen',
+      'Managers see only their own teams',
+      'Bulk upload of people from an Excel template',
+      'Roles and permissions you can change',
+      'ROVEXY Admin app: the full console on a manager\'s phone',
+      'Chat and internet voice calls between office and phone',
+    ]],
+    ['Connect &amp; deploy', 'Fits the way you run IT', 'Our cloud, or your own server with a one-click installer.', [
+      'ROVEXY Cloud, or on-premises on your own server',
+      'Windows installer with https, Cloudflare Tunnel or your own certificate',
+      'Google Maps on our account or yours, with a usage report and limits',
+      'SmartPRS payroll, SmartEPT and Exotel',
+      'SmartDCM: cases, users and calling from SmartDCM <em>Soon</em>',
+    ]],
+  ];
+@endphp
+<section id="features" class="band paper"><div class="wrap">
+  <div class="two head"><div><p class="kicker" style="color:var(--brass)">Features</p><h2>Everything in ROVEXY</h2></div><p class="mute">Built for collection and recovery first, and just as ready for any team that calls and visits customers. Every feature is in every plan.</p></div>
+  <ul class="feat-for" aria-label="Portfolio types">@foreach(['Collections &amp; recovery', 'Parcel delivery &amp; courier', 'Sales', 'Marketing', 'Health care &amp; pharma', 'Nursing', 'Education', 'Service', 'Your own type'] as $t)<li>{!! $t !!}</li>@endforeach</ul>
+  <div class="feat-grid">
+    @foreach($features as [$tag, $h, $line, $points])
+    <div class="feat"><p class="tag">{!! $tag !!}</p><h3>{{ $h }}</h3><p>{{ $line }}</p><ul>@foreach($points as $pt)<li>{!! $pt !!}</li>@endforeach</ul></div>
+    @endforeach
+  </div>
+</div></section>
 
 <section id="security" class="band dark"><div class="wrap two">
   <div class="copy"><h2>Records you can stand behind</h2><p>Customer data, call recordings and employee locations are sensitive. ROVEXY is designed around that, so you can show a bank exactly who did what.</p></div>
@@ -450,6 +526,8 @@ $faqs = [
     <div><h3>Access by role and group</h3><p>Managers see only their group; permissions decide who plays, exports or changes.</p></div>
     <div><h3>Audit log</h3><p>Sign-ins, exports and setting changes, with who and when.</p></div>
     <div><h3>Location only at work</h3><p>Between sign-in and sign-out, with a notice on the phone.</p></div>
+    <div><h3>Fake GPS refused</h3><p>A check-in from a mock location is refused and flagged on the live map.</p></div>
+    <div><h3>Audit pack for the bank</h3><p>Records, recordings and slips in one ZIP, each file with a checksum.</p></div>
     <div><h3>Retention you control</h3><p>Choose how long recordings are kept. Backed up daily.</p></div>
   </div>
 </div></section>

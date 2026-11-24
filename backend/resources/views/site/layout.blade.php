@@ -74,10 +74,10 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
 <header class="top"><div class="wrap">
   <a class="logo" href="/" aria-label="ROVEXY home"><img src="/brand/rovexy-lockup.svg" alt="ROVEXY" width="151" height="44"></a>
   <nav aria-label="Main">
-    <a class="hide-sm" href="/#how">How it works</a><a class="hide-sm" href="/demo">Live demo</a><a class="hide-sm" href="/#product">Product</a><a class="hide-sm" href="/#security">Security</a><a class="hide-sm" href="/#pricing">Pricing</a><a class="hide-sm" href="/#faq">FAQ</a>
+    <a class="hide-sm" href="/#how">How it works</a><a class="hide-sm" href="/demo">Live demo</a><a class="hide-sm" href="/#product">Product</a><a class="hide-sm" href="/#features">Features</a><a class="hide-sm" href="/#pricing">Pricing</a><a class="hide-sm" href="/#faq">FAQ</a>
     <a class="hide-xs" href="/admin">Sign in</a><a class="btn ghost hide-xs" href="/explore-demo">Explore Demo</a><a class="btn gold" href="/#trial">Free trial</a>
     <details class="menu" onclick="if(event.target.tagName==='A')this.open=false"><summary aria-label="Menu"><svg width="24" height="24" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="#0F1E33" stroke-width="2" stroke-linecap="round"/></svg></summary>
-      <div><a href="/explore-demo">Explore Demo</a><a href="/#how">How it works</a><a href="/demo">Live demo</a><a href="/#screens">Screens</a><a href="/#product">Product</a><a href="/#security">Security</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/contact">Contact</a><a href="/admin">Sign in</a></div></details>
+      <div><a href="/explore-demo">Explore Demo</a><a href="/#how">How it works</a><a href="/demo">Live demo</a><a href="/#product">Product</a><a href="/#features">Features</a><a href="/#security">Security</a><a href="/#pricing">Pricing</a><a href="/#faq">FAQ</a><a href="/contact">Contact</a><a href="/admin">Sign in</a></div></details>
   </nav>
 </div></header>
 @yield('main')
@@ -87,10 +87,10 @@ footer address{font-style:normal;max-width:34ch}footer .base{border-top:1px soli
 <footer><div class="wrap">
   <div class="cols">
     <div><span class="logo"><img src="/brand/rovexy-logo-dark.svg" alt="ROVEXY — Your Workforce. In Motion." width="206" height="60"></span>
-      <p>Recorded calls, verified visits and payment slips for collection teams. A product of {{ $co::get('seller_name') }}.</p>
+      <p>Recorded calls, planned and verified visits, payment slips and reports for collection and field teams. A product of {{ $co::get('seller_name') }}.</p>
       <address>{{ $co::get('seller_address') }}</address>
       <a class="play-badge light" href="/play/staff" aria-label="ROVEXY staff app on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M3.6 2.2 13 12l-9.4 9.8a1.5 1.5 0 0 1-.6-1.2V3.4c0-.5.2-.9.6-1.2z"/><path fill="#34A853" d="M3.6 2.2c.4-.3 1-.3 1.6 0L16.4 8.6 13 12z"/><path fill="#EA4335" d="M3.6 21.8 13 12l3.4 3.4-11.2 6.4c-.6.3-1.2.3-1.6 0z"/><path fill="#FBBC04" d="m16.4 8.6 3.8 2.2c1 .5 1 1.9 0 2.4l-3.8 2.2L13 12z"/></svg><span><small>STAFF APP · GET IT ON</small><b>Google Play</b></span></a><a class="play-badge" href="/play/admin" aria-label="ROVEXY Admin app on Google Play"><svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M3.6 2.2 13 12l-9.4 9.8a1.5 1.5 0 0 1-.6-1.2V3.4c0-.5.2-.9.6-1.2z"/><path fill="#34A853" d="M3.6 2.2c.4-.3 1-.3 1.6 0L16.4 8.6 13 12z"/><path fill="#EA4335" d="M3.6 21.8 13 12l3.4 3.4-11.2 6.4c-.6.3-1.2.3-1.6 0z"/><path fill="#FBBC04" d="m16.4 8.6 3.8 2.2c1 .5 1 1.9 0 2.4l-3.8 2.2L13 12z"/></svg><span><small>ADMIN APP · GET IT ON</small><b>Google Play</b></span></a></div>
-    <div><h4>Product</h4><ul><li><a href="/#how">How it works</a></li><li><a href="/demo">Live demo</a></li><li><a href="/#screens">Screens</a></li><li><a href="/#product">Product</a></li><li><a href="/#security">Security</a></li><li><a href="/#pricing">Pricing</a></li></ul></div>
+    <div><h4>Product</h4><ul><li><a href="/#how">How it works</a></li><li><a href="/demo">Live demo</a></li><li><a href="/#product">Product</a></li><li><a href="/#features">Features</a></li><li><a href="/#security">Security</a></li><li><a href="/#pricing">Pricing</a></li></ul></div>
     <div><h4>Get started</h4><ul><li><a href="/explore-demo">Explore Demo</a></li><li><a href="/#trial">Free trial</a></li><li><a href="/buy">Buy a package</a></li><li><a href="/admin">Sign in</a></li><li><a href="/#faq">FAQ</a></li></ul></div>
     <div><h4>Company</h4><ul><li><a href="/contact">Contact us</a></li><li><a href="/privacy">Privacy policy</a></li><li><a href="/terms">Terms of service</a></li><li><a href="/refund">Refund &amp; cancellation</a></li><li><a href="/delivery">Service delivery</a></li></ul></div>
   </div>

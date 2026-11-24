@@ -49,7 +49,7 @@ const RAW = [
   ['Venkatesh Rao', 'AX-220903', 'Axis Q3 Oct', 'Kukatpally', 17.4948, 78.3996, 0, 54200, 5400, null, 6, 'in_progress', { calls: 2, connected: 2, last: [0, 10, 'PAID'], paid: [5400, 0, 'UPI', '428207645190', 'pending'] }],
   ['Swathi Naidu', 'BJ-90455', 'Bajaj PL Aug', 'Manikonda', 17.4045, 78.3866, 9800, 41000, 4900, 45, 4, 'new', { calls: 1, connected: 0, last: [-1, 18, 'RINGING_NO_ANSWER'] }],
   ['Mohammed Irfan', 'HD-551398', 'HDFC Cards Sep', 'Jubilee Hills', 17.4325, 78.4071, 26750, 118000, 8900, 75, 0, 'in_progress', { calls: 5, connected: 2, last: [-2, 17, 'SETTLEMENT'], cb: [-1, 11, 0, 'Wants settlement figure'] }],
-  ['Kavitha Rani', 'AX-221010', 'Axis Q3 Oct', 'Nallagandla', 17.4710, 78.3110, 3100, 12600, 3100, 6, 7, 'new', { calls: 0, connected: 0 }],
+  ['Kavitha Rani', 'AX-221010', 'Axis Q3 Oct', 'Nallagandla', 17.4710, 78.3110, 3100, 12600, 3100, 6, 7, 'new', { calls: 0, connected: 0, approx: true }],
   ['Rajesh Gupta', 'BJ-90502', 'Bajaj PL Aug', 'Chandanagar', 17.4930, 78.3270, 11200, 47300, 5600, 38, 0, 'in_progress', { calls: 3, connected: 1, last: [-5, 13, 'DISPUTE'], pool: true }],
   ['Deepika Joshi', 'HD-551477', 'HDFC Cards Sep', 'Banjara Hills', 17.4156, 78.4347, 0, 22000, 2750, null, 12, 'closed', { calls: 4, connected: 4, last: [-6, 12, 'PAID'], paid: [2750, -6, 'CASH', 'R-00871', 'verified'] }],
   ['Srinivas Goud', 'AX-221077', 'Axis Q3 Oct', 'Ameerpet', 17.4375, 78.4482, 18900, 76500, 6300, 120, 3, 'in_progress', { calls: 8, connected: 1, last: [-1, 9, 'SWITCHED_OFF'], pool: true }],
@@ -70,6 +70,8 @@ function makeCase([name, ref, portfolio, area, lat, lng, overdue, outstanding, e
     status, portfolio, campaign: portfolio.replace(/ .*/, '') + ' collections', team: EMPLOYEE.team, pool: !!x.pool,
     address: STREETS[i % STREETS.length] + ', ' + area, area, city, state, pincode,
     lat: x.noPin ? null : lat, lng: x.noPin ? null : lng, locIssue: x.noPin || null,
+    // Pins come from the address only (Cases.kt): 'address', 'approximate' (area only) or 'verified' (GPS at check-in).
+    pin: x.noPin ? null : i === 0 ? 'verified' : x.approx ? 'approximate' : 'address',
     overdueUploaded: overdue, outstanding, emi, loan: Math.round(outstanding * 1.6 / 1000) * 1000,
     principal: Math.round(outstanding * 0.82), interest: Math.round(outstanding * 0.15), charges: Math.round(outstanding * 0.03),
     oldestDue: oldest == null ? null : iso(-oldest), dueDate: iso(dueIn), balanceAsOf: iso(-9),
@@ -97,8 +99,8 @@ function makeCase([name, ref, portfolio, area, lat, lng, overdue, outstanding, e
   if (x.paid) tl.push({ type: 'entry', at: at(x.paid[1], 10, 20), by: EMPLOYEE.name, outcome: 'Already paid', amount: x.paid[0], mode: x.paid[2], review: x.paid[4] });
   if (x.cb) tl.push({ type: 'callback', at: at(x.last[0], x.last[1], 15), dueAt: at(x.cb[0], x.cb[1], x.cb[2]), status: 'open', by: EMPLOYEE.name, notes: x.cb[3] });
   if (i === 0) {
-    tl.push({ type: 'location', at: at(-8, 12), by: EMPLOYEE.name, notes: 'Pin set at the customer\'s door (GPS ±9 m)' });
-    c.addressHistory.push({ what: 'pin', at: at(-8, 12), by: EMPLOYEE.name, source: 'GPS at the door', oldPin: { lat: 17.4471, lng: 78.3893 }, newPin: { lat, lng }, moved: 270 });
+    tl.push({ type: 'location', at: at(-8, 12), by: EMPLOYEE.name, notes: 'Pin verified at check-in (GPS ±9 m)' });
+    c.addressHistory.push({ what: 'pin', at: at(-8, 12), by: EMPLOYEE.name, source: 'Verified at check-in', oldPin: { lat: 17.4471, lng: 78.3893 }, newPin: { lat, lng }, moved: 270 });
     c.addressHistory.push({ what: 'address', at: at(-11, 15), by: 'Supervisor', source: 'Edited in the console', oldAddress: 'H.No. 3-11, Madhapur, Hyderabad', newAddress: c.address });
   }
   c.timeline = tl.sort((a, b) => b.at - a.at);
@@ -108,6 +110,9 @@ function makeCase([name, ref, portfolio, area, lat, lng, overdue, outstanding, e
 const label = (code) => OUTCOMES.find((o) => o.code === code)?.label || code;
 
 export function sampleCases() { return RAW.map(makeCase); }
+
+/** Today's route the office published for this field agent (field/plan): stops in visiting order. */
+export const TODAY_ROUTE = [1003, 1002, 1001, 1005, 1004];
 
 export const TODAY = { calls: 18, connected: 11, talkSeconds: 2530 };
 

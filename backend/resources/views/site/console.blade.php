@@ -20,14 +20,18 @@
   ];
   $svg = fn (string $k, string $cls = '') => '<svg class="' . $cls . '" viewBox="0 0 24 24" aria-hidden="true"><path d="' . $ic[$k] . '"/></svg>';
   $menu = [
-    [null, 'home', 'Dashboard', []], [null, 'bar', 'Portfolio reports', []],
-    ['Team', 'people', null, ['Groups & people']],
-    ['Calling', 'phone', null, ['Calls & recordings', 'Follow-ups', 'Payments & slips', 'Configuration']],
-    ['Customers', 'contacts', null, ['Portfolios', 'Assignment', 'Customers', 'Address & reachability']],
-    ['Devices', 'device', null, ['Devices & approvals', 'Policy profiles']],
+    // same menu as the real console (admin/src/App.tsx NAV); long groups are shown folded
+    [null, 'home', 'Dashboard', []],
+    ['Team', 'people', null, ['Branches, teams & people']],
+    ['Calling', 'phone', null, ['My calls (Click2Call)', 'Calls & recordings', 'Follow-ups', 'Payments & slips']],
+    ['Calling configuration', 'gear', null, ['Setup', 'Calling options', 'Company numbers', 'People & access', 'Call outcome codes', 'Test calls']],
+    ['Customers', 'contacts', null, ['Portfolios', 'Assignment', 'Field planning (circles & routes)', 'Customers', 'Recording file names']],
+    ['Devices', 'device', null, ['Devices & approvals', 'Policies']],
+    ['Reports', 'bar', null, ['Employee activity', 'Portfolio reports', 'Reports & extracts', 'Recording export', 'Address & reachability']],
     ['Supervision', 'eye', null, ['Status & location', 'Messages', 'Live screen', 'Camera sessions']],
-    ['Administration', 'gear', null, ['Plan & licence', 'Reports & exports', 'Company branding', 'Storage & retention', 'Audit logs', 'Integrations', 'System health']],
+    ['Administration', 'shield', null, ['Plan & licence', 'Company branding', 'Storage & retention', 'Audit logs', 'Integrations (PRS / EPT / Maps)', 'SmartDCM', 'System health']],
   ];
+  $folded = ['Calling configuration', 'Devices', 'Administration'];
   $shotFor = function (string $label) use ($shots) {
       $map = ['Calls & recordings' => ['Calls-and-recordings', .183], 'Payments & slips' => ['Payments-and-slips', .183], 'Portfolio reports' => ['Portfolio-reports', .183],
               'Status & location' => ['Live-status', .183], 'Devices & approvals' => ['Devices-and-approvals', .05], 'Customers' => ['Customers-and-assignment', .05], 'Assignment' => ['Customers-and-assignment', .05]];
@@ -46,8 +50,8 @@
             <?php $sh = $shotFor($label); ?>
             <a href="#" class="{{ $label === 'Dashboard' ? 'on' : '' }}" data-label="{{ $label }}" @if($label === 'Dashboard') data-live @elseif($sh) data-shot="{{ $sh[0] }}" data-cut="{{ $sh[1] }}" @endif>{!! $svg($icon) !!}{{ $label }}</a>
           @else
-            <div class="cx-grp">{!! $svg($icon) !!}<span>{{ $group }}</span><em>{{ count($items) }}</em><i>⌄</i></div>
-            @foreach($items as $it)<?php $sh = $shotFor($it); ?><a href="#" class="sub" data-label="{{ $it }}" data-badge="{{ $it === 'Messages' ? '2' : '' }}" @if($sh) data-shot="{{ $sh[0] }}" data-cut="{{ $sh[1] }}" @endif>{{ $it }}</a>@endforeach
+            <div class="cx-grp">{!! $svg($icon) !!}<span>{{ $group }}</span><em>{{ count($items) }}</em><i>{{ in_array($group, $folded, true) ? '›' : '⌄' }}</i></div>
+            @foreach(in_array($group, $folded, true) ? [] : $items as $it)<?php $sh = $shotFor($it); ?><a href="#" class="sub" data-label="{{ $it }}" data-badge="{{ $it === 'Messages' ? '2' : '' }}" @if($sh) data-shot="{{ $sh[0] }}" data-cut="{{ $sh[1] }}" @endif>{{ $it }}</a>@endforeach
           @endif
         @endforeach
       </nav>

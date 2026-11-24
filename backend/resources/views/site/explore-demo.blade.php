@@ -26,9 +26,10 @@
       <h1>See ROVEXY at work in your city</h1>
       <p>Your own console, already full: a team, customers, two months of calls and collections — set in the city you choose.</p>
       <ul>
-        <li><b>10 employees and 100 customers</b>Tele-callers and field agents with their approved phones, customers with local addresses.</li>
+        <li><b>A branch, two teams, 100 customers</b>Tele-callers and field agents with their approved phones, three bank portfolios with local addresses.</li>
         <li><b>Recorded calls and payment slips</b>Listen to calls, check slips, verify payments, follow up promises.</li>
-        <li><b>Reports you can download</b>Dashboard, portfolio and employee reports, exports and attendance for the last two months.</li>
+        <li><b>Field circles and live map</b>Each field agent's circle, two months of GPS trails and check-ins at customers' doors.</li>
+        <li><b>Reports you can download</b>Employee activity (login, logout, idle, breaks, km), portfolio reports, Excel exports and the audit pack.</li>
         <li><b>Change anything</b>Add people, customers and numbers; it is your demo.</li>
       </ul>
     </aside>
