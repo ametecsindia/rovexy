@@ -703,6 +703,45 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(['completed', null, 40, 'available'], [$old->state, $old->failure_reason, $old->talk_seconds, $old->recording_status]);
     }
 
+    /** 25 Nov 2026: Hang up on a C2C call closes it at once (feedback can be saved); the gateway's late record still fills in the truth. */
+    public function test_click2call_hang_up_allows_feedback_and_late_result_still_applies(): void
+    {
+        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
+            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
+            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => null, 'timeout' => 15, 'timezone' => 'Asia/Kolkata', 'daily_limit' => 100]]);
+        app(TelephonyManager::class)->swap(new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call')));
+        $cdr = ['A_DIAL_STATUS' => 'Connected'];   // employee answered; the gateway's end record is late
+        $url = null;
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['status' => 'success', 'message' => 'C2C Call initiated']),
+            'obd.gateway.test/*' => function () use (&$cdr, &$url) {
+                return \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => $url]]);
+            },
+            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000), 200, ['Content-Type' => 'audio/wav']),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $id = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
+        $m->work('GET', "/api/mobile/v1/calls/{$id}")->assertJsonPath('state', 'ringing');
+        $m->work('POST', "/api/mobile/v1/calls/{$id}/hangup")->assertOk();
+        $m->work('GET', "/api/mobile/v1/calls/{$id}")->assertJsonPath('state', 'disconnected');
+        $m->work('POST', "/api/mobile/v1/calls/{$id}/disposition", ['code' => 'CALLBACK', 'notes' => 'Call Friday', 'follow_up_at' => now()->addDay()->toIso8601String()])->assertOk();
+        // The gateway's record arrives minutes later: real result, talk time and recording; the feedback stays.
+        $ist = now('Asia/Kolkata');
+        $cdr = ['A_DIAL_STATUS' => 'Connected', 'B_DIAL_STATUS' => 'Connected', 'EVENT_TYPE' => 'Call End',
+            'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(40)->format('dmYHis'), 'B_PARTY_END_TIME' => $ist->format('dmYHis')];
+        $url = 'https://rec.gateway.test/r/late.wav';
+        \Illuminate\Support\Facades\Cache::flush();
+        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $id)->first());
+        app(CurrentCompany::class)->run(\App\Models\Company::query()->findOrFail($call->company_id), fn () => app(\App\Services\CallService::class)->syncProvider($call));
+        $call = $call->fresh();
+        $this->assertSame(['completed', null, 40, 'available'], [$call->state, $call->failure_reason, $call->talk_seconds, $call->recording_status]);
+        $this->assertSame('CALLBACK', \App\Models\CallDisposition::query()->withoutGlobalScopes()->where('call_id', $call->id)->value('code'));
+    }
+
     public function test_app_crash_note_lands_in_audit_log(): void
     {
         $this->appOnlyMandatory();
@@ -875,7 +914,7 @@ final class AcceptanceTest extends TestCase
         $this->assertSame('pending', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('recording_status')));
         // "Hang up" before the employee's phone answered: Click2Call has no hang-up API, so the call is closed here.
         $m->work('POST', "/api/mobile/v1/calls/{$open}/hangup")->assertSuccessful();
-        $this->assertSame('cancelled', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('state')));
+        $this->assertSame('disconnected', app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->value('state')));   // 25 Nov: provisional, a late result still applies
         // The employee's phone never answered: after 3 minutes that call no longer blocks calling ("Finish the current call first").
         app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $open)->update(['state' => 'initiated', 'failure_reason' => null, 'initiated_at' => now()->subMinutes(4)]));
         $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'retry_limit');

@@ -559,12 +559,14 @@ final class CallService
                 $call->forceFill(['state' => 'cancelled', 'failure_reason' => 'hung_up_before_answer', 'ended_at' => now()])->save();
             }
         }
-        // Click2Call has no hang-up API: if the employee's phone never answered, "Hang up" simply closes the call here
-        // (otherwise the app waits up to 15 minutes for a result that will not come). A call in progress ends on the phone.
-        if ($call->provider === 'click2call' && $call->state === 'initiated') {
-            $call->forceFill(['state' => 'cancelled', 'failure_reason' => 'hung_up_before_answer', 'ended_at' => now()])->save();
+        // Click2Call has no hang-up API and its gateway record can come minutes late (25 Nov 2026: 8 s to 10 min, or never).
+        // "Hang up" closes the call here, in any open state, so the employee can save feedback at once. It is closed as
+        // 'superseded' (recording stays pending): the gateway's late record still fills in the real result, talk time and
+        // recording (syncProvider + the every-minute check, for 3 hours). Before, it was saved as "hung up before answer".
+        if ($call->provider === 'click2call' && !$call->isTerminal()) {
+            $call->forceFill(['state' => 'disconnected', 'failure_reason' => 'superseded', 'ended_at' => now()])->save();
             ManagedDevice::query()->whereKey($call->device_id)->where('work_state', 'on_call')->update(['work_state' => 'idle']);
-            Audit::record('call.cancelled_by_employee', $call);
+            Audit::record('call.closed_by_employee', $call);
         }
     }
 
