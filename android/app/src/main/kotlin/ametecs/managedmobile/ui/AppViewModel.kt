@@ -25,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -71,6 +72,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val busy = MutableStateFlow(false)
     val error = MutableStateFlow<String?>(null)
     val call = MutableStateFlow<CallUi?>(null)
+    /** Calls whose feedback was saved here: background steps (recording upload, polling) must never reopen their dialog. */
+    private val feedbackSaved = java.util.Collections.synchronizedSet(mutableSetOf<String>())
     val disclosure = MutableStateFlow<Disclosure?>(null)
     val dispositions = MutableStateFlow<List<Outcome>>(emptyList())
     val paymentModes = MutableStateFlow<List<Pair<String, String>>>(emptyList())
@@ -597,6 +600,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         val customer = customers.value.firstOrNull { it.id.toString() == p.str("customer") }
         fun show(state: String, note: String? = null) {
+            if (id in feedbackSaved) return   // feedback already saved: the upload carries on quietly, the dialog never comes back
             call.value = (call.value?.takeIf { it.id == id } ?: CallUi(id, state, 0, null, "", "sim", customer, route = "sim")).copy(state = state, note = note)
         }
         if (System.currentTimeMillis() - since < 2000) return            // resumed before the dialer took over
@@ -720,6 +724,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun applyCall(id: String, r: JsonObject, customer: CachedCustomer?) {
+        if (id in feedbackSaved) return
         call.value = CallUi(id, r.str("state") ?: "completed", r.str("talk_seconds")?.toIntOrNull() ?: 0, r.str("ring_seconds")?.toIntOrNull(),
             r.str("recording_status") ?: "", "sim", call.value?.customer ?: customer, route = "sim")
         if (call.value?.recording in RECORDING_BUSY) watchCall()   // keeps the "Recording: processing" line current
@@ -731,8 +736,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             delay(2000)
             val r = runCatching { g.session.work("GET", "/api/mobile/v1/calls/${cur.id}").obj() }.getOrNull() ?: continue
             val state = r.str("state") ?: continue
-            call.value = cur.copy(state = state, talk = r.str("talk_seconds")?.toIntOrNull() ?: 0, ring = r.str("ring_seconds")?.toIntOrNull(), recording = r.str("recording_status") ?: "")
-            if (state in TERMINAL && r.str("recording_status") !in RECORDING_BUSY) return@launch
+            // Only touch the call still on screen: feedback saved (call = null) or a new call meanwhile → stop, never reopen it.
+            var mine = false
+            call.update { now -> if (now?.id == cur.id) { mine = true; now.copy(state = state, talk = r.str("talk_seconds")?.toIntOrNull() ?: 0,
+                ring = r.str("ring_seconds")?.toIntOrNull(), recording = r.str("recording_status") ?: "") } else now }
+            if (!mine || (state in TERMINAL && r.str("recording_status") !in RECORDING_BUSY)) return@launch
         }
     }
 
@@ -768,6 +776,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             g.work.enqueue("disposition", buildJsonObject { put("call_id", c.id); put("code", code); put("notes", notes); followUpIso?.let { put("follow_up_at", it) }
                 amount?.let { put("amount", it) }; mode?.let { put("payment_mode", it) }; ref?.takeIf { it.isNotBlank() }?.let { put("payment_ref", it) }; paidOn?.let { put("paid_on", it) } })
         }
+        feedbackSaved += c.id
         call.value = null
         runCatching { g.work.syncAll() }
         refreshToday()
