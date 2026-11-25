@@ -98,8 +98,9 @@ export function CallingOptionsPage() {
   const set = (k: string, val: string) => setF({ ...v, [k]: val });
   const reload = async () => { setF(null); await cfg.reload(); await acc.reload(); };
   const saveC2c = (mode: string) => a.run(async () => {
-    setResult(await put('/calling/click2call', { mode, did: v.did || null, agent_caller_id: v.agent_caller_id || null, gateway_secret: v.gateway_secret || null,
-      crm_id: v.crm_id || null, lc_secret: v.lc_secret || null, daily_limit: v.daily_limit ? Number(v.daily_limit) : null }));
+    // Managed by Ametecs (Super Admin holds the keys and the CRM id): send only what the client sees, so nothing is wiped.
+    const keys = d.managed ? {} : { did: v.did || null, gateway_secret: v.gateway_secret || null, crm_id: v.crm_id || null, lc_secret: v.lc_secret || null };
+    setResult(await put('/calling/click2call', { mode, ...keys, agent_caller_id: v.agent_caller_id || null, daily_limit: v.daily_limit ? Number(v.daily_limit) : null }));
     await reload();
   });
   const setSim = (on: boolean) => a.run(async () => {
@@ -128,12 +129,14 @@ export function CallingOptionsPage() {
 
       <div style={{ height: 16 }} />
       <Card title="Click2Call connection" actions={c2cOn ? <Badge value="active" label="on" /> : <Badge value="off" label="off" />}>
-        <p className="muted">From your Ametecs / provider account. You only fill these once.</p>
+        <p className="muted">{d.managed ? 'Connected by Ametecs. Add your voucher under Company numbers — its numbers are used for Click2Call.' : 'From your Ametecs / provider account. You only fill these once.'}</p>
         <div className="form-grid two">
+          {!d.managed && <>
           <label className="field"><span>Gateway secret</span><input type="password" autoComplete="new-password" value={v.gateway_secret} placeholder={d.secret_hint ? `Saved (${d.secret_hint}). Leave blank to keep` : 'From your provider'} onChange={(e) => set('gateway_secret', e.target.value)} /></label>
           <label className="field"><span>CRM id (for adding vouchers)</span><input value={v.crm_id} placeholder="From Ametecs" onChange={(e) => set('crm_id', e.target.value)} /></label>
           <label className="field"><span>CRM secret key (for adding vouchers)</span><input type="password" autoComplete="new-password" value={v.lc_secret} placeholder={d.lc_secret_set ? 'Saved. Leave blank to keep' : 'From Ametecs CRM'} onChange={(e) => set('lc_secret', e.target.value)} /></label>
           <label className="field"><span>Company number {d.voucher_numbers ? '(optional: you have voucher numbers)' : ''}</span><input value={v.did} placeholder="80XXXXXXXX" onChange={(e) => set('did', e.target.value)} /></label>
+          </>}
           <label className="field"><span>Calls to the same customer per day</span><input type="number" min={1} max={1000} value={v.daily_limit} onChange={(e) => set('daily_limit', e.target.value)} /></label>
         </div>
         <details>

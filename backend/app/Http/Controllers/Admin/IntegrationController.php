@@ -78,6 +78,7 @@ final class IntegrationController extends Controller
             'crm_id' => $s['crm_id'] ?? null, 'lc_secret_set' => (bool) \App\Telephony\VoucherService::licenceSecret(), 'daily_limit' => (int) ($s['daily_limit'] ?? config('ammp.telephony.click2call.daily_limit')),
             'voucher_numbers' => \App\Models\C2c\Vmn::query()->count(),
             'webhook_secret_set' => !empty(config('ammp.telephony.click2call.webhook_secret')),
+            'managed' => \App\Telephony\Click2CallSettings::managed(),   // Ametecs holds the keys: the console hides them
         ]);
     }
 
@@ -91,10 +92,10 @@ final class IntegrationController extends Controller
         $d = $r->validate([
             'mode' => 'required|in:off,only,choice',
             // Company number: optional once numbers come from a voucher (Numbers & vouchers); the fallback otherwise.
-            'did' => ['nullable', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && !\App\Models\C2c\Vmn::query()->exists()), 'regex:/^\+?[0-9 ]{6,15}$/'],
+            'did' => ['nullable', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && !\App\Models\C2c\Vmn::query()->exists() && !\App\Telephony\Click2CallSettings::managed()), 'regex:/^\+?[0-9 ]{6,15}$/'],
             'crm_id' => 'nullable|string|max:60', 'lc_secret' => 'nullable|string|max:200', 'daily_limit' => 'nullable|integer|min:1|max:1000',
             'agent_caller_id' => ['nullable', 'regex:/^\+?[0-9 ]{6,15}$/'],
-            'gateway_secret' => ['nullable', 'string', 'max:200', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && empty($old['secret']))],
+            'gateway_secret' => ['nullable', 'string', 'max:200', \Illuminate\Validation\Rule::requiredIf(fn () => $r->input('mode') !== 'off' && empty($old['secret']) && !\App\Telephony\Click2CallSettings::platformSecret('c2c_gateway_secret'))],
         ]);
         $new = ['mode' => $d['mode'], 'did' => isset($d['did']) ? preg_replace('/\D/', '', $d['did']) : ($old['did'] ?? null),
             'agent_caller_id' => isset($d['agent_caller_id']) ? preg_replace('/\D/', '', $d['agent_caller_id']) : null,

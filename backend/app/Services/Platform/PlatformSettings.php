@@ -63,7 +63,8 @@ final class PlatformSettings
         'deposit_per_fos' => '1000',
     ];
 
-    public const SECRETS = ['razorpay_key_secret', 'razorpay_webhook_secret', 'mail_password', 'fcm_service_account_json'];
+    // c2c_*: Ametecs's Click2Call keys for every workspace (25 Nov 2026) — clients only add vouchers; a company's own saved key still wins.
+    public const SECRETS = ['razorpay_key_secret', 'razorpay_webhook_secret', 'mail_password', 'fcm_service_account_json', 'c2c_gateway_secret', 'c2c_crm_secret'];
 
     public static function get(string $key, ?string $default = null): ?string
     {

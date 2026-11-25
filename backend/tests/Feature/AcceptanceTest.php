@@ -909,6 +909,69 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(3, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->count()));
     }
 
+    /** 25 Nov 2026: Ametecs holds the keys (Super Admin), clients only add a voucher; the app picks a voucher number or Smart31. */
+    public function test_managed_click2call_voucher_only_and_smart31_choice(): void
+    {
+        config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);
+        app(TelephonyManager::class)->swap(null);
+        $today = now(\App\Support\CurrentCompany::tz())->toDateString();
+        $started = [];
+        \Illuminate\Support\Facades\Http::fake([
+            'lc.ametecsindia.com/api/did_voucher/GOOD1/CRM77' => fn ($req) => $req->header('Secret-Key')[0] === 'lic-secret'
+                ? \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['click2call_did' => '8047000101,8047000102', 'expiry' => now()->addMonth()->toDateString(),
+                    'smart_groups' => [['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-A']]]])
+                : \Illuminate\Support\Facades\Http::response([], 401),
+            'lc.ametecsindia.com/api/did_voucher_used/*' => \Illuminate\Support\Facades\Http::response(['status' => 200]),
+            'sip.telozar.com/*' => function ($req) use (&$started) { $started[] = $req->data(); return \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ' . count($started)]); },
+            'obd.ametecsindia.com/*' => \Illuminate\Support\Facades\Http::response(['status' => 404]),
+        ]);
+        \App\Services\Platform\PlatformSettings::set('c2c_gateway_secret', 'gw');
+        \App\Services\Platform\PlatformSettings::set('c2c_crm_secret', 'lic-secret');
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $adm = $this->admin('alpha');
+        $emp = $this->users['alpha']['emp'];
+        $team = app(CurrentCompany::class)->run($this->a, function () use ($emp) {
+            $t = \App\Models\Team::query()->create(['code' => 'G9', 'name' => 'Field team']);
+            $emp->teams()->attach($t->id, ['company_id' => $this->a->id, 'membership' => 'member']);
+            return $t;
+        });
+
+        // The client switches Click2Call on with no keys and no number; the voucher needs the CRM id that only Ametecs sets.
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice'])->assertOk();
+        $adm->getJson('/api/admin/calling/click2call')->assertJsonPath('managed', true)->assertJsonPath('secret_hint', '••••gw');
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertStatus(422)->assertJsonPath('message', 'Ametecs has not finished your Click2Call set-up yet (CRM id). Please contact Ametecs support.');
+        $super = \App\Models\Platform\PlatformAdmin::query()->create(['email' => 'super@ametecs.test', 'name' => 'Super', 'password' => 'Staff-password-1', 'role' => 'super', 'status' => 'active']);
+        $this->actingAs($super, 'platform')->withHeaders(['Referer' => 'http://localhost/'])->putJson("/api/super/companies/{$this->a->id}", ['crm_id' => 'CRM77'])->assertOk();
+        $this->actingAs($super, 'platform')->getJson("/api/super/companies/{$this->a->id}")->assertJsonPath('crm_id', 'CRM77');
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'daily_limit' => 50])->assertOk();   // the client's save keeps the CRM id
+        $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
+        $ids = collect($res['numbers'])->pluck('id', 'virtual_number');
+        $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => $ids->values()->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
+        $adm->putJson('/api/admin/calling/smart31/groups', ['group_name' => 'S31-A', 'team_ids' => [$team->id]])->assertOk();
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $call = function (?string $vmn) use ($m, $cid, &$started) {
+            $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'] + ($vmn ? ['vmn' => $vmn] : []))->assertCreated();
+            app(CurrentCompany::class)->withoutScope(fn () => Call::query()->update(['state' => 'completed']));
+            return end($started)['did'];
+        };
+
+        // Smart31 off: only the voucher numbers; the employee's pick is used.
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.numbers.*.number', ['8047000101', '8047000102'])->assertJsonPath('click2call.smart31', false);
+        $this->assertSame('8047000102', $call('8047000102'));
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => 'smart31'])->assertStatus(422)->assertJsonPath('error', 'c2c_no_smart31');
+
+        // Smart31 on: a picked voucher number is still used as picked; "smart31" (and no pick, as older apps send) rotates.
+        $adm->putJson('/api/admin/calling/smart31', ['enabled' => true])->assertOk();
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.smart31', true);
+        $this->assertSame('8047000101', $call('8047000101'));
+        $this->assertSame('1600222001', $call('smart31'));
+        $this->assertSame('1600222001', $call(null));
+        $this->assertSame('gw', \App\Telephony\Click2CallSettings::effective($this->a->fresh())['gateway_secret']);   // Ametecs's gateway key reads results
+    }
+
     public function test_voucher_daily_sync_and_smart31_group_teams(): void
     {
         config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);

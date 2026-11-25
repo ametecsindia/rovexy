@@ -646,7 +646,7 @@ final class ConsoleController extends Controller
             'clear_secrets' => 'array', 'clear_secrets.*' => Rule::in(PlatformSettings::SECRETS),
             'mail_host' => ['nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9.-]+$/'], 'mail_port' => 'nullable|integer|min:1|max:65535', 'mail_encryption' => 'in:tls,ssl,none',
             'mail_username' => 'nullable|string|max:190', 'mail_password' => 'nullable|string|max:300', 'mail_from_address' => 'nullable|email|max:190', 'mail_from_name' => 'nullable|string|max:100',
-            'fcm_service_account_json' => 'nullable|string|max:12000'],
+            'fcm_service_account_json' => 'nullable|string|max:12000', 'c2c_gateway_secret' => 'nullable|string|max:200', 'c2c_crm_secret' => 'nullable|string|max:200'],
             ['mail_host.regex' => 'SMTP server: a host name like smtp.gmail.com (no http:// or spaces).']);
         if (filled($d['fcm_service_account_json'] ?? null)) {
             \App\Services\PushCredential::store($d['fcm_service_account_json'], 'settings');   // checked first: a bad file is refused (422)
@@ -678,7 +678,7 @@ final class ConsoleController extends Controller
     {
         $c = Company::query()->findOrFail($id);
         return response()->json($c->only(['id', 'slug', 'name', 'status', 'created_at', 'billing_email', 'billing_phone', 'gstin', 'state_code', 'address']) + [
-            'console_url' => Workspaces::consoleUrl($c),
+            'console_url' => Workspaces::consoleUrl($c), 'crm_id' => $c->settings['click2call']['crm_id'] ?? null,
             'users' => DB::table('users')->where('company_id', $id)->where('status', 'active')->count(),
             'phones' => DB::table('managed_devices')->where('company_id', $id)->where('approval_state', 'approved')->count(),
             'calls_30d' => DB::table('calls')->where('is_test', false)->where('provider', '!=', 'manual')->where('company_id', $id)->where('initiated_at', '>=', now()->subDays(30))->count(),
@@ -696,8 +696,16 @@ final class ConsoleController extends Controller
             $r->merge(['gstin' => strtoupper(trim((string) $r->input('gstin'))) ?: null]);
         }
         $d = $r->validate(['name' => 'sometimes|required|string|max:150', 'billing_email' => 'sometimes|nullable|email|max:190', 'billing_phone' => 'sometimes|nullable|string|max:20',
-            'gstin' => ['sometimes', 'nullable', 'regex:/^\d{2}[A-Z0-9]{13}$/'], 'state_code' => 'sometimes|nullable|digits:2', 'address' => 'sometimes|nullable|string|max:300']);
+            'gstin' => ['sometimes', 'nullable', 'regex:/^\d{2}[A-Z0-9]{13}$/'], 'state_code' => 'sometimes|nullable|digits:2', 'address' => 'sometimes|nullable|string|max:300',
+            'crm_id' => 'sometimes|nullable|string|max:60']);
         $c = Company::query()->findOrFail($id);
+        if (array_key_exists('crm_id', $d)) {   // Ametecs CRM id for this client's vouchers (kept with its Click2Call settings)
+            $settings = $c->settings ?? [];
+            $settings['click2call'] = array_replace((array) ($settings['click2call'] ?? []), ['crm_id' => trim((string) $d['crm_id']) ?: null]);
+            $c->forceFill(['settings' => $settings])->save();
+            PlatformAudit::record('company.crm_id', $c, ['crm_id' => $settings['click2call']['crm_id']]);
+            unset($d['crm_id']);
+        }
         $state = array_key_exists('state_code', $d) ? $d['state_code'] : $c->state_code;
         $gstin = array_key_exists('gstin', $d) ? $d['gstin'] : $c->gstin;
         if ($gstin !== null && $state !== null && substr($gstin, 0, 2) !== $state) {

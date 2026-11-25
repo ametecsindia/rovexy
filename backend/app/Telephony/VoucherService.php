@@ -37,7 +37,7 @@ final class VoucherService
     {
         $enc = app(CurrentCompany::class)->get()->setting('click2call.lc_secret');
         try { $s = $enc ? \Illuminate\Support\Facades\Crypt::decryptString($enc) : null; } catch (\Throwable) { $s = null; }
-        return ($s ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
+        return ($s ?: Click2CallSettings::platformSecret('c2c_crm_secret') ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
     }
 
     /** @return array{ok: bool, message: string, voucher?: Voucher} */
@@ -48,9 +48,9 @@ final class VoucherService
             return ['ok' => false, 'message' => 'Enter a valid voucher code.'];
         }
         if (!self::crmId() || !self::licenceSecret()) {
-            return ['ok' => false, 'message' => !self::crmId()
+            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id). Please contact Ametecs support.' : (!self::crmId()
                 ? 'Enter your CRM id first (Calling configuration → Calling options → Click2Call connection).'
-                : 'Enter the CRM secret key first (Calling configuration → Calling options → Click2Call connection).'];
+                : 'Enter the CRM secret key first (Calling configuration → Calling options → Click2Call connection).')];
         }
         $result = $this->validate($code);
         if ($result === null) {
@@ -124,7 +124,7 @@ final class VoucherService
     public function syncDaily(): array
     {
         if (!self::crmId() || !self::licenceSecret()) {
-            return ['ok' => false, 'message' => 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null];
+            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id).' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null];
         }
         $removed = 0;
         $problems = [];

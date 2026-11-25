@@ -126,7 +126,9 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
     val defaultNumber by vm.c2cDefault.collectAsState()
     routeAsk?.let { (c, which) ->
         // Only the options this employee is allowed (Calling configuration); Click2Call may also need a company number.
-        var pick by remember(c.id) { mutableStateOf(defaultNumber?.takeIf { it in numbers } ?: numbers.firstOrNull()) }
+        // "smart31" = the server's Smart31 rotation picks the number (offered only when the company has Smart31 on).
+        val choices = numbers + if (vm.c2cSmart31()) listOf("smart31") else emptyList()
+        var pick by remember(c.id) { mutableStateOf(if (vm.c2cSmart31()) "smart31" else defaultNumber?.takeIf { it in numbers } ?: numbers.firstOrNull()) }
         AlertDialog(onDismissRequest = vm::cancelRouteAsk, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Call, Ds.Green, 48) },
             title = { Text("Call ${c.name}") },
             text = {
@@ -135,10 +137,10 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
                     if ("server" in options) Text("Click2Call: this phone rings first; answer it and the customer is connected from the company number. Recorded by the company.", fontSize = 14.sp)
                     if (vm.c2cPicker()) {
                         Text("Company number for Click2Call", fontSize = 13.sp, color = Ds.Muted)
-                        numbers.forEach { n ->
+                        choices.forEach { n ->
                             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { pick = n }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = pick == n, onClick = { pick = n })
-                                Text("+91 $n", fontSize = 15.sp)
+                                Text(if (n == "smart31") "Smart31 (rotating number)" else "+91 $n", fontSize = 15.sp)
                             }
                         }
                     }

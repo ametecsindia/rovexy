@@ -477,8 +477,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else if (!CallRecordService.accessibilityOn(ctx)) CallRecordService.openAccessibilitySettings(ctx)
     }
 
-    /** True when the employee picks the Click2Call company number in the dialog (several numbers, Smart31 not deciding). */
-    fun c2cPicker() = "server" in callingRoutes && !c2cSmart31 && c2cNumbers.value.size > 1
+    /**
+     * True when the employee picks the Click2Call number in the dialog: several voucher numbers, or voucher number(s)
+     * plus Smart31 (25 Nov 2026). Smart31 alone (no voucher numbers) still rotates by itself, as before.
+     */
+    fun c2cPicker() = "server" in callingRoutes && (c2cNumbers.value.size > 1 || (c2cSmart31 && c2cNumbers.value.isNotEmpty()))
+    fun c2cSmart31() = c2cSmart31
 
     fun placeCall(c: CachedCustomer, which: String, route: String? = null, vmn: String? = null) = act {
         routeAsk.value = null

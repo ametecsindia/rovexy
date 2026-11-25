@@ -88,8 +88,15 @@ final class Click2CallSettings
      */
     public static function callerNumberFor(User $u, ?string $requested): string
     {
-        if ($n = self::nextSmart31($u)) {
-            return $n;
+        // 25 Nov 2026: the employee picks a voucher number or "smart31" in the app. Nothing picked (older apps,
+        // a single number) keeps the earlier order: Smart31 rotation first when it is on.
+        if ($requested === 'smart31' || blank($requested)) {
+            if ($n = self::nextSmart31($u)) {
+                return $n;
+            }
+            if ($requested === 'smart31') {
+                throw new \App\Domain\DomainException('c2c_no_smart31', 'No Smart31 number is available for you right now. Choose a company number instead.');
+            }
         }
         $mine = collect(self::numbersFor($u));
         if ($mine->isEmpty()) {
@@ -166,10 +173,23 @@ final class Click2CallSettings
                 $secret = null;   // APP_KEY changed: the admin re-enters it
             }
         }
+        $secret ??= self::platformSecret('c2c_gateway_secret');   // Ametecs's key from Super Admin → Settings
         // With voucher numbers the company number field may be blank: the first voucher number stands in for health checks.
         $did = ($s['did'] ?? null) ?: \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->value('virtual_number');
         return ['did' => $did, 'agent_caller_id' => $s['agent_caller_id'] ?? null, 'gateway_secret' => $secret,
             'crm_id' => ($s['crm_id'] ?? null) ?: config('ammp.telephony.click2call.crm_id')] + config('ammp.telephony.click2call');
+    }
+
+    /** Ametecs-wide Click2Call key saved in Super Admin → Settings (null when not set or the table is missing). */
+    public static function platformSecret(string $key): ?string
+    {
+        return rescue(fn () => \App\Services\Platform\PlatformSettings::get($key), null, false) ?: null;
+    }
+
+    /** Ametecs manages the Click2Call connection (both keys in Super Admin): clients only add vouchers. */
+    public static function managed(): bool
+    {
+        return self::platformSecret('c2c_gateway_secret') !== null && self::platformSecret('c2c_crm_secret') !== null;
     }
 
     /** Is Click2Call the server route right now (company setting, or the .env driver)? */
