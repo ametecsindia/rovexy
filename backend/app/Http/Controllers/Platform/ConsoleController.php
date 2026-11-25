@@ -718,6 +718,50 @@ final class ConsoleController extends Controller
     }
 
     /** A workspace with no live licence gets one: a trial (sales may), or a package / internal licence (super only: free access). */
+    /**
+     * Super Admin enters a client's licence / activation key (25 Nov 2026; clients no longer do it in their console).
+     * A cloud key sold by Ametecs becomes the company's licence; its current one is superseded. Refused: unknown keys,
+     * on-prem keys, keys used by another company, the company's current key, expired / suspended / trial keys.
+     */
+    public function assignLicenceKey(Request $r, int $id)
+    {
+        $key = strtoupper(trim((string) $r->validate(['key' => 'required|string|max:40'])['key']));
+        $c = Company::query()->findOrFail($id);
+        $refuse = fn (string $msg) => response()->json(['message' => $msg, 'code' => 'bad_key'], 422);
+        $l = Licence::query()->where('key', $key)->first();
+        if (!$l) {
+            return $refuse('This licence key is not recognised.');
+        }
+        if (($l->deployment ?? 'cloud') === 'onprem') {
+            return $refuse("This is an on-premises key: it is entered on the client's own ROVEXY server.");
+        }
+        if ($l->company_id === $c->id) {
+            return $refuse($l->status === 'superseded' ? 'This key was replaced by a newer licence.' : "This key is already this company's licence.");
+        }
+        if ($l->company_id !== null) {
+            return $refuse('This key is already used by another company.');
+        }
+        if ($l->status !== 'active' || $l->kind === 'trial' || ($l->expires_at && $l->expires_at->isPast())) {
+            return $refuse('This key is not active (expired, suspended or revoked).');
+        }
+        $won = DB::transaction(function () use ($l, $c) {
+            // claim atomically: the same key entered for two companies at once → only one gets it
+            if (!Licence::query()->whereKey($l->id)->whereNull('company_id')->update(['company_id' => $c->id, 'holder_name' => $c->name, 'activated_at' => now()])) {
+                return false;
+            }
+            foreach (Licence::query()->where('company_id', $c->id)->where('id', '!=', $l->id)->whereNotIn('status', ['superseded', 'revoked'])->get() as $old) {
+                Sales::supersede($old, 'licence key ' . $l->key, $this->actor());
+            }
+            $l->log('activated', ['users' => $l->max_users, 'expires_at' => $l->expires_at?->toDateString()], $this->actor());
+            return true;
+        });
+        if (!$won) {
+            return $refuse('This key is already used by another company.');
+        }
+        PlatformAudit::record('company.licence_key', $c, ['key' => $l->key]);
+        return response()->json(['ok' => true, 'licence' => $l->fresh()->only(['id', 'key', 'kind', 'status', 'max_users', 'expires_at'])]);
+    }
+
     public function issueLicence(Request $r, int $id)
     {
         $d = $r->validate(['plan_id' => 'required|integer', 'kind' => 'required|in:subscription,trial,internal', 'users' => 'nullable|integer|min:1|max:100000',

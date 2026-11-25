@@ -170,11 +170,17 @@ final class LicenceController extends Controller
     {
         $d = $r->validate(['key' => 'required|string|max:40']);
         if (!LicenceClient::isClient()) {
-            return $this->addCloudKey(strtoupper(trim($d['key'])), $r, $ctx, $lic);
+            return self::addedByAmetecs();
         }
         $row = $client->saveKey($d['key']);
         Audit::record('licence.key_saved', null, ['verdict' => $row->status]);
         return response()->json(['verdict' => $row->status, 'error' => $row->last_error]);
+    }
+
+    /** Cloud workspaces: licence keys are entered by Ametecs in Super Admin → Companies (25 Nov 2026). */
+    private static function addedByAmetecs()
+    {
+        return response()->json(['message' => 'Licence keys are added by Ametecs. Please contact Ametecs support.', 'code' => 'key_by_ametecs'], 403);
     }
 
     public function checkNow(LicenceClient $client)
@@ -188,66 +194,11 @@ final class LicenceController extends Controller
     {
         $r->validate(['file' => 'required|file|max:64']);
         if (!LicenceClient::isClient()) {
-            // cloud: a signed file locked to this workspace's fingerprint — same check as an install, then the key is added
-            $p = \App\Services\Licensing\LicenceSigner::verify(trim((string) file_get_contents($r->file('file')->getRealPath())));
-            $fp = LicenceClient::workspaceFingerprint($ctx->get());
-            if (!$p || ($p['source'] ?? null) !== 'file') {
-                return response()->json(['message' => 'This is not a valid ROVEXY licence file.', 'code' => 'bad_licence_file'], 422);
-            }
-            if (($p['fingerprint'] ?? null) !== $fp) {
-                return response()->json(['message' => "This licence file was made for another workspace or server. This workspace's fingerprint is {$fp}.", 'code' => 'bad_licence_file'], 422);
-            }
-            return $this->addCloudKey((string) $p['key'], $r, $ctx, $lic, true);
+            return self::addedByAmetecs();
         }
         $row = $client->importFile((string) file_get_contents($r->file('file')->getRealPath()));
         Audit::record('licence.file_installed', null, ['key' => $row->licence_key]);
         return response()->json(['verdict' => $row->status]);
-    }
-
-    /**
-     * Cloud workspace: add a cloud licence key sold by Ametecs (issued without a workspace). It becomes this workspace's licence and
-     * the current one is superseded. Keys already used by another workspace, on-prem keys, and expired / suspended keys are refused.
-     */
-    private function addCloudKey(string $key, Request $r, CurrentCompany $ctx, Licensing $lic, bool $viaFile = false)
-    {
-        $refuse = fn (string $msg) => response()->json(['message' => $msg, 'code' => 'bad_key'], 422);
-        $l = Licence::query()->where('key', $key)->first();
-        if (!$l) {
-            return $refuse('This licence key is not recognised. Check it against the e-mail from Ametecs.');
-        }
-        if (($l->deployment ?? 'cloud') === 'onprem') {
-            return $refuse('This is an on-premises key: enter it on your own ROVEXY server, not in a cloud workspace.');
-        }
-        if ($viaFile && $l->company_id === $ctx->id() && $l->status === 'active') {
-            return response()->json(['verdict' => 'active', 'error' => null]);   // the same file installed again
-        }
-        if ($l->company_id === $ctx->id()) {
-            return $refuse($l->status === 'superseded' ? 'This key was replaced by a newer licence.' : 'This key is already this workspace\'s licence.');
-        }
-        if ($l->company_id !== null) {
-            return $refuse('This key is already used by another workspace.');
-        }
-        if ($l->status !== 'active' || $l->kind === 'trial' || ($l->expires_at && $l->expires_at->isPast())) {
-            return $refuse('This key is not active (expired, suspended or revoked). Contact Ametecs.');
-        }
-        $won = \Illuminate\Support\Facades\DB::transaction(function () use ($l, $ctx, $r) {
-            // claim the key atomically: two workspaces entering the same key at once → only one gets it
-            if (!Licence::query()->whereKey($l->id)->whereNull('company_id')->update(['company_id' => $ctx->id(), 'holder_name' => $ctx->get()->name, 'activated_at' => now()])) {
-                return false;
-            }
-            $actor = 'company:' . $r->user()->email;
-            foreach (Licence::query()->where('company_id', $ctx->id())->where('id', '!=', $l->id)->whereNotIn('status', ['superseded', 'revoked'])->get() as $old) {
-                Sales::supersede($old, 'licence key ' . $l->key, $actor);
-            }
-            $l->log('activated', ['users' => $l->max_users, 'expires_at' => $l->expires_at?->toDateString()], $actor);
-            return true;
-        });
-        if (!$won) {
-            return $refuse('This key is already used by another workspace.');
-        }
-        $lic->forget();
-        Audit::record($viaFile ? 'licence.file_installed' : 'licence.key_added', null, ['key' => $l->key]);
-        return response()->json(['verdict' => 'active', 'error' => null]);
     }
 
     /** kind = renewal (subscription) / upgrade (trial → first package) / seats (more users now). */

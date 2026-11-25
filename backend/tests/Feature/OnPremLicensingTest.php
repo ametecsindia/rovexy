@@ -303,7 +303,7 @@ final class OnPremLicensingTest extends TestCase
             'buyer_phone' => '9800000001', 'state_code' => '29', 'terms' => '1'])->assertSessionHasErrors(['workspace', 'password']);   // cloud still needs them
     }
 
-    public function test_cloud_licence_sold_as_a_key_is_added_in_the_workspace(): void
+    public function test_cloud_licence_key_is_added_by_super_admin_not_the_client(): void
     {
         $mk = function (string $slug): array {
             $c = Company::query()->create(['slug' => $slug, 'name' => ucfirst($slug), 'timezone' => 'UTC', 'default_country' => 'IN']);
@@ -317,7 +317,7 @@ final class OnPremLicensingTest extends TestCase
                 ->withHeaders(['X-Workspace' => $slug, 'Referer' => 'http://localhost/'])];
         };
         [$alpha, $asAlpha] = $mk('alpha');
-        [, $asBravo] = $mk('bravo');
+        [$bravo, $asBravo] = $mk('bravo');
         $trial = LicenceIssuer::issue($this->plan('starter'), 'Alpha', null, $alpha->id, 'trial', 5, 'cloud', null, 'test');
 
         // staff sell a cloud licence with no workspace → a key is e-mailed
@@ -328,27 +328,19 @@ final class OnPremLicensingTest extends TestCase
         $this->assertNotNull($key);
         $this->assertSame(0, Company::query()->where('slug', '!=', 'alpha')->where('slug', '!=', 'bravo')->count());   // no workspace created
 
-        $onprem = $this->onprem();
-        $asAlpha()->postJson('/api/admin/licence/key', ['key' => $onprem->key])->assertStatus(422);                     // on-prem key
-        $asAlpha()->postJson('/api/admin/licence/key', ['key' => 'RX-AAAA-BBBB-CCCC-DDDD'])->assertStatus(422);         // unknown
-        $asAlpha()->postJson('/api/admin/licence/key', ['key' => strtolower($key)])->assertOk()->assertJsonPath('verdict', 'active');
+        // 25 Nov 2026: the client can no longer add a key or a licence file in a cloud workspace.
+        $asAlpha()->postJson('/api/admin/licence/key', ['key' => $key])->assertForbidden()->assertJsonPath('code', 'key_by_ametecs');
+        $asAlpha()->post('/api/admin/licence/file', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('x.lic', 'x')], ['Accept' => 'application/json'])->assertForbidden();
+
+        // Super Admin → Companies → Alpha → Licences: add the key.
+        $add = fn (Company $c, string $k) => $this->staff()->postJson("/api/super/companies/{$c->id}/licence-key", ['key' => $k]);
+        $add($alpha, $this->onprem()->key)->assertStatus(422);                         // on-prem key
+        $add($alpha, 'RX-AAAA-BBBB-CCCC-DDDD')->assertStatus(422);                     // unknown
+        $add($alpha, strtolower($key))->assertOk()->assertJsonPath('licence.max_users', 20);
         $asAlpha()->getJson('/api/admin/licence')->assertJsonPath('max_users', 20)->assertJsonPath('plan', 'Business')->assertJsonPath('licence_kind', 'subscription');
         $this->assertSame('superseded', $trial->fresh()->status);
-        $asBravo()->postJson('/api/admin/licence/key', ['key' => $key])->assertStatus(422);                             // one workspace per key
-        $asAlpha()->postJson('/api/admin/licence/key', ['key' => $key])->assertStatus(422);                             // already added
-
-        // offline file (SmartEPT logic): a second cloud key, locked to bravo's workspace fingerprint
-        $o2 = $this->staff()->postJson('/api/super/orders', ['kind' => 'new', 'deployment' => 'cloud', 'plan_id' => $this->plan('starter')->id, 'users' => 8, 'billing' => 'annual'] + $buyer)->assertCreated()->json();
-        Sales::markPaid(SalesOrder::query()->findOrFail($o2['id']), 'bank', 'UTR2');
-        $l2 = Licence::query()->where('deployment', 'cloud')->whereNull('company_id')->firstOrFail();
-        $bravoFp = $asBravo()->getJson('/api/admin/licence')->json('server_id');
-        $this->assertSame(40, strlen($bravoFp));
-        $this->staff()->post("/api/super/licences/{$l2->id}/file", [])->assertStatus(422);                              // cloud file needs a fingerprint
-        $lic = $this->staff()->post("/api/super/licences/{$l2->id}/file", ['fingerprint' => $bravoFp])->assertOk()->getContent();
-        $up = fn ($as) => $as()->post('/api/admin/licence/file', ['file' => \Illuminate\Http\UploadedFile::fake()->createWithContent('x.lic', $lic)], ['Accept' => 'application/json']);
-        $up($asAlpha)->assertStatus(422);                                                                               // locked to bravo
-        $up($asBravo)->assertOk()->assertJsonPath('verdict', 'active');
-        $up($asBravo)->assertOk();                                                                                      // re-import is harmless
-        $asBravo()->getJson('/api/admin/licence')->assertJsonPath('max_users', 8);
+        $add($bravo, $key)->assertStatus(422);                                         // one company per key
+        $add($alpha, $key)->assertStatus(422);                                         // already its licence
+        $this->staff('support')->postJson("/api/super/companies/{$alpha->id}/licence-key", ['key' => $key])->assertForbidden();
     }
 }

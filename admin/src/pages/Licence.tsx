@@ -96,11 +96,8 @@ function Features({ x }: { x: any }) {
 }
 
 function Cloud({ x, reload }: { x: any; reload: () => Promise<void> }) {
-  const { can } = useAuth();
-  const mayKey = can('settings.storage') && x.licence_kind !== 'internal';
   return <>
-    {mayKey && <AddKey reload={reload} />}
-    {mayKey && <OfflineFile x={x} reload={reload} />}
+    <Card title="Licence key"><p className="muted" style={{ margin: 0 }}>Your licence key is added by Ametecs — buy or renew below, or contact Ametecs support to activate a key.</p></Card>
     <Purchase x={x} reload={reload} />
     <Card title="Payments & receipts">
       <Table rows={x.paid_orders} empty="No payments yet." columns={[
@@ -231,25 +228,6 @@ function Purchase({ x, reload }: { x: any; reload: () => Promise<void> }) {
       </Card>}
     </div>
   </>;
-}
-
-/** Cloud: add a licence key sold by Ametecs — it becomes this workspace's licence. */
-function AddKey({ reload }: { reload: () => Promise<void> }) {
-  const [key, setKey] = useState('');
-  const [done, setDone] = useState(false);
-  const a = useAction();
-  const add = () => a.run(async () => { await post('/licence/key', { key }); setKey(''); setDone(true); await reload(); });
-  return (
-    <Card title="Licence key">
-      <ErrorBox error={a.error} />
-      {done && <Notice tone="ok">Licence key added. Your plan, users and expiry above are updated.</Notice>}
-      <div className="key-row">
-        <input value={key} onChange={(e) => { setKey(e.target.value.toUpperCase()); setDone(false); }} placeholder="RX-XXXX-XXXX-XXXX-XXXX" aria-label="Licence key" />
-        <button disabled={a.busy || key.length < 10} onClick={() => void add()}>{a.busy ? 'Validating…' : 'Save & validate'}</button>
-      </div>
-      <p className="muted small" style={{ marginBottom: 0 }}>Paste the key from your ROVEXY order e-mail (Billing & Licences). It becomes this workspace's licence straight away — plan, users and expiry update above.</p>
-    </Card>
-  );
 }
 
 type UpdState = { current_version: string; channel: string; phase: string; percent: number; message: string | null; available: any; checked_at: string | null;

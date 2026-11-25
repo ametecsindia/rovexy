@@ -52,6 +52,7 @@ Route::prefix('super')->middleware('central')->group(function () {
     Route::get('companies/{id}', [$c, 'company'])->whereNumber('id')->middleware('platform:companies');
     Route::put('companies/{id}', [$c, 'updateCompany'])->whereNumber('id')->middleware('platform:companies');
     Route::post('companies/{id}/licence', [$c, 'issueLicence'])->whereNumber('id')->middleware('platform:licences');
+    Route::post('companies/{id}/licence-key', [$c, 'assignLicenceKey'])->whereNumber('id')->middleware(['platform:licences', 'throttle:20,1']);
     Route::post('companies/{id}/admin-password', [$c, 'resetCompanyAdminPassword'])->whereNumber('id')->middleware('platform:companies');
     Route::post('companies/{id}/invite', [$c, 'inviteCompanyAdmin'])->whereNumber('id')->middleware(['platform:companies', 'throttle:10,1']);
     Route::get('licences', [$c, 'licences'])->middleware('platform:licences');

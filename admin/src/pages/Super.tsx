@@ -282,8 +282,11 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   const [pw, setPw] = useState({ password: '', reason: '' });
   const [licOpen, setLicOpen] = useState<number | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [key, setKey] = useState('');
   const a = useAction();
   const x = c.data;
+  // Licence / activation key for this client (25 Nov 2026: entered here, no longer in the client's console).
+  const addKey = () => a.run(async () => { await post(`/companies/${id}/licence-key`, { key }); setKey(''); await done('Licence key added — plan, users and expiry updated'); });
   const live = x?.licences?.find((l: any) => l.status === 'active' || l.status === 'suspended');
   const done = async (msg: string) => { toast(msg); setMode(''); await c.reload(); };
   return (
@@ -337,6 +340,10 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
         <h3 className="sub-h">Admins</h3>
         <Table rows={x.admins} empty="No admin accounts." columns={[{ key: 'name', label: 'Name' }, { key: 'email', label: 'E-mail' }, { key: 'status', label: 'Status', render: (u: any) => <Badge value={u.status} /> }, { key: 'last_login_at', label: 'Last sign-in', render: (u: any) => fmtDate(u.last_login_at) }]} />
         <h3 className="sub-h">Licences</h3>
+        {can && <div className="key-row" style={{ marginBottom: 8 }}>
+          <input value={key} onChange={(e) => setKey(e.target.value.toUpperCase())} placeholder="Licence / activation key RX-XXXX-XXXX-XXXX-XXXX" aria-label="Licence key" />
+          <button disabled={a.busy || key.trim().length < 10} onClick={() => void addKey()}>{a.busy ? 'Validating…' : 'Add key'}</button>
+        </div>}
         <Table rows={x.licences} onRow={(l: any) => setLicOpen(l.id)} empty="No licence: the workspace runs unrestricted until one is issued." columns={[
           { key: 'key', label: 'Key', render: (l: any) => <code>{l.key}</code> }, { key: 'plan', label: 'Plan', render: (l: any) => `${l.plan?.name ?? '—'} (${l.kind})` },
           { key: 'expires_at', label: 'Expires', render: (l: any) => (l.expires_at ? day(l.expires_at) : 'never') }, { key: 'status', label: 'Status', render: (l: any) => <Badge value={l.status} /> }]} />
