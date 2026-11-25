@@ -296,6 +296,19 @@ final class AcceptanceTest extends TestCase
         $this->assertFalse(\Illuminate\Support\Facades\Storage::disk(config('ammp.recordings.disk'))->exists($key));
     }
 
+    /** 25 Nov 2026: a company with no outcome codes gets the defaults back, so the app's Save feedback is never dead. */
+    public function test_company_without_outcome_codes_gets_defaults(): void
+    {
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        \App\Models\DispositionCode::query()->delete();
+        $codes = $m->work('GET', '/api/mobile/v1/dispositions?full=1')->assertOk()->json('codes');
+        $this->assertNotEmpty($codes);
+        $this->assertContains('PAID', array_column($codes, 'code'));
+    }
+
     /** Call feedback (9 Oct 2026): promise amount, payment with slip, admin check + e-mail, company isolation. */
     public function test_payment_feedback_slip_review_and_email(): void
     {

@@ -91,6 +91,8 @@ final class CustomerController extends Controller
         // Older app versions read a plain list; the current app asks ?full=1 to also get the payment modes.
         // Only the outcomes of the portfolio types this employee works on (plus the calling results every type shares):
         // a courier agent never sees "Promise to pay", an older app (no per-case filter) never sees another type's codes.
+        // A company with no active outcome at all (created outside the normal set-up) would leave the app's Save button dead.
+        if (!DispositionCode::query()->where('active', true)->exists()) \Database\Seeders\CompanyDefaults::outcomes();
         $types = Customer::query()->visibleTo(request()->user())->distinct()->pluck('portfolio_type')->push(\App\Domain\Portfolios\PortfolioTypes::DEFAULT)->unique()->values();
         $codes = DispositionCode::query()->where('active', true)->where(fn ($q) => $q->whereNull('portfolio_type')->orWhereIn('portfolio_type', $types))
             ->orderBy('label')->get(['code', 'label', 'requires_follow_up', 'captures', 'portfolio_type', 'success']);
