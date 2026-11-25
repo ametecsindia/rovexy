@@ -457,11 +457,11 @@ private fun Section(title: String, content: @Composable () -> Unit) {
     SurfaceCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(14.dp)) { content() } }
 }
 
-/** One label/value line; a missing value says so instead of being left out silently. */
-@Composable
 /** Numbers are shown as XXXXXX + last 4 digits everywhere in the app (as in SmartDCM / LeadGER); dialling uses the full number. */
 fun maskPhone(p: String?): String? = p?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }?.let { "XXXXXX" + it.takeLast(4) }
 
+/** One label/value line; a missing value says so instead of being left out silently. */
+@Composable
 private fun Kv(label: String, value: String?, strong: Boolean = false, color: Color = Ds.Ink) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
