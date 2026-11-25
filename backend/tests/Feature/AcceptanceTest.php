@@ -230,6 +230,22 @@ final class AcceptanceTest extends TestCase
         $this->assertSame('919876543210', ltrim($this->tel->originated[0]['customer_e164'], '+'));
     }
 
+    /** 25 Nov 2026: feedback for a SIM call is saved right away; the call's talk time and recording follow later. */
+    public function test_sim_call_feedback_before_its_result(): void
+    {
+        config(['ammp.telephony.route' => 'sim']);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $uuid = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary'])->assertCreated()->json('call_id');
+        $m->work('POST', "/api/mobile/v1/calls/{$uuid}/disposition", ['code' => 'BUSY', 'notes' => 'saved before the result'])->assertOk();
+        $m->work('POST', "/api/mobile/v1/calls/{$uuid}/sim-result", ['talk_seconds' => 25])->assertOk()->assertJsonPath('talk_seconds', 25);
+        $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $uuid)->first());
+        $this->assertSame('BUSY', \App\Models\CallDisposition::query()->withoutGlobalScopes()->where('call_id', $call->id)->value('code'));
+    }
+
     public function test_shared_phone_still_saves_the_previous_persons_sim_call(): void
     {
         config(['ammp.telephony.route' => 'sim']);

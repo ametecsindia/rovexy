@@ -254,7 +254,7 @@ fun CaseCard(r: CaseRow, outcomeLabel: (String) -> String, enabled: Boolean, onO
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
                     Text(r.c.name, fontWeight = FontWeight.SemiBold, color = Ds.Ink, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(r.c.ref, r.portfolio, r.c.phone.takeLast(4).let { "••$it" }).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(listOfNotNull(r.c.ref, r.portfolio, maskPhone(r.c.phone)).joinToString(" · "), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 Box(Modifier.size(44.dp).background(if (enabled) Ds.Green else Ds.Green.copy(alpha = 0.35f), CircleShape).clickable(enabled = enabled, onClick = onCall)
                     .semantics { contentDescription = "Call ${r.c.name}" }, contentAlignment = Alignment.Center) {
@@ -420,8 +420,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
 
     when (dialog) {
         "which" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Which number?") }, confirmButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary", route) }) { Text("Primary") } }, dismissButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate", route) }) { Text("Alternate") } })
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary", route) }) { Text("Primary · ${maskPhone(case.c.phone)}") } }, dismissButton = {
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate", route) }) { Text("Alternate · ${maskPhone(case.c.altPhone)}") } })
         "note" -> TextDialog("Add collection note", "Note", busy, onDismiss = { dialog = null }) { vm.addCaseNote(case.c.id, it); dialog = null }
         "status" -> StatusDialog(p?.s("status") ?: case.c.status, busy, onDismiss = { dialog = null }) { s, n -> vm.setCaseStatus(case.c.id, s, n); dialog = null }
         "callback" -> CallbackDialog(busy, onDismiss = { dialog = null }) { iso, n -> vm.scheduleCallback(case.c.id, iso, n); dialog = null }
@@ -459,6 +459,9 @@ private fun Section(title: String, content: @Composable () -> Unit) {
 
 /** One label/value line; a missing value says so instead of being left out silently. */
 @Composable
+/** Numbers are shown as XXXXXX + last 4 digits everywhere in the app (as in SmartDCM / LeadGER); dialling uses the full number. */
+fun maskPhone(p: String?): String? = p?.filter { it.isDigit() }?.takeIf { it.isNotEmpty() }?.let { "XXXXXX" + it.takeLast(4) }
+
 private fun Kv(label: String, value: String?, strong: Boolean = false, color: Color = Ds.Ink) {
     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Text(label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
@@ -554,7 +557,7 @@ private fun Timeline(items: List<JsonObject>) {
 private fun DetailsTab(p: JsonObject, ctx: Context) {
     Section("Customer") {
         Kv("Name", p.s("name")); Kv("Case ID", p.s("customer_ref"))
-        Kv("Phone", p.s("phone")); Kv("Alternate", p.s("alt_phone")); Kv("Email", p.s("email"))
+        Kv("Phone", maskPhone(p.s("phone"))); Kv("Alternate", maskPhone(p.s("alt_phone"))); Kv("Email", p.s("email"))
         Kv("Preferred contact time", p.s("preferred_time"))
     }
     Section("Assignment") {

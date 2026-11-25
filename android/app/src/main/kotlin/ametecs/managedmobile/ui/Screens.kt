@@ -140,7 +140,7 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
                         choices.forEach { n ->
                             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { pick = n }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = pick == n, onClick = { pick = n })
-                                Text(if (n == "smart31") "Smart31 (rotating number)" else "+91 $n", fontSize = 15.sp)
+                                Text(if (n == "smart31") "Smart31 (today's rotating number)" else maskPhone(n) ?: n, fontSize = 15.sp)
                             }
                         }
                     }
@@ -604,7 +604,8 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
     val modes by vm.paymentModes.collectAsState()
     val busy by vm.busy.collectAsState()
     val err by vm.error.collectAsState()
-    val ended = c.state in AppViewModel.TERMINAL
+    // 25 Nov 2026: a SIM call is over once it is "saving" (log / recording are worked out in the background) → feedback now.
+    val ended = c.state in AppViewModel.TERMINAL || (c.route == "sim" && c.state == "saving")
     var code by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var followUp by remember { mutableStateOf<LocalDateTime?>(null) }

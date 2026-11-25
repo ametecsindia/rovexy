@@ -595,7 +595,9 @@ final class CallService
         if ($call->user_id !== $user->id) {
             throw new DomainException('forbidden');
         }
-        if (!$call->isTerminal()) {
+        // 25 Nov 2026: a SIM call is over once the phone is back in ROVEXY; its result (talk time from the call log or the
+        // recording) is still being worked out on the phone. Feedback is accepted now; sim-result fills in the call later.
+        if (!$call->isTerminal() && $call->provider !== 'sim') {
             throw new DomainException('call_not_ended', 'Submit the outcome after the call ends.');
         }
         $dc = DispositionCode::query()->where('code', $code)->where('active', true)->first() ?? throw new DomainException('invalid_disposition');

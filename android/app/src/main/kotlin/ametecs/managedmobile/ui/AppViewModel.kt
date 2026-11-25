@@ -563,7 +563,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Employee's Yes/No when no recording file shows the call was answered. */
-    fun answered(yes: Boolean) { answeredOverride = yes; onResumed() }
+    fun answered(yes: Boolean) {
+        answeredOverride = yes
+        call.value?.takeIf { it.id in feedbackSaved }?.let { call.value = null }   // feedback already saved: just close
+        onResumed()
+    }
 
     /** Activity resumed (back from the dialer) or the employee tapped "Finish call": report the SIM call once. */
     fun onResumed() {
@@ -600,7 +604,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         val customer = customers.value.firstOrNull { it.id.toString() == p.str("customer") }
         fun show(state: String, note: String? = null) {
-            if (id in feedbackSaved) return   // feedback already saved: the upload carries on quietly, the dialog never comes back
+            // Feedback already saved: the rest carries on quietly; only "was it answered?" still needs the employee.
+            if (id in feedbackSaved && state != "ask_answered") return
             call.value = (call.value?.takeIf { it.id == id } ?: CallUi(id, state, 0, null, "", "sim", customer, route = "sim")).copy(state = state, note = note)
         }
         if (System.currentTimeMillis() - since < 2000) return            // resumed before the dialer took over
@@ -731,9 +736,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun watchCall() = viewModelScope.launch {
+        val ctx = getApplication<Application>()
+        var sawPhoneCall = false; var closed = false
         while (true) {
             val cur = call.value ?: return@launch
             delay(2000)
+            // 25 Nov 2026: Click2Call rings this phone. When that phone call ends, close the call here at once (as "Hang up"),
+            // so feedback opens without waiting for the gateway's record; its late record still fills in the real result.
+            if (cur.route == "server" && !closed && cur.state !in TERMINAL) {
+                val inCall = SimCalls.inCall(ctx)
+                if (inCall) sawPhoneCall = true
+                else if (sawPhoneCall) { closed = true; runCatching { g.session.work("POST", "/api/mobile/v1/calls/${cur.id}/hangup") } }
+            }
             val r = runCatching { g.session.work("GET", "/api/mobile/v1/calls/${cur.id}").obj() }.getOrNull() ?: continue
             val state = r.str("state") ?: continue
             // Only touch the call still on screen: feedback saved (call = null) or a new call meanwhile → stop, never reopen it.
