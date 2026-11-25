@@ -664,9 +664,14 @@ fun CallPanel(c: CallUi, vm: AppViewModel) {
             }
             if (recMissing == c.id) OutlinedButton(onClick = { pickRec.launch(SimCalls.RECORDING_TYPES) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) { Text("Select recording file") }
             if (ended) {
+                LaunchedEffect(Unit) { vm.ensureOutcomes() }   // the list loaded at sign-in may have failed (bad network, shared phone)
                 Spacer(Modifier.height(16.dp))
                 Text("CALL FEEDBACK", style = MaterialTheme.typography.labelSmall, color = Ds.Muted)
                 Spacer(Modifier.height(8.dp))
+                if (codes.forType(c.customer?.portfolioType()).isEmpty()) {
+                    Text("Outcomes could not be loaded. Check the internet and tap Retry.", color = Ds.Red, fontSize = 13.sp)
+                    TextButton(onClick = vm::reloadOutcomes) { Text("Retry") }
+                }
                 codes.forType(c.customer?.portfolioType()).forEach { (k, label) ->
                     val on = code == k
                     Row(Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(12.dp))

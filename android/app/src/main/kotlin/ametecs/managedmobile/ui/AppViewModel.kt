@@ -718,6 +718,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private fun applyCall(id: String, r: JsonObject, customer: CachedCustomer?) {
         call.value = CallUi(id, r.str("state") ?: "completed", r.str("talk_seconds")?.toIntOrNull() ?: 0, r.str("ring_seconds")?.toIntOrNull(),
             r.str("recording_status") ?: "", "sim", call.value?.customer ?: customer, route = "sim")
+        if (call.value?.recording in RECORDING_BUSY) watchCall()   // keeps the "Recording: processing" line current
     }
 
     private fun watchCall() = viewModelScope.launch {
@@ -727,7 +728,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val r = runCatching { g.session.work("GET", "/api/mobile/v1/calls/${cur.id}").obj() }.getOrNull() ?: continue
             val state = r.str("state") ?: continue
             call.value = cur.copy(state = state, talk = r.str("talk_seconds")?.toIntOrNull() ?: 0, ring = r.str("ring_seconds")?.toIntOrNull(), recording = r.str("recording_status") ?: "")
-            if (r.str("state") in TERMINAL) return@launch
+            if (state in TERMINAL && r.str("recording_status") !in RECORDING_BUSY) return@launch
         }
     }
 
@@ -902,6 +903,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Outcome codes for "record without a call": promises / payments only. */
     suspend fun ensureOutcomes() { if (dispositions.value.isEmpty()) loadOutcomes() }
+    fun reloadOutcomes() { viewModelScope.launch { loadOutcomes() } }
 
     private suspend fun afterCaseAction(id: Long) {
         runCatching { g.work.syncAll() }
@@ -989,5 +991,5 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         finally { busy.value = false }
     }
 
-    companion object { const val ACTION_OPEN_CHAT = ametecs.managedmobile.push.NotificationActions.ACTION_OPEN_CHAT; val TERMINAL = setOf("completed", "disconnected", "busy", "no_answer", "rejected", "failed", "cancelled", "agent_unanswered") }
+    companion object { const val ACTION_OPEN_CHAT = ametecs.managedmobile.push.NotificationActions.ACTION_OPEN_CHAT; val TERMINAL = setOf("completed", "disconnected", "busy", "no_answer", "rejected", "failed", "cancelled", "agent_unanswered"); val RECORDING_BUSY = setOf("pending", "processing") }
 }
