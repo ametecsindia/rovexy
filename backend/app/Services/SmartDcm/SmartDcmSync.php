@@ -341,6 +341,11 @@ final class SmartDcmSync
         if ($teamId === null && $userId !== null) {
             $teamId = (int) (DB::table('team_user')->where('user_id', $userId)->whereIn('team_id', array_values($teams))->value('team_id') ?? 0) ?: null;
         }
+        // 25 Nov 2026: SmartDCM allocates nobody (unallocated there, or its agent isn't linked) → keep ROVEXY's assignment.
+        // Before, such a row un-assigned a case ROVEXY had given an agent (same account no.), so it vanished from the app.
+        if ($userId === null && $teamId === null && $c) {
+            [$userId, $teamId] = [$c->assigned_user_id, $c->assigned_team_id];
+        }
         $num = fn ($k) => isset($r[$k]) && is_numeric($r[$k]) ? round((float) $r[$k], 2) : null;
         $date = fn ($k) => $this->date($r[$k] ?? null);
         $cut = fn ($k, int $n) => filled($r[$k] ?? null) && is_scalar($r[$k]) ? mb_substr(trim((string) $r[$k]), 0, $n) : null;

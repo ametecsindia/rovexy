@@ -282,4 +282,17 @@ final class SmartDcmIntegrationTest extends TestCase
         $this->as('admin')->postJson('/api/admin/integrations/smartdcm/sync')->assertOk();
         $this->in(fn () => $this->assertSame(7, (int) Smart31Number::query()->where('number', '8040009999')->value('calls')));
     }
+
+    /** 25 Nov 2026: a case ROVEXY gave an agent keeps that agent when SmartDCM sends the same account no. unallocated. */
+    public function test_unallocated_smartdcm_case_keeps_the_rovexy_assignment(): void
+    {
+        $id = $this->in(fn () => Customer::query()->create(['customer_ref' => 'RAR318', 'name' => 'Alams', 'phone' => '+919876543299', 'assigned_user_id' => $this->u['emp']->id])->id);
+        $this->dcm['cases']['data'][] = ['id' => 9010, 'account_no' => 'RAR318', 'customer_name' => 'Alams Paiker', 'mobile' => '9876543299', 'updated_at' => '2026-11-22T09:03:00+05:30'];
+        $this->connect();
+        $this->in(function () use ($id) {
+            $c = Customer::query()->findOrFail($id);
+            $this->assertSame([$this->u['emp']->id, 'Alams Paiker'], [$c->assigned_user_id, $c->name]);   // data updated, agent kept
+            $this->assertSame(2, (int) Customer::query()->whereNotNull('assigned_user_id')->whereIn('customer_ref', ['LN001', 'LN002'])->count());   // SmartDCM allocations still apply
+        });
+    }
 }
