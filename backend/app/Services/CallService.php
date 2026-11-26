@@ -149,9 +149,10 @@ final class CallService
                     \App\Telephony\Click2CallSettings::releaseAttempt($decision['destination']);   // given back, as LeadGER
                 }
                 Audit::record('call.not_placed', $call, ['provider' => $adapter->name(), 'detail' => mb_substr($e->getMessage(), 0, 200)]);
+                // Never placed: nothing to record, so the console shows no "recording failed" for it (26 Nov 2026).
                 $call->forceFill(['state' => 'failed', 'failure_reason' => 'telephony_unavailable', 'ended_at' => now(),
-                    'recording_status' => $decision['record'] ? RecordingState::Failed->value : RecordingState::NotRequired->value])->save();
-                Recording::query()->where('call_id', $call->id)->update(['status' => RecordingState::Failed->value, 'last_error' => 'call not placed']);
+                    'recording_status' => RecordingState::NotRequired->value])->save();
+                Recording::query()->where('call_id', $call->id)->update(['status' => RecordingState::NotRequired->value, 'last_error' => 'call not placed']);
                 throw new DomainException('telephony_unavailable', 'Calling service is unavailable. Try again shortly.');
             }
             $device?->forceFill(['work_state' => 'on_call'])->saveQuietly();
