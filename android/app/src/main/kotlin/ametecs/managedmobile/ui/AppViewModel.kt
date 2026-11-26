@@ -123,33 +123,43 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     /** Phone can't auto-record, or ROVEXY can't reach its files: stop blocking; the employee selects each call's file. */
     fun useManualRecording() { SimCalls.setManual(getApplication()); recordingGate.value = false }
 
-    /** Id of the answered call still without a recording: the call panel and home screen offer "Select recording file".
-     *  ponytail: latest call only (one rec_hunt slot); make it a list if employees need to attach to older calls. */
+    /** Id of the newest answered call still without a recording: the call panel and home screen offer "Select recording file".
+     *  Older calls missing a recording are still looked for in the background (RecordingUpload "rec_hunts"). */
     val recordingMissing = MutableStateFlow<String?>(null)
     private fun refreshRecordingMissing() {
-        recordingMissing.value = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject.str("id") }
+        recordingMissing.value = RecordingUpload.latestHunt(g)?.str("id")
+    }
+
+    /** Uploads every recording waiting on this phone, in the background: the employee can save feedback and call again
+     *  meanwhile. Not uploaded (offline / server busy) → SyncWorker retries, also with the app closed. */
+    private fun uploadRecordings(focusId: String? = null) = viewModelScope.launch {
+        val ctx = getApplication<Application>()
+        try {
+            val done = RecordingUpload.uploadAll(g, ctx)
+            if (focusId != null) done[focusId]?.let { r -> if (call.value?.id == focusId) applyCall(focusId, r, null) }
+            if (done.isNotEmpty()) refreshToday()
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            SyncWorker.syncNow(ctx)   // runs as soon as there is a connection, even with the app closed
+        }
+        refreshRecordingMissing()
     }
 
     fun recordingFilePicked(uri: android.net.Uri) { viewModelScope.launch {
         val ctx = getApplication<Application>()
-        val h = g.store.getString("rec_hunt")?.let { g.api.json.parseToJsonElement(it).jsonObject } ?: return@launch
+        val h = RecordingUpload.latestHunt(g) ?: return@launch
         val id = h.str("id")!!; val since = h.str("since")!!.toLong()
         val f = runCatching { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { SimCalls.copyPicked(ctx, uri, id, since) } }
             .getOrElse { error.value = it.message ?: "Could not read that file."; return@launch }
-        if (finishing || g.store.getString("sim_pending") != null) { error.value = "Another call is still being saved. Try again in a moment."; return@launch }
         SimCalls.setManual(ctx)
-        g.store.putString("sim_pending", buildJsonObject {
-            put("id", id); put("number", h.str("number")!!); put("since", since.toString()); put("stage", "upload"); put("manual", true)
+        RecordingUpload.enqueue(g, buildJsonObject {
+            put("id", id); put("manual", true)
             put("uri", f.uri.toString()); put("name", f.name); put("mime", f.mime ?: "audio/mp4"); f.durationSeconds?.let { put("dur", it) }
-        }.toString())
-        val panelOpen = call.value != null
-        finishing = true
-        try { finishSimCall() } finally { finishing = false }
+        })
         refreshRecordingMissing()
-        if (!panelOpen) {   // attached from the home screen: don't pop the feedback form up again
-            if (recordingMissing.value != null) error.value = call.value?.note
-            call.value = null
-        }
+        call.value?.takeIf { it.id == id }?.let { call.value = it.copy(note = "Uploading the call recording…") }
+        uploadRecordings(id)
     } }
 
     /** Employee picked the folder the Phone app saves recordings in (Xiaomi/Redmi and anything MediaStore can't see). */
@@ -518,6 +528,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             recordingGate.value = true   // no call goes out until the Phone app is proven to record
             return@act
         }
+        RecordingUpload.pending(g)   // moves an old app version's waiting upload out of the way of this call
         if (g.store.getString("sim_pending") != null) throw ApiException(0, "pending", "The previous call is still being saved. Tap \"Finish call\" first.")
         val r = g.session.work("POST", "/api/mobile/v1/calls", buildJsonObject { put("customer_id", c.id); put("which", which); put("route", callingRoute); if (callingRoute == "server" && vmn != null) put("vmn", vmn) }).obj()
         val id = r.str("call_id")!!
@@ -578,23 +589,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if ("sim" in callingRoutes) missingPermissions.value = SimCalls.missingLabels(getApplication())
         refreshRecordingMissing()
         if (screen.value is Screen.Dashboard && !LocationService.started && g.policy.bool("location.enabled")) LocationService.start(getApplication())
-        if (screen.value is Screen.Dashboard && g.store.getString("rec_hunt") != null && g.store.getString("sim_pending") == null) viewModelScope.launch { huntRecording() }
+        if (screen.value is Screen.Dashboard && RecordingUpload.pending(g)) viewModelScope.launch { huntRecording() }
         if (finishing || g.store.getString("sim_pending") == null || screen.value !is Screen.Dashboard) return
         finishing = true
         viewModelScope.launch { try { finishSimCall() } finally { finishing = false } }
     }
 
-    /** Late upload of a recording the phone's recorder saved after the call screen closed. True when done or given up. */
+    /** Late recordings: looks again for files the phone's recorder saved after the call screen closed, and uploads
+     *  whatever is waiting. Runs beside new calls. True when nothing is missing any more (or given up after 24 h). */
     private suspend fun huntRecording(): Boolean {
-        if (g.store.getString("rec_hunt") == null) return true
-        if (g.store.getString("sim_pending") != null || finishing) return false
+        if (!RecordingUpload.pending(g)) return true
         val ctx = getApplication<Application>()
-        SimCalls.rescan(ctx); delay(1500)
-        if (!RecordingUpload.hunt(g, ctx)) return g.store.getString("rec_hunt") == null   // not found yet (or given up after 24 h)
-        finishing = true
-        try { finishSimCall() } finally { finishing = false }
-        refreshRecordingMissing()
-        return true
+        if (RecordingUpload.latestHunt(g) != null) { SimCalls.rescan(ctx); delay(1500); RecordingUpload.hunt(g, ctx) }
+        uploadRecordings().join()
+        return RecordingUpload.latestHunt(g) == null
     }
 
     private suspend fun finishSimCall() {
@@ -610,7 +618,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         if (System.currentTimeMillis() - since < 2000) return            // resumed before the dialer took over
         try {
-            var stage = p.str("stage")
+            val stage = p.str("stage")
             if (stage == "result") {
                 if (answeredOverride == null && call.value?.state == "ask_answered") return   // waiting for the employee's Yes/No
                 // The dialer may not have connected yet: wait up to 20 s for the call to show up before judging it.
@@ -679,30 +687,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }).obj()
                 applyCall(id, r, customer)
                 if (file?.uri?.scheme != "file") own.delete()
+                // The call is saved: from here the recording goes up in the background and the next call can be placed at once.
+                g.store.putString("sim_pending", null)
                 if (bytes != null && file != null) {
-                    // Keep the file reference so a failed upload is retried at the next resume.
-                    g.store.putString("sim_pending", buildJsonObject {
-                        p.forEach { (k, v) -> if (k != "stage") put(k, v) }
-                        put("stage", "upload"); put("uri", file.uri.toString()); put("name", file.name); put("mime", file.mime ?: "audio/mp4"); file.durationSeconds?.let { put("dur", it) }
-                    }.toString())
-                    stage = "upload"
-                } else {
-                    g.store.putString("sim_pending", null)
-                    // Answered but no file yet: keep looking for 30 min (OPPO indexed the file only later) and upload it then.
-                    if (keepRecording && talk > 0) {
-                        g.store.putString("rec_hunt", buildJsonObject { put("id", id); put("number", number); put("since", log?.startedAtMs ?: since) }.toString())
-                        refreshRecordingMissing()
-                        viewModelScope.launch { repeat(10) { delay(30_000); if (huntRecording()) return@launch } }
-                    }
-                    return
+                    RecordingUpload.enqueue(g, buildJsonObject {
+                        put("id", id); put("uri", file.uri.toString()); put("name", file.name); put("mime", file.mime ?: "audio/mp4"); file.durationSeconds?.let { put("dur", it) }
+                    })
+                    show(call.value?.state ?: "completed", "Uploading the call recording…")
+                    uploadRecordings(id)
+                } else if (keepRecording && talk > 0) {
+                    // Answered but no file yet: keep looking (OPPO indexed the file only later) and upload it then — 5 min here,
+                    // then SyncWorker every 15 min for 24 h, even with the app closed.
+                    RecordingUpload.addHunt(g, buildJsonObject { put("id", id); put("number", number); put("since", log?.startedAtMs ?: since) })
+                    refreshRecordingMissing()
+                    viewModelScope.launch { repeat(10) { delay(30_000); if (huntRecording()) return@launch } }
                 }
-            }
-            if (stage == "upload") {
-                show(call.value?.state ?: "completed", "Uploading the call recording…")
-                val waiting = g.store.getString("sim_pending") != null   // false: the background sync already uploaded it
-                val r = RecordingUpload.uploadPending(g, ctx)
-                    ?: run { show(call.value?.state ?: "completed", if (waiting) "The recording file is no longer readable." else "Call recording uploaded."); return }
-                applyCall(id, r, customer)
             }
             refreshToday()
         } catch (e: ApiException) {
@@ -710,9 +709,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             show(call.value?.state ?: "saving", "Could not save the call: ${e.message}")
         } catch (e: java.io.IOException) {
             SyncWorker.syncNow(ctx)   // runs as soon as there is a connection, even with the app closed
-            show(call.value?.state ?: "saving", if (g.store.getString("sim_pending")?.contains("\"upload\"") == true)
-                "No connection. The recording is saved on the phone and uploads automatically when you are back online."
-                else "No connection. The call will be saved when you are back online — tap Finish call.")
+            show(call.value?.state ?: "saving", "No connection. The call will be saved when you are back online — tap Finish call.")
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {

@@ -25,7 +25,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
             if (g.session.hasWorkSession) {
                 // Call recordings first: found late or left over from an offline call — uploaded even with the app closed.
                 RecordingUpload.hunt(g, applicationContext)
-                RecordingUpload.uploadPending(g, applicationContext)
+                RecordingUpload.uploadAll(g, applicationContext)
             }
             if (g.session.hasWorkSession) g.work.syncAll() else g.work.syncPolicy()
             Result.success()

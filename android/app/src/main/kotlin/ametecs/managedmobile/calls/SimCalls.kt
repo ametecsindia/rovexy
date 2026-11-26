@@ -131,9 +131,10 @@ object SimCalls {
         return LogEntry(0, sinceMs)
     }
 
-    /** Newest audio file created since the call started that looks like a call recording of this number. */
-    fun findRecording(ctx: Context, number: String, sinceMs: Long): RecorderFile? {
-        folderRecording(ctx, number, sinceMs)?.let { return it }
+    /** Newest audio file created since the call started that looks like a call recording of this number.
+     *  [skip]: file uris already given to another call (two calls to one customer must not share a file). */
+    fun findRecording(ctx: Context, number: String, sinceMs: Long, skip: Set<String> = emptySet()): RecorderFile? {
+        folderRecording(ctx, number, sinceMs, skip)?.let { return it }
         if (ContextCompat.checkSelfPermission(ctx, audioPermission) != PackageManager.PERMISSION_GRANTED) return null
         val digits = number.filter(Char::isDigit).takeLast(7)
         val base = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
@@ -146,7 +147,7 @@ object SimCalls {
                 val where = (c.getString(5).orEmpty() + "/" + (if (cols.size > 6) c.getString(6).orEmpty() else "")).lowercase()
                 // OEM folders: MIUI/sound_recorder/call_rec, Recordings/Call, Music/Recordings/Call Recordings, Record/Call …
                 val looksLikeCall = where.contains("call") || name.lowercase().contains("call") || name.filter(Char::isDigit).contains(digits)
-                if (looksLikeCall && c.getLong(4) > 0) {
+                if (looksLikeCall && c.getLong(4) > 0 && ContentUris.withAppendedId(base, c.getLong(0)).toString() !in skip) {
                     return RecorderFile(ContentUris.withAppendedId(base, c.getLong(0)), name, c.getString(2), (c.getLong(3) / 1000).toInt().takeIf { it > 0 }, c.getLong(4))
                 }
             }
@@ -284,8 +285,8 @@ object SimCalls {
     }
 
     /** The call's recording from the chosen folder: the newest file naming this number, else the newest file since the call. */
-    private fun folderRecording(ctx: Context, number: String, sinceMs: Long): RecorderFile? {
-        val files = folderFiles(ctx, sinceMs - 5_000).map { it.first }.ifEmpty { return null }
+    private fun folderRecording(ctx: Context, number: String, sinceMs: Long, skip: Set<String> = emptySet()): RecorderFile? {
+        val files = folderFiles(ctx, sinceMs - 5_000).map { it.first }.filter { it.uri.toString() !in skip }.ifEmpty { return null }
         val digits = number.filter(Char::isDigit).takeLast(7)
         val f = files.firstOrNull { it.name.filter(Char::isDigit).contains(digits) } ?: files.first()
         return f.copy(durationSeconds = durationOf(ctx, f.uri))
