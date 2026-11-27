@@ -36,6 +36,7 @@ final class Licensing
         'media' => 'Live screen and camera sessions',
         'integrations' => 'SmartPRS / SmartEPT integration',
         'smartdcm' => 'SmartDCM integration: portfolios, allocation, users, calling and results shared with SmartDCM',
+        'smartrmi' => 'SmartRMI: AI analysis of every recorded call (transcript, tone, aggression, compliance risk, score, coaching) and angry-call alerts',
     ];
 
     private ?array $memo = null;

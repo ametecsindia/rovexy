@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useLiveReload } from '../lib/live';
+import { RmiCard } from './Monitoring';
 import { Link, useSearchParams } from 'react-router-dom';
 import { get, post, put, del, fmtDate, fmtSeconds, qs, fileUrl } from '../lib/api';
 import { useAuth } from '../lib/auth';
@@ -17,7 +18,7 @@ export function CallsPage() {
   useLiveReload(calls.reload);
   const emps = useAsync(() => (can('employees.view') ? get('/employees') : Promise.resolve({ data: [] })));
   const codes = useAsync(() => get<any[]>('/disposition-codes'));
-  const [open, setOpen] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(() => Number(params.get('call')) || null);   // ?call=ID (SmartRMI alerts / e-mail link)
   const [deleting, setDeleting] = useState<number | null>(null);
   const [search, setSearch] = useState('');
   const all: any[] | undefined = calls.data?.data;
@@ -98,6 +99,7 @@ function CallDetail({ id, onClose }: { id: number; onClose: () => void }) {
           <Card title="Lifecycle events">
             <Table rows={c.events} columns={[{ key: 'occurred_at', label: 'Time', render: (e: any) => fmtDate(e.occurred_at, me?.company.timezone) }, { key: 'type', label: 'Event' }, { key: 'payload', label: 'Detail', render: (e: any) => e.payload?.cause ?? (e.payload?.source === 'phone_call_log' ? <small>Talk {e.payload.talk}s from the phone's call log{e.payload.diag && Object.keys(e.payload.diag).length > 0 && <><br />{Object.entries(e.payload.diag).map(([k, v]) => <span key={k}>{k.replace(/_/g, ' ')}: <b>{String(v)}</b>; </span>)}</>}</small> : '') }]} />
           </Card>
+          {c.rmi && <RmiCard rmi={c.rmi} />}
           {c.disposition && <Card title="Feedback" actions={c.disposition.payment_mode ? <Link to="/payments">Payments &amp; slips →</Link> : undefined}>
             <p><strong>{c.disposition.code.replace(/_/g, ' ').toLowerCase()}</strong> {c.disposition.notes}</p>
             {c.disposition.amount && <p>{c.disposition.payment_mode ? 'Received' : 'Promised'}: <strong>₹ {Number(c.disposition.amount).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</strong>

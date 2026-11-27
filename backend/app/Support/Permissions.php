@@ -40,6 +40,8 @@ final class Permissions
         'mobile.work' => 'Use the employee mobile app',
         'calls.make' => 'Place customer calls from the mobile app',
         'calls.console' => 'Place Click2Call calls from the admin console',
+        'calls.monitor' => 'Listen in to live Click2Call calls (call snooping)',
+        'rmi.view' => 'View SmartRMI call analysis and alerts',
     ];
 
     public const ROLES = [
@@ -50,7 +52,7 @@ final class Permissions
         ]],
         'supervisor' => ['name' => 'Supervisor', 'permissions' => [
             'devices.view', 'employees.view', 'customers.view', 'customers.import', 'customers.assign', 'calls.view', 'payments.verify', 'recordings.play', 'location.view',
-            'media.screen', 'media.screenshot', 'media.camera', 'chat.use', 'reports.export',
+            'media.screen', 'media.screenshot', 'media.camera', 'chat.use', 'reports.export', 'calls.monitor', 'rmi.view',
         ]],
         'employee' => ['name' => 'Employee', 'permissions' => ['mobile.work', 'calls.make', 'chat.use']],
         // G14: desk telecallers — sign in to the console (e-mail needed) and call their own customers with Click2Call

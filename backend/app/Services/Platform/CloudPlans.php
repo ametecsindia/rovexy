@@ -32,10 +32,10 @@ final class CloudPlans
         return 'cloud-' . $maps . ['none' => '', 'c2c' => '-c2c', 'c2c_smart31' => '-c2c-smart31'][$tel];
     }
 
-    /** Every feature except the two telephony ones (they come with the add-on) and SmartDCM (Super Admin turns it on for SmartDCM clients). */
+    /** Every feature except the two telephony ones (they come with the add-on), SmartDCM and SmartRMI (Super Admin turns those on per client). */
     public static function features(string $tel): array
     {
-        $base = array_values(array_diff(array_keys(Licensing::FEATURES), ['click2call', 'smart31', 'smartdcm']));
+        $base = array_values(array_diff(array_keys(Licensing::FEATURES), ['click2call', 'smart31', 'smartdcm', 'smartrmi']));
         return array_merge($base, ['none' => [], 'c2c' => ['click2call'], 'c2c_smart31' => ['click2call', 'smart31']][$tel]);
     }
 

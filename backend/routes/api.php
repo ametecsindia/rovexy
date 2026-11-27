@@ -368,6 +368,18 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('health', [Admin\SettingsController::class, 'health'])->middleware('perm:system.health');
         // SmartPRS2 / SmartEPT field-force integration (6 Oct 2026).
         Route::get('integrations', [Admin\IntegrationController::class, 'index'])->middleware('perm:system.health');
+        // Call monitoring (27 Nov 2026): live Click2Call calls + listen in (SmartDCM Live calls / Join me), and SmartRMI.
+        Route::get('monitoring/live', [Admin\MonitoringController::class, 'live'])->middleware('perm:calls.monitor');
+        Route::post('monitoring/calls/{id}/join', [Admin\MonitoringController::class, 'join'])->whereNumber('id')->middleware(['perm:calls.monitor', 'feature:click2call', 'throttle:20,1']);
+        Route::get('monitoring/sessions', [Admin\MonitoringController::class, 'sessions'])->middleware('perm:calls.monitor');
+        Route::get('rmi/overview', [Admin\SmartRmiController::class, 'overview'])->middleware(['perm:rmi.view', 'feature:smartrmi']);
+        Route::get('rmi/calls', [Admin\SmartRmiController::class, 'calls'])->middleware(['perm:rmi.view', 'feature:smartrmi']);
+        Route::get('rmi/calls/{callId}', [Admin\SmartRmiController::class, 'show'])->whereNumber('callId')->middleware(['perm:rmi.view', 'feature:smartrmi']);
+        Route::get('rmi/alerts', [Admin\SmartRmiController::class, 'alerts'])->middleware(['perm:rmi.view', 'feature:smartrmi']);
+        Route::post('rmi/alerts/{id}/ack', [Admin\SmartRmiController::class, 'acknowledge'])->whereNumber('id')->middleware(['perm:rmi.view', 'feature:smartrmi']);
+        Route::get('rmi/settings', [Admin\SmartRmiController::class, 'settings'])->middleware('perm:rmi.view');
+        Route::put('rmi/settings', [Admin\SmartRmiController::class, 'saveSettings'])->middleware(['perm:telephony.configure', 'feature:smartrmi']);
+        Route::post('rmi/secret', [Admin\SmartRmiController::class, 'secret'])->middleware(['perm:telephony.configure', 'feature:smartrmi']);
         // SmartDCM two-way integration (23 Nov 2026).
         Route::get('integrations/smartdcm', [Admin\SmartDcmController::class, 'show'])->middleware('perm:system.health');
         Route::put('integrations/smartdcm', [Admin\SmartDcmController::class, 'save'])->middleware('perm:telephony.configure');
@@ -496,6 +508,11 @@ Route::match(['get', 'post'], 'telephony/v1/click2call', $c2cWebhook)->name('tel
 // SmartDCM → ROVEXY (23 Nov 2026): "something changed" webhook (signed) and call recordings (secret key). No session.
 Route::post('integrations/smartdcm/{uuid}/webhook', [\App\Http\Controllers\Integrations\SmartDcmHookController::class, 'webhook'])->name('smartdcm.webhook')->middleware('throttle:telephony');
 Route::get('integrations/smartdcm/{uuid}/recordings/{call}', [\App\Http\Controllers\Integrations\SmartDcmHookController::class, 'recording'])->name('smartdcm.recording')->middleware('throttle:telephony');
+// SmartRMI engine ⇄ ROVEXY (27 Nov 2026): recorded calls to analyse, recordings, results, angry-call alerts. Header X-Api-Key.
+Route::get('integrations/smartrmi/{uuid}/calls', [\App\Http\Controllers\Integrations\SmartRmiHookController::class, 'calls'])->middleware('throttle:telephony');
+Route::get('integrations/smartrmi/{uuid}/recordings/{call}', [\App\Http\Controllers\Integrations\SmartRmiHookController::class, 'recording'])->middleware('throttle:telephony');
+Route::post('integrations/smartrmi/{uuid}/results', [\App\Http\Controllers\Integrations\SmartRmiHookController::class, 'results'])->middleware('throttle:telephony');
+Route::post('integrations/smartrmi/{uuid}/alerts', [\App\Http\Controllers\Integrations\SmartRmiHookController::class, 'alerts'])->middleware('throttle:telephony');
 Route::match(['get', 'post'], 'click2call/webhook', $c2cWebhook)->name('click2call.webhook')->middleware('throttle:telephony');
 Route::post('telephony/webhook', $c2cWebhook)->name('telephony.webhook')->middleware('throttle:telephony');   // LeadGER's call-end URL (OBD guide 4.1)
 // AMAPI Pub/Sub push notifications (OIDC-verified).

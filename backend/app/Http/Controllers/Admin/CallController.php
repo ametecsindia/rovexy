@@ -71,6 +71,9 @@ final class CallController extends Controller
         $out = $c->toArray();
         $out['destination'] = $r->user()->hasPermission('customers.view') ? $c->destination : PhoneNormaliser::mask($c->destination);
         unset($out['recording']['source_path'], $out['recording']['object_key']);
+        // SmartRMI card on the call (27 Nov 2026)
+        $out['rmi'] = $r->user()->hasPermission('rmi.view') && app(\App\Services\Platform\Licensing::class)->has('smartrmi')
+            ? \App\Models\RmiAnalysis::query()->where('call_id', $c->id)->first()?->makeHidden('results') : null;
         return response()->json($out);
     }
 

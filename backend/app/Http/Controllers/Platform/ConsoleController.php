@@ -646,7 +646,7 @@ final class ConsoleController extends Controller
             'clear_secrets' => 'array', 'clear_secrets.*' => Rule::in(PlatformSettings::SECRETS),
             'mail_host' => ['nullable', 'string', 'max:190', 'regex:/^[A-Za-z0-9.-]+$/'], 'mail_port' => 'nullable|integer|min:1|max:65535', 'mail_encryption' => 'in:tls,ssl,none',
             'mail_username' => 'nullable|string|max:190', 'mail_password' => 'nullable|string|max:300', 'mail_from_address' => 'nullable|email|max:190', 'mail_from_name' => 'nullable|string|max:100',
-            'fcm_service_account_json' => 'nullable|string|max:12000', 'c2c_gateway_secret' => 'nullable|string|max:200', 'c2c_crm_secret' => 'nullable|string|max:200'],
+            'fcm_service_account_json' => 'nullable|string|max:12000', 'c2c_gateway_secret' => 'nullable|string|max:200', 'c2c_crm_secret' => 'nullable|string|max:200', 'c2c_conference_url' => 'nullable|url:https|max:255'],
             ['mail_host.regex' => 'SMTP server: a host name like smtp.gmail.com (no http:// or spaces).']);
         if (filled($d['fcm_service_account_json'] ?? null)) {
             \App\Services\PushCredential::store($d['fcm_service_account_json'], 'settings');   // checked first: a bad file is refused (422)

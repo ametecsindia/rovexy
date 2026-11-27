@@ -35,6 +35,11 @@ class Call extends Model
         return $this->hasOne(CallDisposition::class);
     }
 
+    public function rmi(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(RmiAnalysis::class);
+    }
+
     public function customer(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Customer::class);
