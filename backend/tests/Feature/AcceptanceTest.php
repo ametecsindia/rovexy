@@ -758,6 +758,44 @@ final class AcceptanceTest extends TestCase
         $this->assertSame('CALLBACK', \App\Models\CallDisposition::query()->withoutGlobalScopes()->where('call_id', $call->id)->value('code'));
     }
 
+    /** 27 Nov 2026: a hung-up C2C call whose gateway record is missing for >15 min is not written off as failed. */
+    public function test_click2call_hung_up_call_waits_for_a_late_gateway_record(): void
+    {
+        config(['ammp.telephony.routes' => ['sim', 'server'], 'ammp.telephony.driver' => 'click2call', 'ammp.telephony.click2call' => [
+            'start_url' => 'https://sip.telozar.test/api/webrtc/c2c_call', 'cdr_url' => 'https://obd.gateway.test/admin/click2call_data',
+            'gateway_secret' => 'gs', 'did' => '918047000000', 'agent_caller_id' => null, 'webhook_secret' => null, 'timeout' => 15, 'timezone' => 'Asia/Kolkata', 'daily_limit' => 100]]);
+        app(TelephonyManager::class)->swap(new \App\Telephony\Click2CallAdapter(config('ammp.telephony.click2call')));
+        $cdr = null;   // the gateway has no record yet: HTTP 200 + {"status":400}
+        \Illuminate\Support\Facades\Http::fake([
+            'sip.telozar.test/*' => \Illuminate\Support\Facades\Http::response(['status' => 'success', 'message' => 'C2C Call initiated']),
+            'obd.gateway.test/*' => function () use (&$cdr) {
+                return \Illuminate\Support\Facades\Http::response($cdr === null ? ['status' => 400, 'message' => 'Not found'] : ['status' => 200, 'data' => ['response' => json_encode($cdr), 'recording_url' => 'https://rec.gateway.test/r/x.wav']]);
+            },
+            'rec.gateway.test/*' => \Illuminate\Support\Facades\Http::response('RIFF' . str_repeat("\x00", 4000), 200, ['Content-Type' => 'audio/wav']),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $id = $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertCreated()->json('call_id');
+        $m->work('POST', "/api/mobile/v1/calls/{$id}/hangup")->assertOk();
+        $sync = function () use ($id) {
+            \Illuminate\Support\Facades\Cache::flush();
+            $call = app(CurrentCompany::class)->withoutScope(fn () => Call::query()->where('uuid', $id)->first());
+            app(CurrentCompany::class)->run(\App\Models\Company::query()->findOrFail($call->company_id), fn () => app(\App\Services\CallService::class)->syncProvider($call));
+            return $call->fresh();
+        };
+        $this->travel(20)->minutes();
+        $call = $sync();
+        $this->assertSame(['disconnected', 'superseded', 'pending'], [$call->state, $call->failure_reason, $call->recording_status]);   // still waiting
+        $ist = now('Asia/Kolkata');
+        $cdr = ['A_DIAL_STATUS' => 'Connected', 'B_DIAL_STATUS' => 'Connected', 'EVENT_TYPE' => 'Call End',
+            'B_PARTY_CONNECTED_TIME' => $ist->copy()->subSeconds(30)->format('dmYHis'), 'B_PARTY_END_TIME' => $ist->format('dmYHis')];
+        $call = $sync();
+        $this->assertSame(['completed', 30], [$call->state, $call->talk_seconds]);
+    }
+
     public function test_app_crash_note_lands_in_audit_log(): void
     {
         $this->appOnlyMandatory();

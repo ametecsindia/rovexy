@@ -194,10 +194,13 @@ final class Click2CallAdapter implements PolledTelephony
     public function details(Call $call, ?array $payload = null): ?array
     {
         $final = $payload !== null;
+        // A call the employee already closed (Hang up / next call) was placed and may have connected: the gateway's record
+        // can come late, so wait as long as the every-minute poll runs (3 h) before calling it failed. SmartDCM retries for days.
+        $giveUp = now()->subMinutes($call->failure_reason === 'superseded' ? 150 : 15);
         $rec = $final ? ['cdr' => $payload, 'recording_url' => self::recordingUrlIn($payload), 'duration' => null] : $this->record($call);
         if ($rec === null) {
             // No record at all long after the start: the provider never placed the call. End it so it doesn't block calling.
-            if ($call->initiated_at && $call->initiated_at->lt(now()->subMinutes(15))) {
+            if ($call->initiated_at && $call->initiated_at->lt($giveUp)) {
                 return ['terminal' => true, 'state' => 'failed', 'talk' => 0, 'ring' => null, 'started' => null, 'ended' => null,
                     'recording_url' => null, 'cause' => rtrim('C2C_NO_RECORD_' . $this->why, '_')];
             }
@@ -228,7 +231,7 @@ final class Click2CallAdapter implements PolledTelephony
         $terminal = str_contains($event, 'end') || str_contains($event, 'hangup') || $bEnd || $aEnd || ($outcome !== null && $outcome !== 'answered')
             || ($final && $outcome !== null);
         // Still "ringing" 15 minutes after the start: the result will not come any more (kit sweep).
-        if (!$terminal && !$connected && $call->initiated_at && $call->initiated_at->lt(now()->subMinutes(15))) {
+        if (!$terminal && !$connected && $call->initiated_at && $call->initiated_at->lt($giveUp)) {
             return ['terminal' => true, 'state' => 'failed', 'talk' => 0, 'ring' => null, 'started' => null, 'ended' => null,
                 'recording_url' => null, 'cause' => 'C2C_NO_RESULT'];
         }
