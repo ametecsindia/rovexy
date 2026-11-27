@@ -28,7 +28,7 @@ import { LicencePage } from './pages/Licence';
 import { FieldPlanningPage } from './pages/FieldPlanning';
 import { MyCallsPage } from './pages/MyCalls';
 import { EmployeeActivityPage } from './pages/EmployeeActivity';
-import { LiveCallsPage, MonitoringSettingsPage, RmiAlertsPage, RmiCallsPage, RmiOverviewPage } from './pages/Monitoring';
+import { MonitoringSettingsPage, RmiAlertsPage, RmiCallsPage, RmiOverviewPage } from './pages/Monitoring';
 
 type NavItem = { to: string; icon: string; label: string; perm?: string; group: string };
 /** Sidebar: Dashboard on top, then collapsible sections. Order here = order on screen. */
@@ -61,11 +61,10 @@ export const NAV: NavItem[] = [
   { to: '/chat', icon: 'chat', label: 'Messages', perm: 'chat.use', group: 'Supervision' },
   { to: '/screen', icon: 'screen', label: 'Live screen', perm: 'media.screen', group: 'Supervision' },
   { to: '/camera', icon: 'camera', label: 'Camera sessions', perm: 'media.camera', group: 'Supervision' },
-  { to: '/monitoring/live', icon: 'headset', label: 'Live calls (listen in)', perm: 'calls.monitor', group: 'Call monitoring' },
-  { to: '/rmi', icon: 'chart', label: 'SmartRMI overview', perm: 'rmi.view', group: 'Call monitoring' },
-  { to: '/rmi/calls', icon: 'call', label: 'Analysed calls', perm: 'rmi.view', group: 'Call monitoring' },
-  { to: '/rmi/alerts', icon: 'warning', label: 'Angry-call alerts', perm: 'rmi.view', group: 'Call monitoring' },
-  { to: '/monitoring/settings', icon: 'settings', label: 'Monitoring settings', perm: 'rmi.view', group: 'Call monitoring' },
+  { to: '/rmi', icon: 'chart', label: 'Overview', perm: 'rmi.view', group: 'SmartRMI' },
+  { to: '/rmi/calls', icon: 'call', label: 'Analysed calls', perm: 'rmi.view', group: 'SmartRMI' },
+  { to: '/rmi/alerts', icon: 'warning', label: 'Angry-call alerts', perm: 'rmi.view', group: 'SmartRMI' },
+  { to: '/rmi/settings', icon: 'settings', label: 'Settings', perm: 'rmi.view', group: 'SmartRMI' },
   { to: '/licence', icon: 'shield', label: 'Plan & licence', group: 'Administration' },
   { to: '/branding', icon: 'palette', label: 'Company branding', perm: 'branding.manage', group: 'Administration' },
   { to: '/retention', icon: 'clock', label: 'Storage & retention', perm: 'settings.storage', group: 'Administration' },
@@ -74,7 +73,7 @@ export const NAV: NavItem[] = [
   { to: '/smartdcm', icon: 'settings', label: 'SmartDCM', perm: 'system.health', group: 'Administration' },
   { to: '/health', icon: 'warning', label: 'System health', perm: 'system.health', group: 'Administration' },
 ];
-const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', 'Call monitoring': 'headset', Reports: 'chart', Administration: 'settings' };
+const GROUP_ICON: Record<string, string> = { Team: 'people', Calling: 'call', 'Calling configuration': 'settings', Customers: 'contacts', Devices: 'phone', Supervision: 'eye', SmartRMI: 'headset', Reports: 'chart', Administration: 'settings' };
 
 const pref = (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } };
 const save = (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
@@ -330,8 +329,7 @@ export function App() {
           <Route path="/audit" element={<AuditPage />} />
           <Route path="/integrations" element={<IntegrationsPage />} />
           <Route path="/smartdcm" element={<SmartDcmPage />} />
-          <Route path="/monitoring/live" element={<LiveCallsPage />} />
-          <Route path="/monitoring/settings" element={<MonitoringSettingsPage />} />
+          <Route path="/rmi/settings" element={<MonitoringSettingsPage />} />
           <Route path="/rmi" element={<RmiOverviewPage />} />
           <Route path="/rmi/calls" element={<RmiCallsPage />} />
           <Route path="/rmi/alerts" element={<RmiAlertsPage />} />

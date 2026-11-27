@@ -78,21 +78,14 @@ Schedule::call(function () {
     }
 })->dailyAt('01:30')->name('geocode:nightly')->withoutOverlapping();
 
-// Click2Call vouchers (LeadGER daily check): remove numbers the Ametecs licence server deleted and load today's Smart31
-// numbers, for every company with a CRM id and CRM secret key (SmartDCM pulls Smart31 even without a voucher).
-// From 06:10 IST, then hourly until today's check succeeds (CRM down, or today's Smart31 list published late).
+// Click2Call / Smart31 licence (LC) check, every 5 minutes for every company with a CRM id and CRM secret key
+// (SmartDCM dailyValidations, but often): a voucher revoked or expired in the Ametecs LC Manager loses its numbers,
+// numbers the LC deleted go, and today's Smart31 numbers are loaded. Calls also re-check at most every minute (LcGuard).
 Schedule::call(function () {
     foreach (Company::query()->where('status', 'active')->get() as $c) {
-        app(\App\Support\CurrentCompany::class)->run($c, function () use ($c) {
-            $last = (array) ($c->setting('click2call.voucher_sync') ?? []);
-            $doneToday = !empty($last['ok']) && !empty($last['at'])
-                && \Illuminate\Support\Carbon::parse($last['at'])->tz(\App\Support\CurrentCompany::tz())->isToday();
-            if (!$doneToday && \App\Telephony\VoucherService::crmId() && \App\Telephony\VoucherService::licenceSecret()) {
-                rescue(fn () => app(\App\Telephony\VoucherService::class)->syncDaily());
-            }
-        });
+        app(\App\Support\CurrentCompany::class)->run($c, fn () => \App\Telephony\LcGuard::refresh(true));
     }
-})->hourlyAt(10)->between('6:00', '20:00')->timezone('Asia/Kolkata')->name('vouchers:daily')->withoutOverlapping();
+})->everyFiveMinutes()->name('vouchers:lc-check')->withoutOverlapping();
 
 // On-prem install: check the licence with the licence server every night (keeps the last verdict when it can't be reached).
 Schedule::call(fn () => app(\App\Services\Licensing\LicenceClient::class)->check())

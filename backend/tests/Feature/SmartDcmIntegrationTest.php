@@ -141,12 +141,11 @@ final class SmartDcmIntegrationTest extends TestCase
             $this->assertSame('1133', $this->a->fresh()->setting('click2call.crm_id'));
             $this->assertSame('choice', $this->a->fresh()->setting('click2call.mode'));
             $v = Vmn::query()->firstOrFail();
-            $this->assertSame(['8040001111', [$team->id], true], [$v->virtual_number, $v->team_ids, $v->webrtc]);
+            $this->assertSame(['8040001111', [$team->id], false], [$v->virtual_number, $v->team_ids, $v->webrtc]);   // WebRTC is not offered in ROVEXY
             $this->assertSame('smartdcm', Smart31Number::query()->value('source'));
         });
         $show = $this->as('admin')->getJson('/api/admin/integrations/smartdcm')->assertOk();
         $this->assertSame(['teams' => 1, 'users' => 2, 'portfolios' => 1, 'cases' => 2], $show->json('linked'));
-        $this->assertTrue($show->json('webrtc'));
         $this->assertSame('Dcm Admin', $show->json('unmatched_users.0.name'));
 
         // Next sync asks only for what changed; a withdrawn case is withdrawn, and nothing is echoed back to SmartDCM.
@@ -232,28 +231,6 @@ final class SmartDcmIntegrationTest extends TestCase
         $this->in(fn () => \App\Models\Recording::query()->create(['call_id' => $call->id, 'status' => 'pending']));
         $this->getJson("/api/integrations/smartdcm/{$uuid}/recordings/{$call->uuid}", ['X-Api-Key' => 'wrong'])->assertStatus(401);
         $this->getJson("/api/integrations/smartdcm/{$uuid}/recordings/{$call->uuid}", ['X-Api-Key' => $secret])->assertNotFound()->assertJsonPath('status', 'pending');
-    }
-
-    public function test_telecaller_calls_in_the_browser_through_smartdcm_webrtc(): void
-    {
-        $this->connect();
-        $this->in(function () {
-            $p = \App\Models\PolicyProfile::query()->first();
-            $v = \App\Models\PolicyVersion::query()->where('profile_id', $p->id)->first();
-            $v->forceFill(['settings' => $v->settings + ['calling.hours' => ['days' => [1, 2, 3, 4, 5, 6, 7], 'start' => '00:00', 'end' => '23:59']]])->save();
-            $this->a->forceFill(['settings' => array_replace_recursive($this->a->fresh()->settings ?? [], ['calling_access' => ['click2call' => 'everyone']])])->save();
-        });
-        $id = $this->in(fn () => Customer::query()->where('customer_ref', 'LN001')->value('id'));
-        $list = $this->as('emp')->getJson('/api/admin/my/customers')->assertOk()->assertJsonPath('can_webrtc', true);
-        $this->assertStringStartsWith('••••••', $list->json('data.0.phone'));
-        $r = $this->as('emp')->postJson("/api/admin/my/customers/{$id}/webrtc", ['which' => 'primary'])->assertCreated()->json();
-        $this->assertSame(['7001234', '1133_101'], [$r['sip']['dial'], $r['sip']['username']]);   // the browser gets a dial code, not the number
-        $sent = $this->posted['webrtc/calls'][0];
-        $this->assertSame([$r['call_id'], '101', '+919876543210', '9001'], [$sent['ref'], $sent['user_id'], $sent['customer_number'], $sent['case_id']]);
-        $this->assertContains($sent['caller_id'], ['8040002222', '8040001111']);   // Smart31 pool, else the WebRTC number
-        // SmartDCM reports the end: talk time and its recording link (fetched from SmartDCM only).
-        $this->as('emp')->getJson("/api/admin/my/calls/{$r['call_id']}")->assertOk()->assertJsonPath('state', 'completed')->assertJsonPath('talk_seconds', 42);
-        $this->in(fn () => $this->assertSame('https://dcm.test/rec/x.mp3', \App\Models\Recording::query()->where('call_id', Call::query()->where('uuid', $r['call_id'])->value('id'))->value('source_path')));
     }
 
     public function test_bad_data_never_blocks_the_sync_and_admins_are_never_changed(): void

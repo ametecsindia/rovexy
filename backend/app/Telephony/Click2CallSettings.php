@@ -66,7 +66,8 @@ final class Click2CallSettings
 
     /**
      * Company numbers this person may call from (kit VmnService::listFor): voucher numbers flagged Click2Call whose
-     * groups include one of the person's groups. With no voucher numbers at all, the company number (Click2Call page, else .env).
+     * groups include one of the person's groups. With no voucher numbers at all, the company number (Click2Call page, else .env)
+     * — only where the LC Manager is not in charge (no CRM id): there, only numbers the LC still allows are usable (LcGuard).
      * @return list<array{number:string, label:string, available:bool, expires:?string}>
      */
     public static function numbersFor(User $u): array
@@ -74,12 +75,18 @@ final class Click2CallSettings
         $teams = $u->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all();
         $all = \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->get();
         if ($all->isEmpty()) {
+            if (LcGuard::managed()) {
+                return [];   // 27 Nov 2026: no voucher = no Click2Call (SmartDCM: obd_did empty), never the typed company number
+            }
             $did = Click2CallAdapter::normalize((self::stored()['did'] ?? null) ?: config('ammp.telephony.click2call.did'));   // console, else .env C2C_DID
             return $did !== '' ? [['number' => $did, 'label' => '+91' . $did, 'available' => true, 'expires' => null]] : [];
         }
         return $all->filter(fn ($v) => array_intersect(array_map('intval', $v->team_ids ?? []), $teams))
-            ->map(fn ($v) => ['number' => $v->virtual_number, 'label' => '+91' . $v->virtual_number . ($v->isAvailable() ? '' : ' (expired)'),
-                'available' => $v->isAvailable(), 'expires' => $v->expires_at?->toDateString()])->values()->all();
+            ->map(function ($v) {
+                $ok = LcGuard::vmnLicensed($v);
+                return ['number' => $v->virtual_number, 'label' => '+91' . $v->virtual_number . ($ok ? '' : ($v->isAvailable() ? ' (licence not valid)' : ' (expired)')),
+                    'available' => $ok, 'expires' => $v->expires_at?->toDateString()];
+            })->values()->all();
     }
 
     /**
@@ -91,6 +98,7 @@ final class Click2CallSettings
         // 25 Nov 2026: the employee picks a voucher number or "smart31" in the app. Nothing picked (older apps,
         // a single number) keeps the earlier order: Smart31 rotation first when it is on.
         // 27 Nov 2026 (as SmartDCM's dialer): "c2c" = the C2C button — the month's voucher numbers only, never Smart31.
+        LcGuard::refresh();   // 27 Nov 2026: a voucher revoked in the LC Manager stops here, whatever the app still shows
         $c2cOnly = $requested === 'c2c';
         if ($c2cOnly) {
             $requested = null;
@@ -105,7 +113,9 @@ final class Click2CallSettings
         }
         $mine = collect(self::numbersFor($u));
         if ($mine->isEmpty()) {
-            throw new \App\Domain\DomainException('c2c_no_number', 'No Click2Call number is assigned to your group. Ask your administrator (Calling configuration → Numbers & vouchers).');
+            throw new \App\Domain\DomainException('c2c_no_number', LcGuard::managed() && !\App\Models\C2c\Vmn::query()->where('click2call', true)->exists()
+                ? 'Click2Call is not licensed: there is no valid voucher (it may have expired or been revoked). Ask your administrator to add a new voucher.'
+                : 'No Click2Call number is assigned to your group. Ask your administrator (Calling configuration → Numbers & vouchers).');
         }
         $want = Click2CallAdapter::normalize($requested);
         if ($want !== '') {
@@ -114,14 +124,14 @@ final class Click2CallSettings
                 throw new \App\Domain\DomainException('c2c_number_not_yours', "+91{$want} is not configured for Click2Call for your account. Choose a number from your list.");
             }
             if (!$row['available']) {
-                throw new \App\Domain\DomainException('c2c_number_expired', "Click2Call number +91{$want} expired on {$row['expires']}. Choose another number.");
+                throw new \App\Domain\DomainException('c2c_number_expired', "Click2Call number +91{$want} is no longer licensed" . ($row['expires'] ? " (expiry {$row['expires']})" : '') . '. Choose another number.');
             }
             return $want;
         }
         $default = Click2CallAdapter::normalize($u->c2c_default_number);
         $row = ($default !== '' ? $mine->where('available', true)->firstWhere('number', $default) : null) ?? $mine->firstWhere('available', true);
         if (!$row) {
-            throw new \App\Domain\DomainException('c2c_number_expired', 'Your Click2Call numbers have expired. Ask your administrator to add a new voucher.');
+            throw new \App\Domain\DomainException('c2c_number_expired', 'Your Click2Call numbers are no longer licensed (expired or revoked). Ask your administrator to add a new voucher.');
         }
         return $row['number'];
     }
@@ -250,14 +260,25 @@ final class Click2CallSettings
                 // Smart31 numbers from the CRM are allotted per day (SmartDCM smart31_vmn_numbers.usage_date): never reuse yesterday's.
                 ->where(fn ($q) => $q->where('source', '!=', 'voucher')->orWhereNull('source')->orWhereDate('usage_date', $today))
                 ->orderByRaw('last_used_at IS NOT NULL')->orderBy('last_used_at')->orderBy('id')->lockForUpdate()->get()
-                // ponytail: group filter in PHP (team_ids is JSON; pools are tens of numbers). Move to a pivot if pools grow to thousands.
-                ->first(fn ($n) => empty($n->team_ids) || array_intersect(array_map('intval', $n->team_ids), $teams));
+                // ponytail: group + licence filter in PHP (team_ids is JSON; pools are tens of numbers). Move to a pivot if pools grow to thousands.
+                ->first(fn ($n) => (empty($n->team_ids) || array_intersect(array_map('intval', $n->team_ids), $teams)) && LcGuard::smart31Licensed($n));
             if (!$n) {
                 return null;
             }
             $n->forceFill(['last_used_at' => now(), 'calls' => $n->calls + 1])->save();
             return $n->number;
         });
+    }
+
+    /** Is there a licensed Smart31 number for this person right now (without taking it)? */
+    public static function smart31Available(User $u): bool
+    {
+        if (!self::smart31On() || !self::allows($u, 'smart31')) {
+            return false;
+        }
+        $teams = $u->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all();
+        return Smart31Number::query()->where('active', true)->get()
+            ->contains(fn ($n) => (empty($n->team_ids) || array_intersect(array_map('intval', $n->team_ids), $teams)) && LcGuard::smart31Licensed($n));
     }
 
     /** Calling routes offered to this person (default first). */
@@ -275,6 +296,13 @@ final class Click2CallSettings
         if ($u) {
             if (self::active() && !(self::allows($u, 'click2call') && self::agentNumber($u))) {
                 $routes = array_values(array_diff($routes, ['server']));   // not allowed, or no phone to ring
+            }
+            // 27 Nov 2026: no licensed number left (voucher expired / revoked in the LC Manager, no Smart31 today) → no Click2Call button.
+            if (in_array('server', $routes, true) && self::active() && LcGuard::managed()) {
+                LcGuard::refresh();
+                if (!collect(self::numbersFor($u))->contains('available', true) && !self::smart31Available($u)) {
+                    $routes = array_values(array_diff($routes, ['server']));
+                }
             }
             if (!self::allows($u, 'sim')) {
                 $routes = array_values(array_diff($routes, ['sim']));

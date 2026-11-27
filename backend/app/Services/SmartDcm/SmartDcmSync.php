@@ -117,11 +117,12 @@ final class SmartDcmSync
                 $keep = [];
                 foreach ((array) $t['numbers'] as $n) {
                     $num = $digits($n['number'] ?? '');
-                    if ($num === '' || isset($keep[$num])) {
+                    // ROVEXY offers Click2Call and Smart31 only (27 Nov 2026): WebRTC-only numbers are not taken.
+                    if ($num === '' || isset($keep[$num]) || (!($n['click2call'] ?? true) && !($n['obd'] ?? false))) {
                         continue;
                     }
                     $keep[$num] = true;
-                    Vmn::query()->updateOrCreate(['virtual_number' => $num], ['click2call' => (bool) ($n['click2call'] ?? true), 'webrtc' => (bool) ($n['webrtc'] ?? false),
+                    Vmn::query()->updateOrCreate(['virtual_number' => $num], ['click2call' => (bool) ($n['click2call'] ?? true), 'webrtc' => false,
                         'obd' => (bool) ($n['obd'] ?? false), 'tc_verified' => (bool) ($n['tc_verified'] ?? false), 'team_ids' => $mapTeams($n['team_ids'] ?? []),
                         'expires_at' => $this->date($n['expires_on'] ?? null)]);
                 }
@@ -131,7 +132,7 @@ final class SmartDcmSync
                 $keep = [];
                 foreach ((array) $smart['numbers'] as $n) {
                     $num = $digits($n['number'] ?? '');
-                    if ($num === '' || isset($keep[$num])) {
+                    if ($num === '' || isset($keep[$num]) || (array_key_exists('c2c', $n) && !$n['c2c'])) {   // WebRTC-only Smart31 numbers are not taken
                         continue;
                     }
                     $keep[$num] = true;
@@ -147,7 +148,7 @@ final class SmartDcmSync
                 Smart31Number::query()->where('source', self::SYSTEM)->whereNotIn('number', array_keys($keep) ?: [''])->delete();
             }
         });
-        $this->saveState(['webrtc' => ['enabled' => !empty($t['webrtc']['enabled'])], 'crm_id' => $t['crm_id'] ?? null]);
+        $this->saveState(['crm_id' => $t['crm_id'] ?? null]);
         $this->log[] = 'calling: ' . count((array) ($t['numbers'] ?? [])) . ' numbers, ' . count((array) ($t['smart31']['numbers'] ?? [])) . ' Smart31';
     }
 

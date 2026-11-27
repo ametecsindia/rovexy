@@ -10,19 +10,16 @@ use App\Models\Recording;
 use App\Models\Role;
 use App\Models\Team;
 use App\Models\User;
-use App\Services\Platform\PlatformSettings;
 use App\Support\CurrentCompany;
 use Database\Seeders\CompanyDefaults;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-/** Call monitoring (listen in to live Click2Call calls, as SmartDCM's Live calls → Join me) and SmartRMI (engine results + angry-call alerts). */
-final class CallMonitoringTest extends TestCase
+/** SmartRMI: engine feed, results, angry-call alerts (call snooping was removed on 27 Nov 2026). */
+final class SmartRmiTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -69,43 +66,6 @@ final class CallMonitoringTest extends TestCase
         return $this->in(fn () => Call::query()->create(['uuid' => (string) Str::uuid(), 'provider' => $provider, 'user_id' => $this->u['emp']->id,
             'destination' => '+919876543210', 'which_number' => 'primary', 'agent_leg' => 'pstn_callback', 'state' => $state, 'initiated_at' => now(),
             'caller_number' => '918040001111', 'provider_call_id' => 'GW-778', 'talk_seconds' => 42, 'recording_status' => 'pending']));
-    }
-
-    public function test_supervisor_lists_live_click2call_calls_and_listens_in(): void
-    {
-        $live = $this->liveCall();
-        $this->liveCall('completed');                       // ended: not live
-        $this->liveCall('answered', 'sim');                 // SIM calls cannot be joined: not listed
-
-        $res = $this->as('sup1')->getJson('/api/admin/monitoring/live')->assertOk()->assertJsonPath('configured', false)->assertJsonCount(1, 'calls');
-        $this->assertSame($live->id, $res->json('calls.0.id'));
-        $this->assertStringNotContainsString('9876543210', json_encode($res->json()));   // customer number masked
-        $this->as('sup2')->getJson('/api/admin/monitoring/live')->assertOk()->assertJsonCount(0, 'calls');   // another team's supervisor sees nothing
-        $this->as('emp')->getJson('/api/admin/monitoring/live')->assertForbidden();
-
-        // Not switched on yet (no Telozar conference URL in Super Admin): a clear message, nothing sent.
-        $this->as('sup1')->postJson("/api/admin/monitoring/calls/{$live->id}/join")->assertStatus(422)->assertJsonFragment(['message' => 'Listening in is not switched on yet: Ametecs has to add Telozar\'s conference API in Super Admin → Settings → Click2Call.']);
-        $this->as('sup2')->postJson("/api/admin/monitoring/calls/{$live->id}/join")->assertNotFound();
-
-        PlatformSettings::set('c2c_conference_url', 'https://sip.telozar.test/api/c2c_conference');
-        $sent = [];
-        $reply = ['status' => 'success', 'message' => 'Conference added'];
-        Http::fake(['sip.telozar.test/*' => function (HttpRequest $r) use (&$sent, &$reply) {
-            $sent[] = $r->data();
-            return Http::response($reply);
-        }]);
-        $this->as('sup1')->postJson("/api/admin/monitoring/calls/{$live->id}/join")->assertOk()->assertJsonPath('ok', true)->assertJsonPath('session.status', 'joined');
-        $this->assertSame(['918040001111', 'GW-778', '9800000011'], [$sent[0]['cli'], $sent[0]['call_id'], $sent[0]['cparty_number']]);
-        $this->assertSame(1, DB::table('call_monitor_sessions')->where('call_id', $live->id)->where('user_id', $this->u['sup1']->id)->where('status', 'joined')->count());
-        $this->assertSame(1, DB::table('audit_events')->where('action', 'call.monitor')->count());
-        $this->assertStringNotContainsString('9800000011', json_encode($this->as('admin')->getJson('/api/admin/monitoring/sessions')->assertOk()->json()));   // listener phone masked
-
-        // The gateway refusing is reported and kept.
-        $reply = ['status' => 'error', 'message' => 'Call Id or DNI is invalid'];
-        $this->as('sup1')->postJson("/api/admin/monitoring/calls/{$live->id}/join")->assertStatus(502)->assertJsonPath('ok', false);
-        // Ended calls cannot be joined.
-        $live->forceFill(['state' => 'completed'])->save();
-        $this->as('sup1')->postJson("/api/admin/monitoring/calls/{$live->id}/join")->assertStatus(422)->assertJsonFragment(['message' => 'This call has already ended.']);
     }
 
     public function test_smartrmi_engine_reads_calls_sends_results_and_angry_alerts(): void

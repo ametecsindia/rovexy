@@ -1,17 +1,14 @@
-# ROVEXY ⇄ SmartRMI engine, and Telozar "listen in" — integration contract (27 Nov 2026)
+# ROVEXY ⇄ SmartRMI engine — integration contract (27 Nov 2026)
 
-ROVEXY now has a **Call monitoring** section: *Live calls (listen in)*, *SmartRMI overview*, *Analysed calls*,
-*Angry-call alerts* and *Monitoring settings*. The screens, data and alerts are built. Two outside pieces plug in:
-
-1. **SmartRMI engine** (the same engine that sends `rmi_status` / `rmi_results` and the angry-call alert to SmartDCM).
-2. **Telozar conference API** (adds a supervisor's phone to a live Click2Call call — SmartDCM did this with Vi CPaaS
-   `clicktocall/callConference`).
+ROVEXY has a **SmartRMI** section: *Overview*, *Analysed calls*, *Angry-call alerts* and *Settings*. The screens, data and
+alerts are built; the **SmartRMI engine** (the same engine that sends `rmi_status` / `rmi_results` and the angry-call alert
+to SmartDCM) plugs in through the four addresses below.
 
 ---
 
 ## 1. SmartRMI engine ⇄ ROVEXY
 
-Each ROVEXY workspace gets its own address and key: **Call monitoring → Monitoring settings → Connect the engine**.
+Each ROVEXY workspace gets its own address and key: **SmartRMI → Settings → Connect the engine**.
 The page shows four addresses like `https://rovexy.app/api/integrations/smartrmi/{uuid}/…` and a key (shown once).
 
 Every request sends the key in the header **`X-Api-Key`**. Wrong key → 401. Unknown address → 404. Workspace without
@@ -70,34 +67,9 @@ Same body as SmartDCM's `/api/angry-call-alert`, plus the call (`call_uuid` or `
   "a_start_time": "2026-11-27 10:41:00", "b_party_no": "9876543210", "duration": 42 }
 ```
 
-ROVEXY keeps the alert (Call monitoring → Angry-call alerts, where a supervisor acknowledges it) and e-mails
+ROVEXY keeps the alert (SmartRMI → Angry-call alerts, where a supervisor acknowledges it) and e-mails
 **"RED ALERT: Angry call detected"** with the recording attached (up to 10 MB) to the agent's team supervisors
-(SmartDCM: the agent's `reporting_to` managers), plus any extra addresses set in Monitoring settings.
+(SmartDCM: the agent's `reporting_to` managers), plus any extra addresses set in SmartRMI → Settings.
 Only one alert per call and kind. Answer: `201 {"status":"alert_queued","alert_id":…,"emailed_to":2}`.
 
----
-
-## 2. Telozar — listen in to a live Click2Call call
-
-**What ROVEXY sends** (Super Admin → Settings → Click2Call → *Conference API URL*), `POST`, JSON, header `Secret-Key`
-= the OBD gateway Secret-Key already used for Click2Call:
-
-```json
-{ "cli": "918040001111", "did": "918040001111", "call_id": "<gateway call id or our ref>", "ref_id": "9b0c…_d_1133_291_1",
-  "cparty_number": "9800000011", "listener_number": "9800000011", "mode": "listen" }
-```
-
-- `cli` / `did` = the company number the call went out on; `call_id` = what Telozar's `c2c_call` answered as the call id
-  (if it answers none, ROVEXY's `ref_id`); `cparty_number` = the supervisor's phone (10 digits) to ring and add **muted**.
-- Success = HTTP 2xx without `"status":"error"` / `"error"`. Anything else is shown to the supervisor as the gateway's message.
-
-**Questions for the Telozar team** (Praveen's replacement):
-1. The URL of the conference / barge / listen API, and its exact fields (the above matches Vi's `callConference`; rename as needed).
-2. Which call id it needs — and **please return it in the `c2c_call` answer** (`call_id`), so ROVEXY can store it.
-3. Can the listener join **muted** (listen only), and optionally **whisper** (agent hears) or **barge** (both hear)?
-4. Auth: the same `Secret-Key` as the OBD gateway, or another key?
-
-Until the URL is saved, *Live calls* lists the calls but the **Listen in** button stays off.
-
-**SIM calls cannot be joined**: Android gives no app the audio of a phone call in progress. Only Click2Call
-calls (placed by the gateway) can be monitored live. SIM calls still get SmartRMI analysis after the call, from the recording.
+SIM and Click2Call calls are both analysed after the call, from the recording.

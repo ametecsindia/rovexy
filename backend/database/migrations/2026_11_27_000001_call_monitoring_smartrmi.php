@@ -6,26 +6,15 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * 27 Nov 2026 — Call monitoring (SmartDCM "Live calls / Join me" snooping) and SmartRMI (AI call analysis + angry-call alerts).
- *  call_monitor_sessions  every time a supervisor asked to listen in to a live Click2Call call (who, which call, which phone, result)
+ * 27 Nov 2026 — SmartRMI (AI call analysis + angry-call alerts).
  *  rmi_analyses           the SmartRMI engine's result per call (main fields pulled out for lists; the engine's JSON kept as sent)
  *  rmi_alerts             angry-call / risk alerts sent by the engine, acknowledged in the console
- *  permissions            calls.monitor (listen in), rmi.view (SmartRMI pages) — given to company admins and supervisors
+ *  permission             rmi.view (SmartRMI pages) — given to company admins and supervisors
+ *  (call snooping was built here first and removed the same day: see 2026_11_27_000002)
  */
 return new class extends Migration {
     public function up(): void
     {
-        Schema::create('call_monitor_sessions', function (Blueprint $t) {
-            $t->id();
-            $t->foreignId('company_id')->constrained()->cascadeOnDelete();
-            $t->foreignId('call_id')->constrained()->cascadeOnDelete();
-            $t->foreignId('user_id')->constrained();              // the supervisor listening in
-            $t->string('listen_number', 20);                      // the phone the gateway rang
-            $t->string('status', 12);                             // joined | failed
-            $t->string('error', 255)->nullable();
-            $t->timestamps();
-            $t->index(['company_id', 'created_at']);
-        });
         Schema::create('rmi_analyses', function (Blueprint $t) {
             $t->id();
             $t->foreignId('company_id')->constrained()->cascadeOnDelete();
@@ -63,7 +52,7 @@ return new class extends Migration {
             $t->index(['company_id', 'acknowledged_at', 'created_at']);
         });
 
-        $new = ['calls.monitor' => 'Listen in to live Click2Call calls (call snooping)', 'rmi.view' => 'View SmartRMI call analysis and alerts'];
+        $new = ['rmi.view' => 'View SmartRMI call analysis and alerts'];
         foreach ($new as $key => $desc) {
             $pid = DB::table('permissions')->where('key', $key)->value('id') ?? DB::table('permissions')->insertGetId(['key' => $key, 'description' => $desc]);
             foreach (DB::table('roles')->whereIn('key', ['company_admin', 'supervisor'])->pluck('id') as $rid) {
@@ -74,11 +63,10 @@ return new class extends Migration {
 
     public function down(): void
     {
-        $ids = DB::table('permissions')->whereIn('key', ['calls.monitor', 'rmi.view'])->pluck('id');
+        $ids = DB::table('permissions')->whereIn('key', ['rmi.view'])->pluck('id');
         DB::table('permission_role')->whereIn('permission_id', $ids)->delete();
         DB::table('permissions')->whereIn('id', $ids)->delete();
         Schema::dropIfExists('rmi_alerts');
         Schema::dropIfExists('rmi_analyses');
-        Schema::dropIfExists('call_monitor_sessions');
     }
 };

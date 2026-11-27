@@ -48,7 +48,7 @@ final class AuthController extends Controller
             'click2call' => in_array('server', \App\Services\CallService::routes($u), true) && \App\Telephony\Click2CallSettings::active() ? [
                 'numbers' => array_values(array_filter(\App\Telephony\Click2CallSettings::numbersFor($u), fn ($n) => $n['available'])),
                 'default' => \App\Telephony\Click2CallAdapter::normalize($u->c2c_default_number) ?: null,
-                'smart31' => \App\Telephony\Click2CallSettings::smart31On() && \App\Telephony\Click2CallSettings::allows($u, 'smart31'),
+                'smart31' => \App\Telephony\Click2CallSettings::smart31Available($u),   // licensed Smart31 number for this person (LcGuard)
             ] : null,
             'sim_recorder' => config('ammp.telephony.sim_recorder') === 'app' ? 'app' : 'phone',
             'today' => (function () use ($u) {

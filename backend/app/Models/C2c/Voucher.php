@@ -14,10 +14,18 @@ class Voucher extends Model
 
     protected $table = 'c2c_vouchers';
 
-    protected $fillable = ['voucher_code', 'numbers', 'smart31_numbers', 'expires_at', 'created_by'];
+    protected $fillable = ['voucher_code', 'numbers', 'smart31_numbers', 'expires_at', 'created_by', 'status', 'last_ok_at', 'checked_at', 'revoked_at', 'status_message'];
 
     protected function casts(): array
     {
-        return ['expires_at' => 'date'];
+        return ['expires_at' => 'date', 'last_ok_at' => 'datetime', 'checked_at' => 'datetime', 'revoked_at' => 'datetime'];
+    }
+
+    /** The LC Manager still allows it: active, not past its expiry day, and confirmed within the grace period. */
+    public function licensed(): bool
+    {
+        return ($this->status ?? 'active') === 'active'
+            && (!$this->expires_at || $this->expires_at->copy()->endOfDay()->gte(now()))
+            && ($this->last_ok_at ?? $this->created_at)?->gte(now()->subHours(\App\Telephony\LcGuard::GRACE_HOURS)) === true;
     }
 }

@@ -2,19 +2,10 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { get, post, put, qs, fmtDate } from '../lib/api';
 import { useAuth } from '../lib/auth';
-import { useLiveReload } from '../lib/live';
-import { Badge, Card, ErrorBox, Field, Initials, Kpi, Modal, Notice, Page, Pager, Table, toast, useAction, useAsync } from '../components/ui';
+import { Badge, Card, ErrorBox, Field, Kpi, Modal, Notice, Page, Pager, Table, toast, useAction, useAsync } from '../components/ui';
 
-/**
- * Call monitoring (27 Nov 2026): Live calls with "Listen in" (SmartDCM Live calls → Join me) and SmartRMI
- * (AI call analysis from the SmartRMI engine + angry-call alerts).
- */
+/** SmartRMI (27 Nov 2026): AI call analysis from the SmartRMI engine + angry-call alerts. */
 
-const since = (iso?: string | null) => {
-  if (!iso) return '—';
-  const s = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
-};
 const tone = (v?: string | null) => {
   const x = (v ?? '').toLowerCase();
   return ['high', 'severe', 'critical', 'rude', 'angry', 'negative'].includes(x) ? 'failed' : ['medium', 'moderate', 'neutral'].includes(x) ? 'pending' : x ? 'completed' : 'muted';
@@ -22,57 +13,13 @@ const tone = (v?: string | null) => {
 const Score = ({ v }: { v?: number | null }) => v == null ? <span className="muted">—</span>
   : <strong style={{ color: v >= 70 ? 'var(--ok, #15803d)' : v >= 40 ? 'var(--warn, #b45309)' : 'var(--bad, #b91c1c)' }}>{Math.round(v)}</strong>;
 
-export function LiveCallsPage() {
-  const { me } = useAuth();
-  const live = useAsync(() => get<any>('/monitoring/live'));
-  useLiveReload(live.reload, ['call.'], 5_000);
-  const [, tick] = useState(0);
-  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
-  const a = useAction();
-  const join = (c: any) => a.run(async () => {
-    const r = await post<any>(`/monitoring/calls/${c.id}/join`);
-    toast(r.message ?? 'Your phone will ring now.');
-    sessions.reload();
-  });
-  const sessions = useAsync(() => get<any>('/monitoring/sessions'));
-  const d = live.data;
-  return (
-    <Page title="Live calls" subtitle="Click2Call calls in progress. Listen in: the gateway rings your phone and adds you to the call silently. Every listen is recorded in the audit log.">
-      <ErrorBox error={live.error ?? a.error} />
-      {d && !d.configured && <Notice tone="warn">Listening in is not switched on yet. Ametecs has to add Telozar's conference API in Super Admin → Settings → Click2Call. You can already see live calls here.</Notice>}
-      {d && !d.listen_number && <Notice tone="warn">Your profile has no phone number, so the gateway cannot ring you. Add it under Branches, teams &amp; people.</Notice>}
-      <Notice>Only Click2Call calls can be joined. SIM calls stay on the agent's phone; Android does not let any app listen to them.</Notice>
-      <Card title={`On a call now (${d?.calls?.length ?? 0})`} actions={<button className="secondary sm" onClick={() => live.reload()}>Refresh</button>}>
-        <Table rows={d?.calls} empty="No Click2Call call in progress." columns={[
-          { key: 'u', label: 'Agent', render: (c: any) => <span className="row"><Initials name={c.user?.name ?? '?'} size={26} /> {c.user?.name}{c.user?.employee_code ? <span className="muted"> · {c.user.employee_code}</span> : null}</span> },
-          { key: 'cust', label: 'Customer', render: (c: any) => c.customer ? <Link to={`/customers/${c.customer.id}`}>{c.customer.name ?? c.customer.customer_ref}</Link> : c.destination_masked },
-          { key: 'n', label: 'Number', render: (c: any) => <span className="code">{c.destination_masked}</span> },
-          { key: 'state', label: 'State', render: (c: any) => <Badge value={c.state} /> },
-          { key: 't', label: 'Duration', align: 'right', render: (c: any) => since(c.answered_at ?? c.initiated_at) },
-          { key: 'go', label: '', align: 'right', render: (c: any) => <button disabled={a.busy || !d?.configured || !d?.listen_number} onClick={() => join(c)}>Listen in</button> },
-        ]} />
-      </Card>
-      <Card title="Recent listens">
-        <Table rows={sessions.data?.data} empty="Nobody has listened in yet." columns={[
-          { key: 'created_at', label: 'When', render: (s: any) => fmtDate(s.created_at, me?.company.timezone) },
-          { key: 'by', label: 'Listened by', render: (s: any) => s.user?.name },
-          { key: 'agent', label: 'Agent', render: (s: any) => s.call?.user?.name ?? '—' },
-          { key: 'cust', label: 'Customer', render: (s: any) => s.call?.customer?.name ?? s.call?.customer?.customer_ref ?? '—' },
-          { key: 'phone', label: 'Rang', render: (s: any) => <span className="code">{s.listen_masked}</span> },
-          { key: 'status', label: 'Result', render: (s: any) => <Badge value={s.status === 'joined' ? 'completed' : 'failed'} label={s.status === 'joined' ? 'joined' : (s.error ?? 'failed')} /> },
-        ]} />
-      </Card>
-    </Page>
-  );
-}
-
 function useRmiSettings() {
   return useAsync(() => get<any>('/rmi/settings'));
 }
 
 function RmiGate({ s, children }: { s: ReturnType<typeof useRmiSettings>; children: ReactNode }) {
   if (s.data && !s.data.licensed) return <Notice tone="warn">SmartRMI is not in your plan. Contact Ametecs to add it (Plan &amp; licence).</Notice>;
-  return <>{s.data && !s.data.connected && <Notice>The SmartRMI engine is not connected yet. Call monitoring → Settings shows the engine's address and key.</Notice>}{children}</>;
+  return <>{s.data && !s.data.connected && <Notice>The SmartRMI engine is not connected yet. SmartRMI → Settings shows the engine's address and key.</Notice>}{children}</>;
 }
 
 function Range({ f, setF }: { f: any; setF: (x: any) => void }) {
@@ -230,15 +177,9 @@ export function MonitoringSettingsPage() {
   const edit = can('telephony.configure');
   const d = s.data;
   return (
-    <Page title="Call monitoring settings" subtitle="Listening in to live calls and the SmartRMI engine connection.">
+    <Page title="SmartRMI settings" subtitle="The SmartRMI engine connection and who gets angry-call alerts.">
       <ErrorBox error={s.error ?? a.error} />
       {d && <>
-        <Card title="Listen in (live calls)">
-          {d.monitor_configured
-            ? <Notice tone="ok">Switched on. Supervisors with "Listen in to live Click2Call calls" can join from Call monitoring → Live calls; the gateway rings the phone number on their profile.</Notice>
-            : <Notice tone="warn">Waiting for Ametecs: Telozar's conference API has to be added in Super Admin → Settings → Click2Call.</Notice>}
-          <p className="muted small">Who may listen in: Branches, teams &amp; people → Roles → "Listen in to live Click2Call calls (call snooping)". Supervisors only see their own teams' calls.</p>
-        </Card>
         <Card title="SmartRMI engine">
           {!d.licensed && <Notice tone="warn">SmartRMI is not in your plan.</Notice>}
           {d.licensed && <>

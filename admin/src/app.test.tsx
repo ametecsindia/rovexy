@@ -43,7 +43,7 @@ describe('api client', () => {
 
 describe('navigation', () => {
   it('lists every module and filters by permission', async () => {
-    expect(NAV).toHaveLength(40);   // menu as of 27 Nov 2026 (+ Call monitoring: live calls, SmartRMI overview, analysed calls, alerts, settings; 23 Nov: + SmartDCM; 10 Nov: + Employee activity; 29 Oct: + Field planning, My calls) (portfolios, assignment, address report, payments, calling configuration…)
+    expect(NAV).toHaveLength(39);   // menu as of 27 Nov 2026 (+ Call monitoring: SmartRMI overview, analysed calls, alerts, settings; 23 Nov: + SmartDCM; 10 Nov: + Employee activity; 29 Oct: + Field planning, My calls) (portfolios, assignment, address report, payments, calling configuration…)
     mockFetch((u) => {
       if (u.endsWith('/auth/me')) return { status: 200, body: ME };
       if (u.endsWith('/branding')) return { status: 200, body: { display_name: 'Alpha', logo_url: null } };

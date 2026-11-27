@@ -1012,7 +1012,7 @@ function Settings() {
   const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days', 'demo_calling_from',
     'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
     'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'cloud_setup_base', 'cloud_setup_included_users', 'cloud_setup_per_extra', 'amc_pct', 'quote_validity_days',
-    'price_c2c_user', 'price_smart31_user', 'deposit_per_fos', 'c2c_gateway_secret', 'c2c_crm_secret', 'c2c_conference_url'];
+    'price_c2c_user', 'price_smart31_user', 'deposit_per_fos', 'c2c_gateway_secret', 'c2c_crm_secret'];
   const [clear, setClear] = useState<string[]>([]);
   const submit = (e: FormEvent) => { e.preventDefault(); void a.run(async () => { s.setData(await put('/settings', { ...Object.fromEntries(keys.map((k) => [k, f[k]])), clear_secrets: clear })); setClear([]); setSaved(true); toast('Settings saved'); }); };
   const removeBox = (k: string) => s.data?.[`${k}_set`] ? <label className="row small" style={{ gap: 6 }}><input type="checkbox" style={{ width: 'auto' }} checked={clear.includes(k)} onChange={(e) => setClear(e.target.checked ? [...clear, k] : clear.filter((x) => x !== k))} />Remove the saved value</label> : null;
@@ -1106,7 +1106,6 @@ function Settings() {
           <div className="form-grid">
             <div>{box('c2c_gateway_secret', `OBD gateway Secret-Key ${s.data.c2c_gateway_secret_set ? '(saved)' : '(not set)'}`, undefined, 'password')}{removeBox('c2c_gateway_secret')}</div>
             <div>{box('c2c_crm_secret', `CRM voucher Secret-Key ${s.data.c2c_crm_secret_set ? '(saved)' : '(not set)'}`, undefined, 'password')}{removeBox('c2c_crm_secret')}</div>
-            {box('c2c_conference_url', 'Conference API URL (listen in)', "Telozar's API that adds a supervisor's phone to a live Click2Call call. Blank = Call monitoring → Live calls shows calls but cannot join them.")}
           </div>
         </Card>
         <Card title="Razorpay">

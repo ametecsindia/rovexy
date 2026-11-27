@@ -582,7 +582,7 @@ final class AcceptanceTest extends TestCase
 
         $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '08047000001')->assertJsonPath('numbers.0.source', 'company');
         $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '9811111111', 'customer_number' => '9876543210', 'from' => '8047999999'])
-            ->assertStatus(422)->assertJsonPath('message', 'That number is not one of your Click2Call numbers (or it has expired).');
+            ->assertStatus(422)->assertJsonPath('message', 'That number is not one of your Click2Call numbers (or its licence has expired or been revoked).');
         // A voucher number is offered first and is the default "call from".
         \App\Models\C2c\Vmn::query()->create(['virtual_number' => '8047000101', 'click2call' => true, 'expires_at' => now()->addMonth()]);
         $adm->getJson('/api/admin/calling/click2call/test-call/numbers')->assertJsonPath('numbers.0.number', '8047000101')->assertJsonPath('numbers.0.source', 'voucher')
@@ -635,6 +635,13 @@ final class AcceptanceTest extends TestCase
         $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '6744123493', 'gateway_secret' => " 'tel-secret', ", 'crm_id' => '776'])->assertOk();   // pasted from PHP: quotes dropped
         \Illuminate\Support\Facades\Http::assertSent(fn ($req) => str_contains($req->url(), 'click2call_data/connection-test_d_776_0_1/') && $req->header('Secret-Key')[0] === 'tel-secret');
         $ist = now('Asia/Kolkata');
+        // 27 Nov 2026: with a CRM id the LC Manager is in charge — calls go out only on a licensed voucher number, not the typed one.
+        $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '7322822761', 'customer_number' => '9640875757'])->assertStatus(422)
+            ->assertJsonPath('message', 'No licensed Click2Call number: add a voucher (Company numbers).');
+        app(CurrentCompany::class)->run($this->a, function () {
+            $v = \App\Models\C2c\Voucher::query()->create(['voucher_code' => 'V1', 'numbers' => 1, 'status' => 'active', 'last_ok_at' => now(), 'expires_at' => now()->addMonth()->toDateString()]);
+            \App\Models\C2c\Vmn::query()->create(['virtual_number' => '6744123493', 'click2call' => true, 'team_ids' => [], 'voucher_id' => $v->id, 'expires_at' => $v->expires_at]);
+        });
         $place = fn (string $to) => $adm->postJson('/api/admin/calling/click2call/test-call', ['agent_number' => '7322822761', 'customer_number' => $to])->assertOk()->json('call_id');
 
         // 1) Connected (guide 3.3 spellings), http RecordVoice → stored over https; LeadGER webhook URL + Secret-Key = Gateway secret.
@@ -938,9 +945,9 @@ final class AcceptanceTest extends TestCase
         $this->assertSame([true, true, false], collect($res['numbers'])->pluck('click2call')->all());
         $this->assertSame(1, $res['smart31_from_voucher']);
         // Numbers start with no group → the employee has none (company number no longer used once vouchers exist).
-        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.numbers', []);
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call', null);   // no licensed number for him → no Click2Call button
         $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
-        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422)->assertJsonPath('error', 'c2c_no_number');
+        $m->work('POST', '/api/mobile/v1/calls', ['customer_id' => $cid, 'which' => 'primary', 'route' => 'server'])->assertStatus(422);   // and the server refuses too
         $ids = collect($res['numbers'])->pluck('id', 'virtual_number');
         $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => [$ids['8047000101'], $ids['8047000102']], 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
         $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.numbers.*.number', ['8047000101', '8047000102']);
@@ -1091,7 +1098,8 @@ final class AcceptanceTest extends TestCase
         $adm->postJson('/api/admin/calling/vouchers/sync')->assertStatus(422);   // no CRM id / secret yet
         $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '8047000999', 'gateway_secret' => 'gw', 'crm_id' => 'CRM77', 'lc_secret' => 'lic-secret'])->assertOk();
         $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->assertJsonPath('smart31_from_voucher', 2);
-        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '8040009999', 'team_ids' => []])->assertOk();   // added by hand: never touched
+        // 27 Nov 2026: Smart31 numbers come only from the LC Manager where it is in charge (CRM id set).
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '8040009999', 'team_ids' => []])->assertStatus(422);
 
         // The company gives Smart31 group S31-A to a team: every number of the group gets it.
         $pool = fn () => collect($adm->getJson('/api/admin/calling/smart31')->json('numbers'))->keyBy('number');
@@ -1099,15 +1107,14 @@ final class AcceptanceTest extends TestCase
         $this->assertSame([$team->id], $pool()['1600222001']['team_ids']);
 
         // Daily check: the withdrawn number leaves (kept in history); today's Smart31 list replaces the voucher numbers,
-        // the new S31-A number inherits the group's team, the WebRTC-only one is skipped, the hand-added one stays.
+        // the new S31-A number inherits the group's team, the WebRTC-only one is skipped.
         $res = $adm->postJson('/api/admin/calling/vouchers/sync')->assertOk()->json();
         $this->assertSame(['8047000101'], collect($res['numbers'])->pluck('virtual_number')->all());
         $this->assertStringContainsString('1 number(s) removed, 2 Smart31 number(s) for today', $res['message']);
         $this->assertTrue($res['last_sync']['ok']);
         $p = $pool();
-        $this->assertSame(['8040001111', '8040002222', '8040009999'], $p->keys()->map(fn ($k) => (string) $k)->sort()->values()->all());
+        $this->assertSame(['8040001111', '8040002222'], $p->keys()->map(fn ($k) => (string) $k)->sort()->values()->all());
         $this->assertSame([$team->id], $p['8040002222']['team_ids']);
-        $this->assertSame('admin', $p['8040009999']['source']);
         app(CurrentCompany::class)->withoutScope(function () {
             $this->assertSame(1, \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->where('virtual_number', '8047000102')->count());
             $this->assertSame(1, \Illuminate\Support\Facades\DB::table('smart31_history')->where('number', '1600222001')->count());
@@ -1122,6 +1129,118 @@ final class AcceptanceTest extends TestCase
         $before = $pool()->keys()->all();
         $this->assertFalse($adm->postJson('/api/admin/calling/vouchers/sync')->assertOk()->json('last_sync.ok'));
         $this->assertSame($before, $pool()->keys()->all());
+    }
+
+    /** 27 Nov 2026: a voucher revoked or expired in the Ametecs LC Manager stops Click2Call and Smart31 at once — on the server, whatever the app shows. */
+    public function test_lc_revoked_or_expired_voucher_stops_click2call_and_smart31(): void
+    {
+        config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);
+        app(TelephonyManager::class)->swap(null);
+        $today = now()->toDateString();
+        $lc = ['voucher' => ['status' => 200, 'deleted' => []], 'smart31' => ['status' => 200, 'vmn_details' => [['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-A']]], 'down' => false];
+        $started = [];
+        \Illuminate\Support\Facades\Http::fake([
+            'lc.ametecsindia.com/api/did_voucher/GOOD1/CRM77' => \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['click2call_did' => '8047000101,8047000102',
+                'expiry' => now()->addMonth()->toDateString(), 'smart_groups' => [['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-A']]]]),
+            'lc.ametecsindia.com/api/did_voucher_used/*' => \Illuminate\Support\Facades\Http::response(['status' => 200]),
+            'lc.ametecsindia.com/api/did_voucher_validate/*' => function () use (&$lc) {
+                if ($lc['down']) {
+                    throw new \Illuminate\Http\Client\ConnectionException('down');
+                }
+                return \Illuminate\Support\Facades\Http::response($lc['voucher']);
+            },
+            'lc.ametecsindia.com/api/smart31-details/*' => function () use (&$lc) {
+                if ($lc['down']) {
+                    throw new \Illuminate\Http\Client\ConnectionException('down');
+                }
+                return \Illuminate\Support\Facades\Http::response($lc['smart31']);
+            },
+            'sip.telozar.com/*' => function ($req) use (&$started) {
+                $started[] = $req->data();
+                return \Illuminate\Support\Facades\Http::response(['call_id' => 'TZ' . count($started)]);
+            },
+            'obd.ametecsindia.com/*' => \Illuminate\Support\Facades\Http::response(['status' => 404]),
+        ]);
+        $this->appOnlyMandatory();
+        $m = $this->approvedPhone();
+        $this->login($m);
+        $this->ackAll($m);
+        $adm = $this->admin('alpha');
+        $emp = $this->users['alpha']['emp'];
+        $team = app(CurrentCompany::class)->run($this->a, function () use ($emp) {
+            $t = \App\Models\Team::query()->create(['code' => 'G9', 'name' => 'Field team']);
+            $emp->teams()->attach($t->id, ['company_id' => $this->a->id, 'membership' => 'member']);
+            return $t;
+        });
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'did' => '8047000999', 'gateway_secret' => 'gw', 'crm_id' => 'CRM77', 'lc_secret' => 'lic-secret', 'daily_limit' => 50])->assertOk();
+        $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
+        $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => collect($res['numbers'])->pluck('id')->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
+        $adm->putJson('/api/admin/calling/smart31', ['enabled' => true])->assertOk();
+        $adm->putJson('/api/admin/calling/smart31/groups', ['group_name' => 'S31-A', 'team_ids' => [$team->id]])->assertOk();
+        $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
+        $call = fn (?string $vmn = null) => $m->work('POST', '/api/mobile/v1/calls', array_filter(['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => $vmn]));
+        $end = function () {
+            app(CurrentCompany::class)->withoutScope(fn () => Call::query()->whereNull('ended_at')->update(['state' => 'completed', 'ended_at' => now()]));
+            $this->travel(61)->seconds();   // the LC Manager is asked again at most every minute
+        };
+
+        // Licensed: both buttons, calls go out on the voucher number and on today's Smart31 number.
+        $me = $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call.smart31', true)->json('click2call.numbers.*.number');
+        $this->assertSame(['8047000101', '8047000102'], $me);
+        $call('c2c')->assertCreated();
+        $this->assertSame('8047000101', end($started)['did']);
+        $end();
+        $call('smart31')->assertCreated();
+        $this->assertSame('1600222001', end($started)['did']);
+        $end();
+
+        // A bypass from the console is refused: expiry and Click2Call/WebRTC use come from the LC Manager only.
+        $adm->patchJson('/api/admin/calling/numbers/' . $res['numbers'][0]['id'], ['expires_at' => '2099-12-31', 'usage' => 'webrtc'])->assertOk();
+        $this->assertSame(now()->addMonth()->toDateString(), app(CurrentCompany::class)->withoutScope(fn () => \App\Models\C2c\Vmn::query()->find($res['numbers'][0]['id'])->expires_at->toDateString()));
+        $adm->postJson('/api/admin/calling/smart31/numbers', ['number' => '8040009999'])->assertStatus(422);
+        $this->postJson('/api/admin/my/customers/' . $cid . '/webrtc')->assertNotFound();   // WebRTC calling is gone
+
+        // The LC Manager revokes the voucher and withdraws Smart31: the very next call is refused by the server (old app, cached numbers).
+        $lc['voucher'] = ['status' => 400, 'message' => 'Voucher revoked'];
+        $lc['smart31'] = ['status' => 404, 'message' => 'No Smart31 for this CRM'];
+        $call('c2c')->assertStatus(422)->assertJsonPath('error', 'c2c_not_licensed');
+        $call('8047000102')->assertStatus(422)->assertJsonPath('error', 'c2c_not_licensed');
+        $call('smart31')->assertStatus(422)->assertJsonPath('error', 'c2c_not_licensed');
+        $this->assertCount(2, $started);   // nothing more reached the gateway
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call', null);   // the app's C2C / Smart31 buttons go
+        $num = $adm->getJson('/api/admin/calling/numbers')->assertOk()->assertJsonPath('numbers', [])->assertJsonPath('vouchers.0.status', 'revoked')->json();
+        $this->assertSame('Voucher revoked', $num['vouchers'][0]['status_message']);
+        $this->assertSame(1, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('audit_events')->where('action', 'c2c.voucher_revoked')->count()));
+
+        // A new voucher works again; then it passes its expiry day → the 5-minute check removes its numbers.
+        $lc['voucher'] = ['status' => 200, 'deleted' => []];
+        $lc['smart31'] = ['status' => 200, 'vmn_details' => []];
+        $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
+        $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => collect($res['numbers'])->pluck('id')->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
+        $call('c2c')->assertCreated();
+        $end();
+        $this->travel(32)->days();
+        app(CurrentCompany::class)->run($this->a->fresh(), fn () => \App\Telephony\LcGuard::refresh(true));   // the 5-minute scheduler job
+        $adm->getJson('/api/admin/calling/numbers')->assertJsonPath('numbers', [])->assertJsonPath('vouchers.0.status', 'expired');
+        $this->travelBack();   // (the phone's sign-in would have lapsed after a month; the numbers stay removed)
+        $call('c2c')->assertStatus(422)->assertJsonPath('error', 'c2c_not_licensed');
+
+        // LC Manager unreachable: the last confirmed licence counts for 24 h, then calling stops.
+        $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
+        $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => collect($res['numbers'])->pluck('id')->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
+        $lc['down'] = true;
+        $call('c2c')->assertCreated();   // confirmed minutes ago: still fine while the LC Manager is down
+        $end();
+        app(CurrentCompany::class)->withoutScope(fn () => \App\Models\C2c\Voucher::query()->where('status', 'active')->update(['last_ok_at' => now()->subHours(25)]));
+        $call('c2c')->assertStatus(422)->assertJsonPath('error', 'c2c_number_expired');   // voucher not confirmed for 24 h → C2C stopped
+        $call('smart31')->assertCreated();   // today's Smart31 list was confirmed (also kept for 24 h)
+        $end();
+        app(CurrentCompany::class)->run($this->a->fresh(), function () {
+            $c = app(CurrentCompany::class)->get();
+            $c->forceFill(['settings' => array_replace_recursive($c->settings ?? [], ['click2call' => ['smart31_ok_at' => now()->subHours(25)->toIso8601String()]])])->save();
+        });
+        $call('smart31')->assertStatus(422)->assertJsonPath('error', 'c2c_not_licensed');   // nothing confirmed for 24 h → Click2Call stopped
+        $m->work('GET', '/api/mobile/v1/me')->assertJsonPath('click2call', null);
     }
 
     public function test_click2call_leg_results(): void

@@ -198,7 +198,7 @@ final class Phase34Test extends TestCase
     public function test_smart31_skips_numbers_the_crm_allotted_for_another_day(): void
     {
         $this->in(function () {
-            $this->a->forceFill(['settings' => ($this->a->settings ?? []) + ['smart31' => ['enabled' => true]]])->save();
+            $this->a->forceFill(['settings' => ($this->a->settings ?? []) + ['smart31' => ['enabled' => true], 'click2call' => ['smart31_ok_at' => now()->toIso8601String()]]])->save();
             app(CurrentCompany::class)->run($this->a->fresh(), function () {
                 \App\Models\Smart31Number::query()->create(['number' => '8047000201', 'source' => 'voucher', 'active' => true, 'usage_date' => now()->subDay()->toDateString()]);
                 \App\Models\Smart31Number::query()->create(['number' => '8047000202', 'source' => 'voucher', 'active' => true, 'usage_date' => now()->toDateString()]);

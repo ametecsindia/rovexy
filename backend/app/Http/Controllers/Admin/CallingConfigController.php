@@ -106,8 +106,9 @@ final class CallingConfigController extends Controller
             'crm_id_set' => (bool) \App\Telephony\VoucherService::crmId(),
             'licence_secret_set' => (bool) \App\Telephony\VoucherService::licenceSecret(),
             'numbers' => \App\Models\C2c\Vmn::query()->orderBy('virtual_number')->get()->map(fn ($v) => $v->toArray() + [
-                'groups' => collect($v->team_ids ?? [])->map(fn ($t) => $teams[$t] ?? null)->filter()->values(), 'available' => $v->isAvailable(),
+                'groups' => collect($v->team_ids ?? [])->map(fn ($t) => $teams[$t] ?? null)->filter()->values(), 'available' => \App\Telephony\LcGuard::vmnLicensed($v),
             ]),
+            'lc_managed' => \App\Telephony\LcGuard::managed(),
             'vouchers' => \App\Models\C2c\Voucher::query()->latest('id')->limit(10)->get(),
             'smart31_from_voucher' => Smart31Number::query()->where('source', 'voucher')->count(),
             'last_sync' => app(CurrentCompany::class)->get()->setting('click2call.voucher_sync'),
@@ -132,18 +133,6 @@ final class CallingConfigController extends Controller
         return response()->json(['message' => $res['message']] + $this->numbers()->getData(true));
     }
 
-    /** kit usage values → flags. */
-    private function usage(?string $usage): array
-    {
-        return match ($usage) {
-            'click2call' => ['click2call' => true, 'obd' => false],
-            'obd' => ['click2call' => false, 'obd' => true],
-            'both' => ['click2call' => true, 'obd' => true],
-            'webrtc' => ['webrtc' => true],
-            default => [],
-        };
-    }
-
     private function validTeams(array $ids): array
     {
         return Team::query()->whereIn('id', $ids)->pluck('id')->map(fn ($i) => (int) $i)->values()->all();
@@ -152,9 +141,9 @@ final class CallingConfigController extends Controller
     public function updateNumberVmn(Request $r, int $id)
     {
         $v = \App\Models\C2c\Vmn::query()->findOrFail($id);
-        $d = $r->validate(['team_ids' => 'nullable|array', 'team_ids.*' => 'integer', 'usage' => 'nullable|in:click2call,obd,both,webrtc', 'expires_at' => 'nullable|date']);
-        $v->fill((array_key_exists('team_ids', $d) ? ['team_ids' => $this->validTeams($d['team_ids'] ?? [])] : [])
-            + (array_key_exists('expires_at', $d) ? ['expires_at' => $d['expires_at']] : []) + $this->usage($d['usage'] ?? null))->save();
+        // 27 Nov 2026: what a number may do and until when comes from the LC Manager (voucher); here only its groups change.
+        $d = $r->validate(['team_ids' => 'nullable|array', 'team_ids.*' => 'integer']);
+        $v->fill(array_key_exists('team_ids', $d) ? ['team_ids' => $this->validTeams($d['team_ids'] ?? [])] : [])->save();
         Audit::record('c2c.number_updated', $v, ['number' => $v->virtual_number]);
         return $this->numbers();
     }
@@ -162,12 +151,12 @@ final class CallingConfigController extends Controller
     public function bulkNumbers(Request $r)
     {
         $d = $r->validate(['ids' => 'required|array|min:1', 'ids.*' => 'integer', 'action' => 'required|in:update,delete',
-            'team_ids' => 'nullable|array', 'team_ids.*' => 'integer', 'usage' => 'nullable|in:click2call,obd,both,webrtc']);
+            'team_ids' => 'nullable|array', 'team_ids.*' => 'integer']);
         $q = \App\Models\C2c\Vmn::query()->whereIn('id', $d['ids']);
         if ($d['action'] === 'delete') {
             $q->delete();
         } else {
-            $changes = $this->usage($d['usage'] ?? null) + (!empty($d['team_ids']) ? ['team_ids' => $this->validTeams($d['team_ids'])] : []);
+            $changes = !empty($d['team_ids']) ? ['team_ids' => $this->validTeams($d['team_ids'])] : [];
             $q->get()->each(fn ($v) => $v->fill($changes)->save());
         }
         Audit::record('c2c.numbers_bulk', null, ['action' => $d['action'], 'count' => count($d['ids'])]);
@@ -251,7 +240,9 @@ final class CallingConfigController extends Controller
             'numbers' => Smart31Number::query()->orderBy('number')->get()->map(fn ($n) => $n->toArray() + [
                 'groups' => collect($n->team_ids ?? [])->map(fn ($t) => $teams[$t] ?? null)->filter()->values(),
                 'expired' => $n->expires_on?->isPast() && !$n->expires_on->isToday(),
+                'licensed' => \App\Telephony\LcGuard::smart31Licensed($n),
             ]),
+            'lc_managed' => \App\Telephony\LcGuard::managed(),
         ]);
     }
 
@@ -297,6 +288,7 @@ final class CallingConfigController extends Controller
 
     public function addNumber(Request $r)
     {
+        abort_if(\App\Telephony\LcGuard::managed(), 422, 'Smart31 numbers come from the Ametecs LC Manager for each day; they cannot be added by hand.');
         $d = $this->clean($r->validate($this->numberRules()));
         abort_if(Smart31Number::query()->where('number', $d['number'])->exists(), 422, 'This number is already in the pool.');
         $n = Smart31Number::query()->create($d);
@@ -308,6 +300,9 @@ final class CallingConfigController extends Controller
     {
         $n = Smart31Number::query()->findOrFail($id);
         $d = $this->clean($r->validate($this->numberRules($id)));
+        if (\App\Telephony\LcGuard::managed() || $n->source !== 'admin') {
+            unset($d['number'], $d['expires_on']);   // the number and its validity come from the LC Manager / SmartDCM
+        }
         abort_if(isset($d['number']) && Smart31Number::query()->where('number', $d['number'])->whereKeyNot($id)->exists(), 422, 'This number is already in the pool.');
         $n->fill($d)->save();
         Audit::record('smart31.number_updated', $n, array_keys($d));

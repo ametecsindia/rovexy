@@ -17,11 +17,12 @@ use Illuminate\Support\Facades\Log;
  *  1. GET {licence_url}/api/did_voucher/{code}/{crm_id}  (Secret-Key) → must answer status 200
  *  2. GET {licence_url}/api/did_voucher_used/{code}/{ip} → marks it used
  *  3. One transaction: the company's numbers go to c2c_vmn_history and are REPLACED by the voucher's
- *     (click2call_did / obd_did / webrtc_did / tc_verified, expiry). Groups start empty; the admin assigns them.
+ *     (click2call_did / obd_did / tc_verified, expiry; webrtc_did is not used). Groups start empty; the admin assigns them.
  *     Today's smart_groups numbers replace the previous voucher's Smart31 numbers in the existing Smart31 pool
  *     (numbers the admin added by hand stay); a Smart31 group keeps the teams the company gave it (inheritAssignments).
- * Daily (scheduler, and "Sync with Ametecs CRM"), LeadGER dailyValidations:
- *  4. GET {licence_url}/api/did_voucher_validate/{code}/{crm_id} → numbers in deleted[] are removed (kept in history)
+ * Every 5 minutes, before each Click2Call call (LcGuard) and on "Sync with Ametecs CRM" — LeadGER/SmartDCM dailyValidations:
+ *  4. GET {licence_url}/api/did_voucher_validate/{code}/{crm_id} → status ≠ 200: voucher revoked, all its numbers removed;
+ *     status 200: numbers in deleted[] are removed (kept in history)
  *  5. GET {licence_url}/api/smart31-details/{crm_id} → today's Smart31 numbers replace the voucher numbers in the pool
  */
 final class VoucherService
@@ -98,77 +99,165 @@ final class VoucherService
     private function import(string $code, array $data, ?int $userId): Voucher
     {
         $list = fn (string $key) => array_values(array_filter(array_map(fn ($n) => Click2CallAdapter::normalize($n), explode(',', (string) ($data[$key] ?? '')))));
-        [$c2c, $obd, $webrtc, $verified] = [$list('click2call_did'), $list('obd_did'), $list('webrtc_did'), $list('tc_verified')];
-        $all = array_values(array_unique(array_merge($c2c, $obd, $webrtc)));
+        // ROVEXY offers Click2Call and Smart31 only (27 Nov 2026): webrtc_did numbers are not taken.
+        [$c2c, $obd, $verified] = [$list('click2call_did'), $list('obd_did'), $list('tc_verified')];
+        $all = array_values(array_unique(array_merge($c2c, $obd)));
         $expiry = !empty($data['expiry']) ? date('Y-m-d', strtotime((string) $data['expiry'])) : null;
         $now = now();
 
         $this->archiveVmns(Vmn::query()->orderBy('id')->get(), $now);
         Vmn::query()->delete();
 
-        $voucher = Voucher::query()->create(['voucher_code' => $code, 'numbers' => count($all), 'smart31_numbers' => 0, 'expires_at' => $expiry, 'created_by' => $userId]);
+        Voucher::query()->where('status', 'active')->update(['status' => 'replaced']);   // only the newest voucher's numbers exist
+        $voucher = Voucher::query()->create(['voucher_code' => $code, 'numbers' => count($all), 'smart31_numbers' => 0, 'expires_at' => $expiry, 'created_by' => $userId,
+            'status' => 'active', 'last_ok_at' => now(), 'checked_at' => now()]);
         foreach ($all as $n) {
             Vmn::query()->create(['virtual_number' => $n, 'click2call' => in_array($n, $c2c, true), 'obd' => in_array($n, $obd, true),
-                'webrtc' => in_array($n, $webrtc, true), 'tc_verified' => in_array($n, $verified, true), 'team_ids' => [], 'expires_at' => $expiry, 'voucher_id' => $voucher->id]);
+                'webrtc' => false, 'tc_verified' => in_array($n, $verified, true), 'team_ids' => [], 'expires_at' => $expiry, 'voucher_id' => $voucher->id]);
         }
         $voucher->forceFill(['smart31_numbers' => $this->replaceSmart31((array) ($data['smart_groups'] ?? []))])->save();
+        $this->markSmart31Confirmed();
         return $voucher;
     }
 
     /**
-     * Daily check with the licence server (LeadGER dailyValidations, steps 2–3): numbers the server lists as deleted
-     * leave the company's numbers, and today's Smart31 numbers replace the voucher ones in the pool. A server that
-     * can't be reached changes nothing. The verdict is kept in click2call.voucher_sync for the console.
-     * @return array{ok: bool, message: string, removed: int, smart31: ?int}
+     * Check the voucher and today's Smart31 numbers with the LC Manager now (LcGuard calls this before calls and every
+     * 5 minutes; "Sync with Ametecs CRM" in the console too). As SmartDCM's dailyValidations:
+     *  - voucher past its expiry day, or did_voucher_validate answering status ≠ 200 (revoked / expired / not found in
+     *    the LC Manager) → the voucher is marked revoked/expired and ALL its numbers are removed (kept in history);
+     *  - status 200 → numbers listed in deleted[] are removed; a new expiry date is taken;
+     *  - smart31-details → today's Smart31 numbers replace the voucher ones; an answer refusing the CRM id removes them.
+     * A server that can't be reached changes nothing (LcGuard's grace period then decides). The verdict is kept in
+     * click2call.voucher_sync for the console.
+     * @return array{ok: bool, message: string, removed: int, smart31: ?int, voucher: ?string}
      */
-    public function syncDaily(): array
+    public function verify(): array
     {
         if (!self::crmId() || !self::licenceSecret()) {
-            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id).' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null];
+            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id).' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null, 'voucher' => null];
         }
         $removed = 0;
         $problems = [];
-        if ($voucher = Voucher::query()->latest('id')->first()) {
-            $json = $this->get('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
-            if ($json === null) {
-                $problems[] = 'voucher check failed';
+        $state = null;
+        if ($voucher = Voucher::query()->where('status', 'active')->latest('id')->first()) {
+            $voucher->checked_at = now();
+            if ($voucher->expires_at && $voucher->expires_at->copy()->endOfDay()->lt(now())) {
+                $removed = $this->retire($voucher, 'expired', 'The voucher expired on ' . $voucher->expires_at->toDateString() . '.');
             } else {
-                $gone = collect((array) ($json['deleted'] ?? $json['data']['deleted'] ?? []))
-                    ->map(fn ($n) => Click2CallAdapter::normalize(is_array($n) ? ($n['virtual_number'] ?? $n['vmn'] ?? '') : (string) $n))->filter()->unique()->values()->all();
-                $removed = $gone ? DB::transaction(function () use ($gone) {
-                    $rows = Vmn::query()->whereIn('virtual_number', $gone)->get();
-                    $this->archiveVmns($rows, now());
-                    Vmn::query()->whereIn('id', $rows->pluck('id'))->delete();
-                    return $rows->count();
-                }) : 0;
+                [$json, $reachable] = $this->ask('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
+                if (!$reachable) {
+                    $problems[] = 'the LC Manager did not answer the voucher check';
+                } elseif (self::refused($json)) {
+                    $msg = (string) ($json['message'] ?? $json['msg'] ?? $json['error'] ?? 'The LC Manager no longer accepts this voucher.');
+                    $removed = $this->retire($voucher, self::looksExpired($json) ? 'expired' : 'revoked', mb_substr($msg, 0, 250));
+                } else {
+                    $voucher->last_ok_at = now();
+                    $voucher->status_message = null;
+                    $exp = $json['expiry'] ?? $json['data']['expiry'] ?? null;
+                    if ($exp && strtotime((string) $exp)) {
+                        $voucher->expires_at = date('Y-m-d', strtotime((string) $exp));
+                        Vmn::query()->where('voucher_id', $voucher->id)->update(['expires_at' => $voucher->expires_at]);
+                    }
+                    $gone = collect((array) ($json['deleted'] ?? $json['data']['deleted'] ?? []))
+                        ->map(fn ($n) => Click2CallAdapter::normalize(is_array($n) ? ($n['virtual_number'] ?? $n['vmn'] ?? '') : (string) $n))->filter()->unique()->values()->all();
+                    $removed = $gone ? DB::transaction(function () use ($gone) {
+                        $rows = Vmn::query()->whereIn('virtual_number', $gone)->get();
+                        $this->archiveVmns($rows, now());
+                        Vmn::query()->whereIn('id', $rows->pluck('id'))->delete();
+                        return $rows->count();
+                    }) : 0;
+                }
             }
+            $voucher->save();
+            $state = $voucher->status;
         }
         $smart = null;
-        $json = $this->get('/api/smart31-details/' . rawurlencode((string) self::crmId()));
+        [$json, $reachable] = $this->ask('/api/smart31-details/' . rawurlencode((string) self::crmId()));
         $list = is_array($json) ? ($json['vmn_details'] ?? $json['data']['vmn_details'] ?? null) : null;
-        if (is_array($list)) {
-            $smart = DB::transaction(fn () => $this->replaceSmart31($list));
+        if (is_array($list) || ($reachable && self::refused($json))) {
+            $smart = DB::transaction(fn () => $this->replaceSmart31(is_array($list) ? $list : []));   // refused = no Smart31 numbers for this CRM id
+            $this->markSmart31Confirmed();
         } else {
             $problems[] = 'Smart31 numbers not received';
         }
         $ok = !$problems;
-        $message = ($ok ? 'Checked with Ametecs CRM' : 'Partly checked (' . implode(', ', $problems) . ')')
+        $message = ($state === 'revoked' ? 'The LC Manager has revoked the voucher: its numbers were removed. '
+                : ($state === 'expired' ? 'The voucher has expired: its numbers were removed. ' : ''))
+            . ($ok ? 'Checked with Ametecs CRM' : 'Partly checked (' . implode(', ', $problems) . ')')
             . ": {$removed} number(s) removed" . ($smart !== null ? ", {$smart} Smart31 number(s) for today" : '') . '.';
         $c = app(CurrentCompany::class)->get();
         $s = $c->settings ?? [];
-        data_set($s, 'click2call.voucher_sync', ['at' => now()->toIso8601String(), 'ok' => $ok, 'message' => $message]);
-        $c->forceFill(['settings' => $s])->save();
-        return ['ok' => $ok, 'message' => $message, 'removed' => $removed, 'smart31' => $smart];
+        $prev = data_get($s, 'click2call.voucher_sync');
+        data_set($s, 'click2call.voucher_sync', ['at' => now()->toIso8601String(), 'ok' => $ok, 'message' => $message, 'voucher' => $state]);
+        // The 5-minute check would otherwise save the company row every time; save only when something changed.
+        if ($removed || $prev === null || ($prev['ok'] ?? null) !== $ok || ($prev['voucher'] ?? null) !== $state
+            || \Illuminate\Support\Carbon::parse($prev['at'] ?? '2000-01-01')->lt(now()->subHour())) {
+            $c->forceFill(['settings' => $s])->save();
+        }
+        if ($removed && $state !== 'active') {
+            \App\Support\Audit::record('c2c.voucher_' . $state, $voucher, ['removed' => $removed, 'message' => $voucher->status_message]);
+        }
+        return ['ok' => $ok, 'message' => $message, 'removed' => $removed, 'smart31' => $smart, 'voucher' => $state];
     }
 
-    private function get(string $path): ?array
+    /** Kept for callers of the old name ("Sync with Ametecs CRM"). */
+    public function syncDaily(): array
+    {
+        return $this->verify();
+    }
+
+    /** As SmartDCM's helper: anything but status 200 is a refusal (revoked, expired, not found, wrong CRM id). */
+    private static function refused(?array $json): bool
+    {
+        if ($json === null) {
+            return false;
+        }
+        foreach (['revoked', 'is_revoked', 'expired', 'is_expired', 'blocked'] as $k) {
+            if (!empty($json[$k]) || !empty($json['data'][$k])) {
+                return true;
+            }
+        }
+        return (int) ($json['status'] ?? 0) !== 200;
+    }
+
+    private static function looksExpired(array $json): bool
+    {
+        return !empty($json['expired']) || !empty($json['is_expired']) || str_contains(strtolower((string) ($json['message'] ?? '')), 'expir');
+    }
+
+    /** The voucher is no longer valid: every number it gave goes to history and is removed (SmartDCM: delete from obd_did). */
+    private function retire(Voucher $voucher, string $status, string $message): int
+    {
+        $voucher->forceFill(['status' => $status, 'revoked_at' => now(), 'status_message' => $message]);
+        return DB::transaction(function () use ($voucher) {
+            $rows = Vmn::query()->where('voucher_id', $voucher->id)->get();
+            $this->archiveVmns($rows, now());
+            Vmn::query()->whereIn('id', $rows->pluck('id'))->delete();
+            return $rows->count();
+        });
+    }
+
+    private function markSmart31Confirmed(): void
+    {
+        $c = app(CurrentCompany::class)->get();
+        $s = $c->settings ?? [];
+        $prev = data_get($s, 'click2call.smart31_ok_at');
+        if (!$prev || \Illuminate\Support\Carbon::parse($prev)->lt(now()->subMinutes(30))) {   // grace is 24 h: no need to save every check
+            data_set($s, 'click2call.smart31_ok_at', now()->toIso8601String());
+            $c->forceFill(['settings' => $s])->save();
+        }
+    }
+
+    /** @return array{0: ?array, 1: bool} the JSON answer, and whether the LC Manager answered at all (no network error, no 5xx). */
+    private function ask(string $path): array
     {
         try {
-            $json = $this->licence()->get($path)->json();
-            return is_array($json) ? $json : null;
+            $r = $this->licence()->get($path);
+            $json = $r->json();
+            return [is_array($json) ? $json : null, $r->status() < 500 && is_array($json)];
         } catch (\Throwable $e) {
-            Log::warning('[Click2Call] licence server unreachable: ' . $e->getMessage());
-            return null;
+            Log::warning('[Click2Call] LC Manager unreachable: ' . $e->getMessage());
+            return [null, false];
         }
     }
 

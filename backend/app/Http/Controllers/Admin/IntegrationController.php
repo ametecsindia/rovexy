@@ -165,7 +165,7 @@ final class IntegrationController extends Controller
         // Call from: one of the company's Click2Call numbers (voucher numbers first, as real calls use them), never a free-typed one.
         $numbers = collect($this->testCallNumberList($current))->where('available', true);
         $from = isset($d['from']) ? $numbers->firstWhere('number', \App\Telephony\Click2CallAdapter::normalize($d['from'])) : $numbers->first();
-        abort_if(!$from, 422, isset($d['from']) ? 'That number is not one of your Click2Call numbers (or it has expired).' : 'No Click2Call number: add a voucher (Company numbers) or a company number above.');
+        abort_if(!$from, 422, isset($d['from']) ? 'That number is not one of your Click2Call numbers (or its licence has expired or been revoked).' : 'No licensed Click2Call number: add a voucher (Company numbers).');
         $cfg['did'] = $from['number'];
         $adapter = new \App\Telephony\Click2CallAdapter($cfg);
         $h = $adapter->health();
@@ -234,11 +234,12 @@ final class IntegrationController extends Controller
     /** @return list<array{number:string,source:string,available:bool,expires:?string}> voucher numbers, then the typed company number */
     private function testCallNumberList(\App\Support\CurrentCompany $current): array
     {
+        \App\Telephony\LcGuard::refresh();   // test calls follow the same LC rules as real calls (27 Nov 2026)
         $out = \App\Models\C2c\Vmn::query()->where('click2call', true)->orderBy('virtual_number')->get()
             ->map(fn ($v) => ['number' => \App\Telephony\Click2CallAdapter::normalize($v->virtual_number), 'source' => 'voucher',
-                'available' => $v->isAvailable(), 'expires' => $v->expires_at?->toDateString()])->unique('number')->values()->all();
+                'available' => \App\Telephony\LcGuard::vmnLicensed($v), 'expires' => $v->expires_at?->toDateString()])->unique('number')->values()->all();
         $typed = \App\Telephony\Click2CallAdapter::normalize(\App\Telephony\Click2CallSettings::stored($current->get())['did'] ?? null);
-        if ($typed !== '' && !in_array($typed, array_column($out, 'number'), true)) {
+        if ($typed !== '' && !\App\Telephony\LcGuard::managed() && !in_array($typed, array_column($out, 'number'), true)) {
             $out[] = ['number' => $typed, 'source' => 'company', 'available' => true, 'expires' => null];
         }
         return $out;

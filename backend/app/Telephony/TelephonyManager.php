@@ -29,15 +29,9 @@ final class TelephonyManager
         };
     }
 
-    /** The adapter that placed this call (a SmartDCM WebRTC call is read back from SmartDCM, whatever the company's Click2Call is). */
+    /** The adapter that placed this call. (SmartDCM WebRTC calling was removed on 27 Nov 2026: ROVEXY offers Click2Call and Smart31 only.) */
     public function forCall(\App\Models\Call $call): TelephonyAdapter
     {
-        if ($call->provider === SmartDcmWebrtcAdapter::PROVIDER && !$this->swapped) {
-            $conn = \App\Models\IntegrationConnection::query()->where('system', 'smartdcm')->first();
-            if ($conn) {
-                return new SmartDcmWebrtcAdapter($conn);
-            }
-        }
         return $this->adapter();
     }
 

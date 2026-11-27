@@ -23,7 +23,7 @@ final class SmartDcmController extends Controller
     public const OPTIONS = [
         'auto_create_users' => true,   // SmartDCM users not found in ROVEXY are created (telecallers, FOS, team leaders, managers)
         'share_passwords' => true,     // same password as SmartDCM (when SmartDCM sends it)
-        'use_calling' => true,         // CRM id, company numbers, Smart31 pool and WebRTC from SmartDCM
+        'use_calling' => true,         // CRM id, company Click2Call numbers and Smart31 pool from SmartDCM
         'send_results' => true,        // outcomes, PTP, payments, calls, visits, notes back to SmartDCM
         'send_allocations' => true,    // re-allocations done in ROVEXY back to SmartDCM
     ];
@@ -39,7 +39,7 @@ final class SmartDcmController extends Controller
             'configured' => $c !== null, 'base_url' => $c?->base_url, 'api_key_hint' => $c ? '••••' . mb_substr($c->api_key, -4) : null,
             'enabled' => (bool) $c?->enabled, 'options' => array_replace(self::OPTIONS, (array) ($c?->options ?? [])),
             'last_status' => $c?->last_status, 'last_ok_at' => $c?->last_ok_at?->toAtomString(),
-            'synced_at' => $c?->state['synced_at'] ?? null, 'crm_id' => $c?->state['crm_id'] ?? null, 'webrtc' => (bool) ($c?->state['webrtc']['enabled'] ?? false),
+            'synced_at' => $c?->state['synced_at'] ?? null, 'crm_id' => $c?->state['crm_id'] ?? null,
             'unmatched_users' => array_values(array_map(fn ($id, $u) => ['id' => (string) $id] + (array) $u, array_keys((array) ($c?->state['unmatched_users'] ?? [])), (array) ($c?->state['unmatched_users'] ?? []))),
             'linked' => ['teams' => (int) ($linked['team'] ?? 0), 'users' => (int) ($linked['user'] ?? 0), 'portfolios' => (int) ($linked['portfolio'] ?? 0), 'cases' => (int) ($linked['case'] ?? 0)],
             'queue' => $queue,

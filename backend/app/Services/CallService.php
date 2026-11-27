@@ -48,6 +48,11 @@ final class CallService
     public function start(User $user, ?ManagedDevice $device, ?int $customerId, string $which, ?string $requestedNumber, ?string $route = null, ?string $vmn = null): Call
     {
         $routes = self::routes($user);
+        // 27 Nov 2026: Click2Call asked for, allowed for this person, but no licensed number left (LcGuard) → say why.
+        if (($route === 'server' || $device === null) && !in_array('server', $routes, true) && \App\Telephony\LcGuard::managed()
+            && \App\Telephony\Click2CallSettings::active() && \App\Telephony\Click2CallSettings::allows($user, 'click2call')) {
+            throw new DomainException('c2c_not_licensed', 'Click2Call is not licensed right now: the voucher has expired or was revoked in the Ametecs LC Manager, and there is no Smart31 number for you today. Ask your administrator to add a new voucher.');
+        }
         if ($device === null) {
             // G14: from the console (no phone): Click2Call only — the telecaller's work phone rings, then the customer.
             $routes = array_values(array_intersect($routes, ['server']));
@@ -159,62 +164,6 @@ final class CallService
             Audit::record('call.started', $call, ['customer_id' => $customer?->id, 'which' => $which, 'from' => $device ? 'phone' : 'console']);
             $customer?->touch();
             return $call;
-        } finally {
-            $lock->release();
-        }
-    }
-
-    /**
-     * SmartDCM WebRTC (23 Nov 2026): a telecaller at the console talks in the browser through the client's SmartDCM.
-     * Same rules as Click2Call from the console (assignment, calling hours, DNC, daily attempts); SmartDCM records.
-     * Returns the call and the one-time SIP session for the browser.
-     * @return array{0: Call, 1: array}
-     */
-    public function startWebrtc(User $user, int $customerId, string $which, \App\Telephony\SmartDcmWebrtcAdapter $adapter): array
-    {
-        $lock = Cache::lock("call-start:{$user->id}", 10);
-        if (!$lock->get()) {
-            throw new DomainException('call_in_progress', 'A call is already being started.');
-        }
-        try {
-            $customer = Customer::query()->whereKey($customerId)->whereNull('withdrawn_at')->first() ?? throw new DomainException('customer_not_assigned', 'Customer is not available.');
-            // Same housekeeping as start(): finished provider calls must not block the next one.
-            Call::query()->where('user_id', $user->id)->whereIn('provider', \App\Telephony\PolledTelephony::PROVIDERS)
-                ->whereNotIn('state', CallLifecycle::TERMINAL)->get()->each(fn (Call $c) => $this->syncProvider($c));
-            Call::query()->where('user_id', $user->id)->where('provider', $adapter->name())->whereNotIn('state', CallLifecycle::TERMINAL)
-                ->where('initiated_at', '<', now()->subMinutes(2))->update(['state' => 'disconnected', 'failure_reason' => 'superseded', 'ended_at' => now()]);
-            $active = Call::query()->where('user_id', $user->id)->whereNotIn('state', CallLifecycle::TERMINAL)->where('initiated_at', '>', now()->subHours(2))->exists();
-            $decision = CallAuthoriser::authorise($this->policies->companyValues(), [
-                'id' => $customer->id, 'phone' => $customer->phone, 'alt_phone' => $customer->alt_phone, 'status' => $customer->status,
-                'assigned_user_id' => $customer->assigned_user_id, 'assigned_team_id' => $customer->assigned_team_id,
-            ], null, $which, [
-                'user_id' => $user->id, 'team_ids' => $user->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all(),
-                'compliant' => true, 'active_call' => $active, 'timezone' => $this->current->get()->timezone,
-            ], new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
-            $callerNumber = \App\Telephony\SmartDcmWebrtcAdapter::callerNumber($user);
-            \App\Telephony\Click2CallSettings::reserveAttempt($user, $decision['destination']);
-            $call = DB::transaction(function () use ($user, $customer, $which, $decision, $adapter) {
-                $call = Call::query()->create([
-                    'uuid' => (string) Str::uuid(), 'provider' => $adapter->name(), 'user_id' => $user->id, 'device_id' => null,
-                    'customer_id' => $customer->id, 'destination' => $decision['destination'], 'which_number' => $which, 'calling_mode' => 'webrtc',
-                    'agent_leg' => 'webrtc', 'state' => 'initiated', 'initiated_at' => now(), 'recording_required' => $decision['record'],
-                    'recording_status' => RecordingState::Pending->value,   // SmartDCM records every call
-                ]);
-                Recording::query()->create(['call_id' => $call->id, 'status' => RecordingState::Pending->value]);
-                return $call;
-            });
-            try {
-                $adapter->originate($call, ['call_id' => $call->uuid, 'customer_e164' => $decision['destination'], 'caller_number' => $callerNumber]);
-            } catch (TelephonyUnavailable $e) {
-                \App\Telephony\Click2CallSettings::releaseAttempt($decision['destination']);
-                Audit::record('call.not_placed', $call, ['provider' => $adapter->name(), 'detail' => mb_substr($e->getMessage(), 0, 200)]);
-                $call->forceFill(['state' => 'failed', 'failure_reason' => 'telephony_unavailable', 'ended_at' => now(), 'recording_status' => RecordingState::NotRequired->value])->save();
-                Recording::query()->where('call_id', $call->id)->update(['status' => RecordingState::NotRequired->value]);
-                throw new DomainException('telephony_unavailable', 'SmartDCM calling is unavailable: ' . $e->getMessage());
-            }
-            Audit::record('call.started', $call, ['customer_id' => $customer->id, 'which' => $which, 'from' => 'console', 'route' => 'webrtc']);
-            $customer->touch();
-            return [$call, $adapter->session];
         } finally {
             $lock->release();
         }
@@ -362,7 +311,7 @@ final class CallService
                     $rec->forceFill(['status' => RecordingState::Processing->value, 'source_path' => $d['recording_url']])->save();
                     $call->forceFill(['recording_status' => RecordingState::Processing->value])->save();
                     DB::afterCommit(fn () => FetchRecording::dispatch($call->company_id, $rec->id));
-                } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes(in_array($call->provider, ['click2call', 'smartdcm_webrtc'], true) ? (int) config('ammp.telephony.click2call.recording_wait_minutes', 60) : 15))) {
+                } elseif ($call->ended_at && $call->ended_at->lt(now()->subMinutes($call->provider === 'click2call' ? (int) config('ammp.telephony.click2call.recording_wait_minutes', 60) : 15))) {
                     $rec->forceFill(['status' => RecordingState::Failed->value, 'last_error' => 'The calling provider returned no recording for this call (is recording enabled on the account?).'])->save();
                     $call->forceFill(['recording_status' => RecordingState::Failed->value])->save();
                 }
@@ -549,16 +498,6 @@ final class CallService
         }
         if (!$call->isTerminal() && $call->provider !== 'sim') {   // SIM calls are hung up on the phone itself
             $this->telephony->forCall($call)->hangup($call, 'NORMAL_CLEARING');
-        }
-        // WebRTC: the browser has already ended the SIP call; a call that never got an answer from SmartDCM is closed here.
-        if ($call->provider === \App\Telephony\SmartDcmWebrtcAdapter::PROVIDER && in_array($call->state, ['initiated', 'ringing'], true)) {
-            $adapter = $this->telephony->forCall($call);
-            $d = $adapter instanceof \App\Telephony\PolledTelephony ? $adapter->details($call) : null;
-            $call = $this->syncProvider($call);
-            // Only when SmartDCM itself says nobody answered (if SmartDCM can't be asked, the poll fills in the real result later).
-            if ($d !== null && !$d['terminal'] && $d['state'] !== 'answered' && !$call->isTerminal()) {
-                $call->forceFill(['state' => 'cancelled', 'failure_reason' => 'hung_up_before_answer', 'ended_at' => now()])->save();
-            }
         }
         // Click2Call has no hang-up API and its gateway record can come minutes late (25 Nov 2026: 8 s to 10 min, or never).
         // "Hang up" closes the call here, in any open state, so the employee can save feedback at once. It is closed as

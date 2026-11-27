@@ -5,13 +5,13 @@ import { Badge, Card, ErrorBox, Field, Notice, Page, Table, useAction, useAsync 
 
 /**
  * Administration → SmartDCM (23 Nov 2026): connect ROVEXY to the company's SmartDCM.
- * From SmartDCM: portfolios, cases and allocation, users and teams, calling (CRM id, numbers, Smart31, WebRTC).
+ * From SmartDCM: portfolios, cases and allocation, users and teams, calling (CRM id, Click2Call numbers, Smart31).
  * To SmartDCM: outcomes, PTPs, payments, calls with recordings, field visits, notes and re-allocations.
  */
 const OPTIONS: [string, string][] = [
   ['auto_create_users', 'Create SmartDCM users that are not in ROVEXY yet (telecallers, FOS, team leaders, managers). Matched first by employee code, e-mail, then mobile.'],
   ['share_passwords', 'Same password as SmartDCM (when SmartDCM shares it). People then sign in to ROVEXY with their SmartDCM password.'],
-  ['use_calling', 'Use SmartDCM’s calling account: CRM id, company numbers, Smart31 pool and WebRTC come from SmartDCM.'],
+  ['use_calling', 'Use SmartDCM’s calling account: CRM id, Click2Call numbers and Smart31 pool come from SmartDCM.'],
   ['send_results', 'Send work done in ROVEXY back to SmartDCM: outcomes, PTPs, payments, calls with recordings, field visits, remarks.'],
   ['send_allocations', 'Send re-allocations made in ROVEXY back to SmartDCM.'],
 ];
@@ -78,7 +78,7 @@ function StatusCard({ d, canEdit, reload }: { d: any; canEdit: boolean; reload: 
       <ul style={{ margin: 0, paddingLeft: 18 }}>
         <li>SmartDCM portfolios appear under Customers → Portfolios; cases keep their SmartDCM allocation.</li>
         <li>SmartDCM users, teams and branches appear under Team → People (same employee code).</li>
-        <li>Click2Call, Smart31 and browser (WebRTC) calls use the SmartDCM calling account and numbers.</li>
+        <li>Click2Call and Smart31 calls use the SmartDCM calling account and numbers.</li>
         <li>Outcomes, PTPs, payments, calls with recordings and field visits go back to the SmartDCM case.</li>
         <li>Each case shows its SmartDCM history in ROVEXY.</li>
       </ul>
@@ -92,7 +92,6 @@ function StatusCard({ d, canEdit, reload }: { d: any; canEdit: boolean; reload: 
         <tr><th>Result</th><td>{d.last_status ?? '—'}</td></tr>
         <tr><th>CRM id</th><td>{d.crm_id ?? '—'}</td></tr>
         <tr><th>Linked</th><td>{d.linked.portfolios} portfolios · {d.linked.cases.toLocaleString('en-IN')} cases · {d.linked.users} users · {d.linked.teams} teams</td></tr>
-        <tr><th>Browser calling (WebRTC)</th><td>{d.webrtc ? <Badge value="ok" label="available" /> : <span className="muted">not offered by SmartDCM</span>}</td></tr>
         <tr><th>Sent to SmartDCM</th><td>waiting {q.pending ?? 0} · delivered {q.sent ?? 0}{q.failed ? ` · rejected ${q.failed}` : ''}</td></tr>
       </tbody></table>
       <p className="muted small">Reads what changed every 5 minutes, and at once when SmartDCM notifies ROVEXY. Results are sent within a minute and retried if SmartDCM is offline.</p>

@@ -61,8 +61,6 @@ final class PlatformSettings
         'price_c2c_user' => '350',
         'price_smart31_user' => '550',
         'deposit_per_fos' => '1000',
-        // call snooping (27 Nov 2026): Telozar's "add a listener to a live Click2Call call" API. Blank = Join is switched off.
-        'c2c_conference_url' => '',
     ];
 
     // c2c_*: Ametecs's Click2Call keys for every workspace (25 Nov 2026) — clients only add vouchers; a company's own saved key still wins.

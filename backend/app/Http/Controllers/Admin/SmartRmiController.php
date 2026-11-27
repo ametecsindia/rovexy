@@ -90,7 +90,7 @@ final class SmartRmiController extends Controller
         return response()->json($a->fresh(['acknowledger:id,name']));
     }
 
-    /** Engine connection + alert options (Call monitoring → Settings). */
+    /** Engine connection + alert options (SmartRMI → Settings). */
     public function settings(Request $r)
     {
         $c = SmartRmi::connection();
@@ -101,7 +101,6 @@ final class SmartRmiController extends Controller
             'connected' => (bool) $c?->enabled, 'has_secret' => (bool) $c?->inbound_secret, 'last_ok_at' => $c?->last_ok_at, 'last_status' => $c?->last_status,
             'endpoints' => $base ? ['calls' => $base . '/calls', 'recording' => $base . '/recordings/{call_uuid}', 'results' => $base . '/results', 'alerts' => $base . '/alerts'] : null,
             'notify_supervisors' => (bool) ($cfg['notify_supervisors'] ?? true), 'alert_emails' => array_values((array) ($cfg['alert_emails'] ?? [])),
-            'monitor_configured' => \App\Services\CallMonitor::configured(),
         ]);
     }
 

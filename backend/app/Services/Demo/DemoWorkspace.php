@@ -731,7 +731,9 @@ final class DemoWorkspace
         $vouchers = [];
         foreach (DB::table('c2c_vouchers')->where('company_id', $src->id)->get() as $v) {
             $vouchers[$v->id] = $this->ins('c2c_vouchers', ['voucher_code' => $v->voucher_code, 'numbers' => $v->numbers, 'smart31_numbers' => $v->smart31_numbers,
-                'expires_at' => $v->expires_at, 'created_at' => $this->day(-70, 12, 0), 'updated_at' => $this->day(-70, 12, 0)]);
+                'expires_at' => $v->expires_at, 'created_at' => $this->day(-70, 12, 0), 'updated_at' => $this->day(-70, 12, 0),
+                // the source's licence state (27 Nov 2026): a revoked voucher stays revoked; the demo re-checks with the LC Manager itself
+                'status' => $v->status ?? 'active', 'last_ok_at' => $v->last_ok_at ?? null, 'revoked_at' => $v->revoked_at ?? null, 'status_message' => $v->status_message ?? null]);
         }
         foreach (DB::table('c2c_vmns')->where('company_id', $src->id)->get() as $v) {
             $this->ins('c2c_vmns', ['virtual_number' => $v->virtual_number, 'click2call' => $v->click2call, 'webrtc' => $v->webrtc, 'obd' => $v->obd, 'tc_verified' => $v->tc_verified,

@@ -231,7 +231,7 @@ function TestCall({ onChange }: { onChange?: () => void }) {
             <select value={fromValue} onChange={(e) => setFrom(e.target.value)} disabled={live}>
               {list.length === 0 && <option value="">No Click2Call number yet</option>}
               {list.map((n) => <option key={n.number} value={n.number} disabled={!n.available}>
-                +91 {fmt(n.number)} · {n.source === 'voucher' ? 'voucher' : 'company'}{n.available ? '' : ' (expired)'}
+                +91 {fmt(n.number)} · {n.source === 'voucher' ? 'voucher' : 'company'}{n.available ? '' : ' (not licensed)'}
               </option>)}
             </select>
           </label>
@@ -375,11 +375,13 @@ function VoucherNumbers() {
           <button disabled={a.busy || !code} onClick={() => a.run(async () => { const r = await post('/calling/vouchers', { voucher_code: code }); setMsg(r.message); setCode(''); await s.reload(); })}>Add voucher</button>
         </div>
         {msg && <Notice tone="ok">{msg}</Notice>}
-        {d?.vouchers?.length > 0 && <p className="muted" style={{ marginTop: 8 }}>Latest: {d.vouchers.slice(0, 3).map((v: any) => `${v.voucher_code} · ${v.numbers} numbers · ${new Date(v.created_at).toLocaleDateString()}`).join('  |  ')}</p>}
+        {d?.vouchers?.[0] && d.vouchers[0].status !== 'active' && d.vouchers[0].status !== 'replaced' && <Notice tone="bad">
+          Voucher {d.vouchers[0].voucher_code} was {d.vouchers[0].status} by the Ametecs LC Manager{d.vouchers[0].revoked_at ? ` on ${new Date(d.vouchers[0].revoked_at).toLocaleString()}` : ''}: its numbers were removed and Click2Call stopped.{d.vouchers[0].status_message ? ` (${d.vouchers[0].status_message})` : ''} Add a new voucher to call again.</Notice>}
+        {d?.vouchers?.length > 0 && <p className="muted" style={{ marginTop: 8 }}>Latest: {d.vouchers.slice(0, 3).map((v: any) => `${v.voucher_code} · ${v.numbers} numbers · ${new Date(v.created_at).toLocaleDateString()} · ${v.status ?? 'active'}`).join('  |  ')}</p>}
         {d?.vouchers?.length > 0 && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
             <button className="secondary" disabled={a.busy} onClick={() => a.run(async () => { const r = await post('/calling/vouchers/sync', {}); setMsg(r.message); await s.reload(); })}>Sync with Ametecs CRM</button>
-            <small className="muted">Checked from 6:10 am, then every hour until it succeeds: numbers withdrawn by Ametecs are removed and today's Smart31 numbers are loaded.
+            <small className="muted">Checked with the Ametecs LC Manager every 5 minutes and before calls: a revoked or expired voucher stops Click2Call, withdrawn numbers are removed and today's Smart31 numbers are loaded.
               {d.last_sync ? ` Last check ${new Date(d.last_sync.at).toLocaleString()}: ${d.last_sync.message}` : ' Not checked yet.'}</small>
           </div>
         )}
@@ -389,7 +391,7 @@ function VoucherNumbers() {
           {d.numbers.length > 0 && <p className="muted">Each number can be used only by the groups listed next to it. To give every Click2Call number to a group at once, use the menu at the top right.</p>}
           <Table rows={d.numbers} empty="No numbers yet. Add your voucher above." columns={[
             { key: 'n', label: 'Number', render: (x: any) => <><strong>+91 {x.virtual_number}</strong>{x.tc_verified && <> <Badge value="active" label="verified" /></>}</> },
-            { key: 'u', label: 'For', render: (x: any) => [x.click2call && 'Click2Call', x.obd && 'OBD', x.webrtc && 'WebRTC'].filter(Boolean).join(', ') || '—' },
+            { key: 'u', label: 'For', render: (x: any) => [x.click2call && 'Click2Call', x.obd && 'OBD'].filter(Boolean).join(', ') || '—' },
             { key: 'g', label: 'Groups that may use it', render: (x: any) => (
               <div className="cc-chips">
                 {x.groups.length === 0 && <span className="muted">Nobody yet</span>}
@@ -397,7 +399,7 @@ function VoucherNumbers() {
                 <GroupPicker teams={t} have={x.team_ids ?? []} onAdd={(id) => setGroups(x, [...(x.team_ids ?? []), id])} />
               </div>
             ) },
-            { key: 'e', label: 'Valid until', render: (x: any) => x.expires_at ? (x.available ? x.expires_at.slice(0, 10) : <Badge value="failed" label={`expired ${x.expires_at.slice(0, 10)}`} />) : '—' },
+            { key: 'e', label: 'Valid until', render: (x: any) => !x.available && x.click2call ? <Badge value="failed" label={x.expires_at && new Date(x.expires_at.slice(0, 10)) < new Date(new Date().toDateString()) ? `expired ${x.expires_at.slice(0, 10)}` : 'licence not valid'} /> : x.expires_at ? x.expires_at.slice(0, 10) : '—' },
             { key: 'x', label: '', render: (x: any) => <button className="ghost" disabled={a.busy} onClick={() => a.run(async () => { await del(`/calling/numbers/${x.id}`); await s.reload(); })}>Remove</button> },
           ]} />
         </Card>
@@ -435,10 +437,11 @@ function Smart31Pool() {
             </div>
           ) },
           { key: 'c', label: 'Calls', render: (x: any) => <>{x.calls}<br /><small className="muted">{x.last_used_at ? `last ${new Date(x.last_used_at).toLocaleString()}` : 'not used yet'}</small></> },
-          { key: 'on', label: 'In rotation', render: (x: any) => x.expired ? <Badge value="failed" label="expired" /> : <Switch on={!!x.active} disabled={a.busy || !d.in_plan} onChange={(on) => upd(x, { active: on })} /> },
+          { key: 'on', label: 'In rotation', render: (x: any) => x.expired ? <Badge value="failed" label="expired" /> : !x.licensed ? <Badge value="failed" label={x.source === 'voucher' ? 'not licensed today' : 'not licensed (added by hand)'} /> : <Switch on={!!x.active} disabled={a.busy || !d.in_plan} onChange={(on) => upd(x, { active: on })} /> },
           { key: 'x', label: '', render: (x: any) => <button className="ghost" disabled={a.busy} onClick={() => a.run(async () => { await del(`/calling/smart31/numbers/${x.id}`); await s.reload(); })}>Remove</button> },
         ]} />
-        {d.in_plan && (
+        {d.lc_managed && <p className="muted small">Smart31 numbers come from the Ametecs LC Manager for each day; numbers added by hand are not used for calls.</p>}
+        {d.in_plan && !d.lc_managed && (
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <input value={n.number} placeholder="Add a number: 1600XXXXXX or 80XXXXXXXX" onChange={(e) => setN({ ...n, number: e.target.value })} style={{ flex: 2 }} />
             <input value={n.label} placeholder="Label (optional)" onChange={(e) => setN({ ...n, label: e.target.value })} style={{ flex: 1 }} />

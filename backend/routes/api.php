@@ -311,7 +311,6 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::prefix('my')->middleware('perm:calls.console')->group(function () {
             Route::get('customers', [Admin\ConsoleCallController::class, 'customers']);
             Route::post('customers/{id}/call', [Admin\ConsoleCallController::class, 'call'])->whereNumber('id')->middleware('throttle:calls');
-            Route::post('customers/{id}/webrtc', [Admin\ConsoleCallController::class, 'webrtcCall'])->whereNumber('id')->middleware('throttle:calls');
             Route::get('calls/{uuid}', [Admin\ConsoleCallController::class, 'show']);
             Route::post('calls/{uuid}/hangup', [Admin\ConsoleCallController::class, 'hangup']);
         });
@@ -368,10 +367,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
         Route::get('health', [Admin\SettingsController::class, 'health'])->middleware('perm:system.health');
         // SmartPRS2 / SmartEPT field-force integration (6 Oct 2026).
         Route::get('integrations', [Admin\IntegrationController::class, 'index'])->middleware('perm:system.health');
-        // Call monitoring (27 Nov 2026): live Click2Call calls + listen in (SmartDCM Live calls / Join me), and SmartRMI.
-        Route::get('monitoring/live', [Admin\MonitoringController::class, 'live'])->middleware('perm:calls.monitor');
-        Route::post('monitoring/calls/{id}/join', [Admin\MonitoringController::class, 'join'])->whereNumber('id')->middleware(['perm:calls.monitor', 'feature:click2call', 'throttle:20,1']);
-        Route::get('monitoring/sessions', [Admin\MonitoringController::class, 'sessions'])->middleware('perm:calls.monitor');
+        // SmartRMI (27 Nov 2026): AI call analysis + angry-call alerts. (Call snooping was removed the same day.)
         Route::get('rmi/overview', [Admin\SmartRmiController::class, 'overview'])->middleware(['perm:rmi.view', 'feature:smartrmi']);
         Route::get('rmi/calls', [Admin\SmartRmiController::class, 'calls'])->middleware(['perm:rmi.view', 'feature:smartrmi']);
         Route::get('rmi/calls/{callId}', [Admin\SmartRmiController::class, 'show'])->whereNumber('callId')->middleware(['perm:rmi.view', 'feature:smartrmi']);
