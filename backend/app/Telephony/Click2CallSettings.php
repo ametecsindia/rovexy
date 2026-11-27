@@ -201,10 +201,11 @@ final class Click2CallSettings
         return rescue(fn () => \App\Services\Platform\PlatformSettings::get($key), null, false) ?: null;
     }
 
-    /** Ametecs manages the Click2Call connection (both keys in Super Admin): clients only add vouchers. */
+    /** Ametecs holds the OBD gateway key (Super Admin): the client console hides the gateway fields. */
     public static function managed(): bool
     {
-        return self::platformSecret('c2c_gateway_secret') !== null && self::platformSecret('c2c_crm_secret') !== null;
+        // ponytail: CRM id and CRM key are the client's (Calling options / SmartDCM), never Super Admin (27 Nov 2026)
+        return self::platformSecret('c2c_gateway_secret') !== null;
     }
 
     /** Is Click2Call the server route right now (company setting, or the .env driver)? */

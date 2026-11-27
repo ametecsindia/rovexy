@@ -11,7 +11,7 @@ import { Badge, Card, ErrorBox, Field, Notice, Page, Table, useAction, useAsync 
 const OPTIONS: [string, string][] = [
   ['auto_create_users', 'Create SmartDCM users that are not in ROVEXY yet (telecallers, FOS, team leaders, managers). Matched first by employee code, e-mail, then mobile.'],
   ['share_passwords', 'Same password as SmartDCM (when SmartDCM shares it). People then sign in to ROVEXY with their SmartDCM password.'],
-  ['use_calling', 'Use SmartDCM’s calling account: CRM id, Click2Call numbers and Smart31 pool come from SmartDCM.'],
+  ['use_calling', 'SmartDCM licence for C2C and C2C Smart31: CRM id, voucher, numbers and Smart31 pool come from SmartDCM (same choice as Company numbers → Licence).'],
   ['send_results', 'Send work done in ROVEXY back to SmartDCM: outcomes, PTPs, payments, calls with recordings, field visits, remarks.'],
   ['send_allocations', 'Send re-allocations made in ROVEXY back to SmartDCM.'],
 ];

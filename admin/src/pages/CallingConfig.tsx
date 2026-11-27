@@ -98,8 +98,10 @@ export function CallingOptionsPage() {
   const set = (k: string, val: string) => setF({ ...v, [k]: val });
   const reload = async () => { setF(null); await cfg.reload(); await acc.reload(); };
   const saveC2c = (mode: string) => a.run(async () => {
-    // Managed by Ametecs (Super Admin holds the keys and the CRM id): send only what the client sees, so nothing is wiped.
-    const keys = d.managed ? {} : { did: v.did || null, gateway_secret: v.gateway_secret || null, crm_id: v.crm_id || null, lc_secret: v.lc_secret || null };
+    // Send only what the client sees, so nothing is wiped: the gateway key may be Ametecs's (Super Admin); the CRM id and
+    // key are the client's own unless SmartDCM's licence is used (Company numbers → Licence).
+    const keys = { ...(d.managed ? {} : { did: v.did || null, gateway_secret: v.gateway_secret || null }),
+      ...(d.licence_source === 'smartdcm' ? {} : { crm_id: v.crm_id || null, lc_secret: v.lc_secret || null }) };
     setResult(await put('/calling/click2call', { mode, ...keys, agent_caller_id: v.agent_caller_id || null, daily_limit: v.daily_limit ? Number(v.daily_limit) : null }));
     await reload();
   });
@@ -129,12 +131,14 @@ export function CallingOptionsPage() {
 
       <div style={{ height: 16 }} />
       <Card title="Click2Call connection" actions={c2cOn ? <Badge value="active" label="on" /> : <Badge value="off" label="off" />}>
-        <p className="muted">{d.managed ? 'Connected by Ametecs. Add your voucher under Company numbers — its numbers are used for Click2Call.' : 'From your Ametecs / provider account. You only fill these once.'}</p>
+        <p className="muted">{d.licence_source === 'smartdcm' ? 'Licence: SmartDCM — the CRM id, key and voucher come from your linked SmartDCM (Company numbers → Licence).' : 'Licence: ROVEXY — your own CRM id and CRM key from Ametecs. You only fill these once; then add your voucher under Company numbers.'}</p>
         <div className="form-grid two">
-          {!d.managed && <>
-          <label className="field"><span>Gateway secret</span><input type="password" autoComplete="new-password" value={v.gateway_secret} placeholder={d.secret_hint ? `Saved (${d.secret_hint}). Leave blank to keep` : 'From your provider'} onChange={(e) => set('gateway_secret', e.target.value)} /></label>
+          {d.licence_source !== 'smartdcm' && <>
           <label className="field"><span>CRM id (for adding vouchers)</span><input value={v.crm_id} placeholder="From Ametecs" onChange={(e) => set('crm_id', e.target.value)} /></label>
           <label className="field"><span>CRM secret key (for adding vouchers)</span><input type="password" autoComplete="new-password" value={v.lc_secret} placeholder={d.lc_secret_set ? 'Saved. Leave blank to keep' : 'From Ametecs CRM'} onChange={(e) => set('lc_secret', e.target.value)} /></label>
+          </>}
+          {!d.managed && <>
+          <label className="field"><span>Gateway secret</span><input type="password" autoComplete="new-password" value={v.gateway_secret} placeholder={d.secret_hint ? `Saved (${d.secret_hint}). Leave blank to keep` : 'From your provider'} onChange={(e) => set('gateway_secret', e.target.value)} /></label>
           <label className="field"><span>Company number {d.voucher_numbers ? '(optional: you have voucher numbers)' : ''}</span><input value={v.did} placeholder="80XXXXXXXX" onChange={(e) => set('did', e.target.value)} /></label>
           </>}
           <label className="field"><span>Calls to the same customer per day</span><input type="number" min={1} max={1000} value={v.daily_limit} onChange={(e) => set('daily_limit', e.target.value)} /></label>
@@ -367,6 +371,32 @@ function VoucherNumbers() {
   return (
     <>
       <ErrorBox error={s.error ?? a.error} />
+      {d?.smartdcm_linked && (
+        <Card title="Licence for C2C and C2C Smart31">
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            {[['smartdcm', 'SmartDCM licence', 'Use the voucher and CRM id already set up in your SmartDCM. Nothing to enter here.'],
+              ['rovexy', 'ROVEXY licence', 'Use your own CRM id, CRM key (Calling options) and voucher added below.']].map(([k, label, hint]) => (
+              <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', maxWidth: 420, cursor: 'pointer' }}>
+                <input type="radio" name="licence" checked={d.licence_source === k} disabled={a.busy}
+                  onChange={() => a.run(async () => { await put('/calling/licence-source', { source: k }); setMsg(null); await s.reload(); })} />
+                <span><strong>{label}</strong><br /><small className="muted">{hint}</small></span>
+              </label>
+            ))}
+          </div>
+        </Card>
+      )}
+      {d?.licence_source === 'smartdcm' ? (
+        <Card title="SmartDCM licence">
+          <p className="muted">CRM id <strong>{d.smartdcm_licence?.crm_id ?? 'not sent yet'}</strong> · {d.smartdcm_licence?.key_from_smartdcm ? 'checked with the Ametecs LC Manager' : 'status as SmartDCM reports it'}{d.smartdcm_licence?.at ? ` · from SmartDCM ${new Date(d.smartdcm_licence.at).toLocaleString()}` : ''}</p>
+          {msg && <Notice tone="ok">{msg}</Notice>}
+          {d.vouchers?.[0] && !['active', 'replaced'].includes(d.vouchers[0].status) && <Notice tone="bad">SmartDCM voucher {d.vouchers[0].voucher_code} is {d.vouchers[0].status}: its numbers stopped.{d.vouchers[0].status_message ? ` (${d.vouchers[0].status_message})` : ''} Renew it in SmartDCM.</Notice>}
+          <p className="muted">{d.vouchers?.length ? 'Vouchers: ' + d.vouchers.slice(0, 3).map((v: any) => `${v.voucher_code} · ${v.status}${v.expires_at ? ' · until ' + new Date(v.expires_at).toLocaleDateString() : ''}`).join('  |  ') : 'SmartDCM has not sent a voucher yet.'}</p>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button className="secondary" disabled={a.busy} onClick={() => a.run(async () => { const r = await post('/calling/vouchers/sync', {}); setMsg(r.message); await s.reload(); })}>Sync now</button>
+            <small className="muted">Taken from SmartDCM and checked every 5 minutes and before calls: a revoked or expired voucher stops C2C at once.{d.last_sync ? ` Last check ${new Date(d.last_sync.at).toLocaleString()}: ${d.last_sync.message}` : ''}</small>
+          </div>
+        </Card>
+      ) : (
       <Card title="Add voucher">
         {d && (!d.crm_id_set || !d.licence_secret_set) && <Notice tone="warn">First {!d.crm_id_set && <>enter your <strong>CRM id</strong> in <Link to="/calling/options">Calling options</Link></>}{!d.crm_id_set && !d.licence_secret_set && ', and '}{!d.licence_secret_set && <>enter the <strong>CRM secret key</strong> in <Link to="/calling/options">Calling options</Link></>}.</Notice>}
         <p className="muted">A new voucher replaces your current numbers. Old numbers are kept in history.</p>
@@ -386,6 +416,7 @@ function VoucherNumbers() {
           </div>
         )}
       </Card>
+      )}
       {d && (
         <Card title={`Your numbers (${d.numbers.length})`} actions={d.numbers.length > 0 && t.length > 0 ? <GroupPicker teams={t} have={[]} onAdd={giveAll} label="Give all Click2Call numbers to…" /> : undefined}>
           {d.numbers.length > 0 && <p className="muted">Each number can be used only by the groups listed next to it. To give every Click2Call number to a group at once, use the menu at the top right.</p>}

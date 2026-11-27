@@ -1009,7 +1009,7 @@ final class AcceptanceTest extends TestCase
         $this->assertSame(3, app(CurrentCompany::class)->withoutScope(fn () => \Illuminate\Support\Facades\DB::table('c2c_vmn_history')->count()));
     }
 
-    /** 25 Nov 2026: Ametecs holds the keys (Super Admin), clients only add a voucher; the app picks a voucher number or Smart31. */
+    /** 25 Nov 2026: Ametecs holds the gateway key (Super Admin); the CRM id and CRM key are the client's own (27 Nov); the app picks a voucher number or Smart31. */
     public function test_managed_click2call_voucher_only_and_smart31_choice(): void
     {
         config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);
@@ -1026,7 +1026,6 @@ final class AcceptanceTest extends TestCase
             'obd.ametecsindia.com/*' => \Illuminate\Support\Facades\Http::response(['status' => 404]),
         ]);
         \App\Services\Platform\PlatformSettings::set('c2c_gateway_secret', 'gw');
-        \App\Services\Platform\PlatformSettings::set('c2c_crm_secret', 'lic-secret');
         $this->appOnlyMandatory();
         $m = $this->approvedPhone();
         $this->login($m);
@@ -1039,14 +1038,12 @@ final class AcceptanceTest extends TestCase
             return $t;
         });
 
-        // The client switches Click2Call on with no keys and no number; the voucher needs the CRM id that only Ametecs sets.
+        // The client switches Click2Call on with no keys and no number; the voucher needs the client's CRM id and key.
         $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice'])->assertOk();
         $adm->getJson('/api/admin/calling/click2call')->assertJsonPath('managed', true)->assertJsonPath('secret_hint', '••••gw');
-        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertStatus(422)->assertJsonPath('message', 'Ametecs has not finished your Click2Call set-up yet (CRM id). Please contact Ametecs support.');
-        $super = \App\Models\Platform\PlatformAdmin::query()->create(['email' => 'super@ametecs.test', 'name' => 'Super', 'password' => 'Staff-password-1', 'role' => 'super', 'status' => 'active']);
-        $this->actingAs($super, 'platform')->withHeaders(['Referer' => 'http://localhost/'])->putJson("/api/super/companies/{$this->a->id}", ['crm_id' => 'CRM77'])->assertOk();
-        $this->actingAs($super, 'platform')->getJson("/api/super/companies/{$this->a->id}")->assertJsonPath('crm_id', 'CRM77');
-        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'daily_limit' => 50])->assertOk();   // the client's save keeps the CRM id
+        $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertStatus(422)->assertJsonPath('message', 'Enter your CRM id first (Calling configuration → Calling options → Click2Call connection).');
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'crm_id' => 'CRM77', 'lc_secret' => 'lic-secret'])->assertOk();   // client-specific, in the client's console
+        $adm->putJson('/api/admin/calling/click2call', ['mode' => 'choice', 'daily_limit' => 50])->assertOk();   // a later save keeps the CRM id and key
         $res = $adm->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'GOOD1'])->assertOk()->json();
         $ids = collect($res['numbers'])->pluck('id', 'virtual_number');
         $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => $ids->values()->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();

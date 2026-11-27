@@ -78,6 +78,9 @@ final class SmartDcmIntegrationTest extends TestCase
         Http::fake(function (HttpRequest $r) {
             $path = parse_url($r->url(), PHP_URL_PATH);
             if (preg_match('#lc\.ametecsindia\.com/api/did_voucher_validate/([^/]+)/#', $r->url(), $m)) {
+                if (($r->header('Secret-Key')[0] ?? '') !== 'lc-secret') {
+                    return Http::response(['status' => 400, 'message' => 'Secret Key not matched']);
+                }
                 return Http::response($this->lc['vouchers'][$m[1]] ?? ['status' => 404, 'message' => 'Voucher not found']);
             }
             if (str_contains($r->url(), 'lc.ametecsindia.com/api/smart31-details/')) {
@@ -146,7 +149,7 @@ final class SmartDcmIntegrationTest extends TestCase
                 [$c->assigned_user_id, $c->assigned_team_id, $c->last_import_id, $c->phone, (float) $c->outstanding, $c->details['x:Bucket'], $c->details['x:Ref 1']]);
             $this->assertSame('follow_up', Customer::query()->where('customer_ref', 'LN002')->value('status'));
             // one telephony account: CRM id, gateway secret, numbers for the team, Smart31 pool
-            $this->assertSame('1133', $this->a->fresh()->setting('click2call.crm_id'));
+            $this->assertSame('1133', $this->a->fresh()->setting('click2call.smartdcm.crm_id'));   // kept apart from the client's own CRM id
             $this->assertSame('choice', $this->a->fresh()->setting('click2call.mode'));
             $v = Vmn::query()->firstOrFail();
             $this->assertSame(['8040001111', [$team->id], false], [$v->virtual_number, $v->team_ids, $v->webrtc]);   // WebRTC is not offered in ROVEXY
@@ -282,16 +285,17 @@ final class SmartDcmIntegrationTest extends TestCase
     }
 
     /** 27 Nov 2026: SmartDCM's numbers are LC-checked by ROVEXY itself — a voucher revoked in the LC Manager stops them at once. */
+    /** 27 Nov 2026: SmartDCM's voucher is used as it is (nothing typed again); its status and the LC Manager both stop it. */
     public function test_smartdcm_numbers_follow_the_lc_manager(): void
     {
-        \App\Services\Platform\PlatformSettings::set('c2c_crm_secret', 'lc-secret');   // Ametecs's LC key (Super Admin)
+        $this->dcm['telephony']['c2c']['lc_secret'] = 'lc-secret';   // SmartDCM's CRM key: ROVEXY asks the LC Manager itself
         $this->dcm['telephony']['numbers'] = [
-            ['number' => '918040001111', 'click2call' => true, 'team_ids' => [7], 'voucher_code' => 'DCMV1'],
+            ['number' => '918040001111', 'click2call' => true, 'team_ids' => [7], 'voucher_code' => 'DCMV1', 'voucher_status' => 'active'],
             ['number' => '918040003333', 'click2call' => true, 'team_ids' => [7]],   // no voucher code: not usable
         ];
         $this->dcm['telephony']['smart31']['numbers'] = [['number' => '8040002222', 'group' => 'Pool A', 'team_ids' => [7]]];
         $this->lc['vouchers']['DCMV1'] = ['status' => 200, 'deleted' => []];
-        $this->lc['smart31'] = ['status' => 200, 'vmn_details' => [['vmn' => '8040002222', 'usage_date' => now()->toDateString(), 'c2c' => 1, 'group_name' => 'Pool A']]];
+        $this->lc['smart31'] = ['status' => 200, 'vmn_details' => [['vmn' => '8040002222', 'usage_date' => now()->toDateString(), 'c2c' => 1, 'webrtc' => 1, 'group_name' => 'Pool A']]];
         $this->connect();
         $usable = fn () => $this->in(function () {
             \Illuminate\Support\Facades\Cache::flush();
@@ -301,8 +305,18 @@ final class SmartDcmIntegrationTest extends TestCase
         });
         $this->in(fn () => \App\Telephony\LcGuard::refresh(true));
         $this->assertSame([['8040001111'], true], $usable());
+        $page = $this->as('admin')->getJson('/api/admin/calling/numbers')->assertOk();
+        $this->assertSame(['smartdcm', true, '1133', true], [$page->json('licence_source'), $page->json('smartdcm_linked'), $page->json('smartdcm_licence.crm_id'), $page->json('smartdcm_licence.key_from_smartdcm')]);
+        $this->assertSame(['DCMV1'], collect($page->json('vouchers'))->pluck('voucher_code')->all());
+        $this->as('admin')->postJson('/api/admin/calling/vouchers', ['voucher_code' => 'OWN1'])->assertStatus(422);   // no second copy while SmartDCM's licence is used
 
-        // Revoked in the LC Manager (and Smart31 withdrawn): gone at the next check, and SmartDCM's next sync does not bring it back.
+        // ROVEXY licence chosen: SmartDCM's numbers stop; the client's own CRM id / key / voucher are used instead.
+        $this->as('admin')->putJson('/api/admin/calling/licence-source', ['source' => 'rovexy'])->assertOk()->assertJsonPath('licence_source', 'rovexy');
+        $this->assertSame([[], false], $usable());   // no own voucher yet, no own CRM id
+        $this->as('admin')->putJson('/api/admin/calling/licence-source', ['source' => 'smartdcm'])->assertOk();
+        $this->assertSame([['8040001111'], true], $usable());
+
+        // Revoked in the LC Manager: gone at the next check, and SmartDCM's next sync ("active") does not bring it back.
         $this->lc['vouchers']['DCMV1'] = ['status' => 400, 'message' => 'Voucher revoked'];
         $this->lc['smart31'] = ['status' => 200, 'vmn_details' => []];
         $this->in(fn () => \App\Telephony\LcGuard::refresh(true));
@@ -311,5 +325,15 @@ final class SmartDcmIntegrationTest extends TestCase
         $this->assertSame([[], false], $usable());
         $this->assertSame('revoked', $this->in(fn () => \App\Models\C2c\Voucher::query()->where('voucher_code', 'DCMV1')->value('status')));
         $this->assertSame(['8040003333'], $this->in(fn () => \App\Models\C2c\Vmn::query()->pluck('virtual_number')->all()));   // kept, but not licensed
+
+        // A new voucher in SmartDCM, no CRM key sent: SmartDCM's status decides. "expired" there stops it at once.
+        unset($this->dcm['telephony']['c2c']['lc_secret']);
+        $this->dcm['telephony']['numbers'] = [['number' => '918040004444', 'click2call' => true, 'team_ids' => [7], 'voucher_code' => 'DCMV2', 'voucher_status' => 'active']];
+        $this->as('admin')->postJson('/api/admin/integrations/smartdcm/sync')->assertOk();
+        $this->assertSame([['8040004444'], false], $usable());
+        $this->dcm['telephony']['numbers'][0]['voucher_status'] = 'expired';
+        $this->as('admin')->postJson('/api/admin/integrations/smartdcm/sync')->assertOk();
+        $this->assertSame([[], false], $usable());
+        $this->assertSame('expired', $this->in(fn () => \App\Models\C2c\Voucher::query()->where('voucher_code', 'DCMV2')->value('status')));
     }
 }

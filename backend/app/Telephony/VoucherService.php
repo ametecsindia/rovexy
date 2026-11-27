@@ -30,19 +30,24 @@ final class VoucherService
     /** Today's Click2Call Smart31 numbers from the LC Manager (last replaceSmart31). */
     private array $lcSmart31 = [];
 
+    /** CRM id of the chosen licence: SmartDCM's (from the link) or the client's own (Calling options). */
     public static function crmId(): ?string
     {
         $c = app(CurrentCompany::class)->get();
-        return ($c->setting('click2call.crm_id') ?: config('ammp.telephony.click2call.crm_id')) ?: null;
+        $own = $c->setting('click2call.crm_id');
+        $dcm = LcGuard::source() === 'smartdcm' ? $c->setting('click2call.smartdcm.crm_id') : null;
+        return ($dcm ?: $own ?: config('ammp.telephony.click2call.crm_id')) ?: null;
     }
 
-    /** CRM Secret-Key: entered in Calling options (stored encrypted); C2C_LICENSE_SECRET in .env only as an optional fallback. */
+    /** CRM Secret-Key of the chosen licence: SmartDCM's if it sends one, else the client's own (Calling options). */
     public static function licenceSecret(): ?string
     {
-        $enc = app(CurrentCompany::class)->get()->setting('click2call.lc_secret');
-        try { $s = $enc ? \Illuminate\Support\Facades\Crypt::decryptString($enc) : null; } catch (\Throwable) { $s = null; }
-        // The CRM key is one fixed key for every client: the Super Admin copy wins over an old one saved in a workspace (27 Nov 2026).
-        return (Click2CallSettings::platformSecret('c2c_crm_secret') ?: $s ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
+        $c = app(CurrentCompany::class)->get();
+        $dec = function (?string $enc): ?string {
+            try { return $enc ? \Illuminate\Support\Facades\Crypt::decryptString($enc) : null; } catch (\Throwable) { return null; }
+        };
+        $dcm = LcGuard::source() === 'smartdcm' ? $dec($c->setting('click2call.smartdcm.lc_secret')) : null;
+        return ($dcm ?: $dec($c->setting('click2call.lc_secret')) ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
     }
 
     /** "SMART-31 Web RTC - 1" is WebRTC Smart31. The LC Manager marks C2C groups webrtc=1 too, so the group name decides (27 Nov 2026). */
@@ -64,10 +69,13 @@ final class VoucherService
         if (!preg_match('/^[A-Za-z0-9_-]{4,100}$/', $code)) {
             return ['ok' => false, 'message' => 'Enter a valid voucher code.'];
         }
+        if (LcGuard::source() === 'smartdcm') {
+            return ['ok' => false, 'message' => 'This workspace uses the SmartDCM licence: its voucher comes from SmartDCM automatically. Choose "ROVEXY licence" to add your own voucher.'];
+        }
         if (!self::crmId() || !self::licenceSecret()) {
-            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id). Please contact Ametecs support.' : (!self::crmId()
+            return ['ok' => false, 'message' => !self::crmId()
                 ? 'Enter your CRM id first (Calling configuration → Calling options → Click2Call connection).'
-                : 'Enter the CRM secret key first (Calling configuration → Calling options → Click2Call connection).')];
+                : 'Enter the CRM secret key first (Calling configuration → Calling options → Click2Call connection).'];
         }
         $result = $this->validate($code);
         if ($result === null) {
@@ -124,8 +132,8 @@ final class VoucherService
         $this->archiveVmns(Vmn::query()->orderBy('id')->get(), $now);
         Vmn::query()->delete();
 
-        Voucher::query()->where('status', 'active')->update(['status' => 'replaced']);   // only the newest voucher's numbers exist
-        $voucher = Voucher::query()->create(['voucher_code' => $code, 'numbers' => count($all), 'smart31_numbers' => 0, 'expires_at' => $expiry, 'created_by' => $userId,
+        Voucher::query()->where('status', 'active')->where('source', 'rovexy')->update(['status' => 'replaced']);   // only the newest own voucher's numbers exist
+        $voucher = Voucher::query()->create(['voucher_code' => $code, 'source' => 'rovexy', 'numbers' => count($all), 'smart31_numbers' => 0, 'expires_at' => $expiry, 'created_by' => $userId,
             'status' => 'active', 'last_ok_at' => now(), 'checked_at' => now()]);
         foreach ($all as $n) {
             Vmn::query()->create(['virtual_number' => $n, 'click2call' => in_array($n, $c2c, true), 'obd' => in_array($n, $obd, true),
@@ -150,17 +158,21 @@ final class VoucherService
     public function verify(bool $record = false): array
     {
         if (!self::crmId() || !self::licenceSecret()) {
-            return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id).' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null, 'voucher' => null];
+            return ['ok' => false, 'message' => LcGuard::source() === 'smartdcm' ? 'SmartDCM has not sent its CRM id yet.' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null, 'voucher' => null];
         }
         $removed = 0;
         $problems = [];
         $state = null;
         // Every active voucher: ROVEXY's own, and the ones behind SmartDCM's numbers (27 Nov 2026).
-        foreach (Voucher::query()->where('status', 'active')->latest('id')->get() as $voucher) {
+        $source = LcGuard::source();
+        $key = self::licenceSecret();
+        foreach (Voucher::query()->where('status', 'active')->where('source', $source)->latest('id')->get() as $voucher) {   // the chosen licence's vouchers
             $was = $removed;
             $voucher->checked_at = now();
             if ($voucher->expires_at && $voucher->expires_at->copy()->endOfDay()->lt(now())) {
                 $removed += $this->retire($voucher, 'expired', 'The voucher expired on ' . $voucher->expires_at->toDateString() . '.');
+            } elseif (!$key) {   // no CRM key: a SmartDCM voucher goes by the status SmartDCM sends (SmartDcmSync)
+                $source === 'rovexy' && $problems[] = 'no CRM secret key';
             } else {
                 [$json, $reachable] = $this->ask('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
                 if (!$reachable) {
@@ -246,7 +258,7 @@ final class VoucherService
     }
 
     /** The voucher is no longer valid: every number it gave goes to history and is removed (SmartDCM: delete from obd_did). */
-    private function retire(Voucher $voucher, string $status, string $message): int
+    public function retire(Voucher $voucher, string $status, string $message): int
     {
         $voucher->forceFill(['status' => $status, 'revoked_at' => now(), 'status_message' => $message]);
         return DB::transaction(function () use ($voucher) {

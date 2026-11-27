@@ -75,10 +75,11 @@ final class IntegrationController extends Controller
             'callback_url' => url('/api/telephony/v1/click2call'),
             'server_driver' => config('ammp.telephony.driver'),
             'in_plan' => \App\Telephony\Click2CallSettings::inPlan('click2call'),
-            'crm_id' => $s['crm_id'] ?? null, 'lc_secret_set' => (bool) \App\Telephony\VoucherService::licenceSecret(), 'daily_limit' => (int) ($s['daily_limit'] ?? config('ammp.telephony.click2call.daily_limit')),
+            'crm_id' => $s['crm_id'] ?? null, 'lc_secret_set' => !empty($s['lc_secret']), 'daily_limit' => (int) ($s['daily_limit'] ?? config('ammp.telephony.click2call.daily_limit')),
             'voucher_numbers' => \App\Models\C2c\Vmn::query()->count(),
             'webhook_secret_set' => !empty(config('ammp.telephony.click2call.webhook_secret')),
-            'managed' => \App\Telephony\Click2CallSettings::managed(),   // Ametecs holds the keys: the console hides them
+            'managed' => \App\Telephony\Click2CallSettings::managed(),   // Ametecs holds the gateway key: the console hides it
+            'licence_source' => \App\Telephony\LcGuard::source(),   // "smartdcm": CRM id and key come from SmartDCM
         ]);
     }
 

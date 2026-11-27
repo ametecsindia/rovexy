@@ -109,7 +109,12 @@ final class CallingConfigController extends Controller
                 'groups' => collect($v->team_ids ?? [])->map(fn ($t) => $teams[$t] ?? null)->filter()->values(), 'available' => \App\Telephony\LcGuard::vmnLicensed($v),
             ]),
             'lc_managed' => \App\Telephony\LcGuard::managed(),
-            'vouchers' => \App\Models\C2c\Voucher::query()->latest('id')->limit(10)->get(),
+            'licence_source' => $source = \App\Telephony\LcGuard::source(),
+            'smartdcm_linked' => \App\Telephony\LcGuard::smartDcmLinked(),
+            'smartdcm_licence' => ['crm_id' => app(CurrentCompany::class)->get()->setting('click2call.smartdcm.crm_id'),
+                'key_from_smartdcm' => (bool) app(CurrentCompany::class)->get()->setting('click2call.smartdcm.lc_secret'),
+                'at' => app(CurrentCompany::class)->get()->setting('click2call.smartdcm.at')],
+            'vouchers' => \App\Models\C2c\Voucher::query()->where('source', $source)->latest('id')->limit(10)->get(),   // the chosen licence's
             'smart31_from_voucher' => Smart31Number::query()->where('source', 'voucher')->count(),
             'last_sync' => app(CurrentCompany::class)->get()->setting('click2call.voucher_sync'),
         ]);
@@ -118,10 +123,39 @@ final class CallingConfigController extends Controller
     /** "Sync with Ametecs CRM": the daily voucher check + today's Smart31 numbers, now (LeadGER users/license/sync-did). */
     public function syncVouchers(\App\Telephony\VoucherService $vouchers)
     {
-        abort_if(!\App\Telephony\VoucherService::crmId() || !\App\Telephony\VoucherService::licenceSecret(), 422, 'Enter the CRM id and CRM secret key in Calling options first.');
+        abort_if(!\App\Telephony\VoucherService::crmId(), 422, \App\Telephony\LcGuard::source() === 'smartdcm'
+            ? 'SmartDCM has not sent its CRM id yet.' : 'Enter the CRM id and CRM secret key in Calling options first.');
+        \App\Telephony\LcGuard::source() === 'smartdcm' && $this->pullSmartDcmLicence();
         $res = $vouchers->syncDaily();
         Audit::record('c2c.voucher_synced', null, ['ok' => $res['ok'], 'message' => $res['message']]);
         return response()->json(['message' => $res['message']] + $this->numbers()->getData(true));
+    }
+
+    /**
+     * Licence for C2C and C2C Smart31 (27 Nov 2026): "smartdcm" = the voucher and CRM id already set up in the linked
+     * SmartDCM (nothing typed again here); "rovexy" = the client's own CRM id, key and voucher. Saved as the SmartDCM
+     * connection's use_calling option — the same switch as on the SmartDCM integration page.
+     */
+    public function setLicenceSource(Request $r)
+    {
+        $d = $r->validate(['source' => 'required|in:smartdcm,rovexy']);
+        $conn = \App\Models\IntegrationConnection::query()->where('system', 'smartdcm')->first();
+        abort_if($d['source'] === 'smartdcm' && !\App\Telephony\LcGuard::smartDcmLinked(), 422, 'Link SmartDCM first (Administration → Integrations → SmartDCM).');
+        if ($conn) {
+            $conn->forceFill(['options' => array_replace((array) $conn->options, ['use_calling' => $d['source'] === 'smartdcm'])])->save();
+        }
+        Audit::record('c2c.licence_source', null, ['source' => $d['source']]);
+        $d['source'] === 'smartdcm' && $this->pullSmartDcmLicence();
+        \Illuminate\Support\Facades\Cache::forget('lc-check:' . app(CurrentCompany::class)->id());
+        \App\Telephony\LcGuard::refresh(true);   // today's Smart31 list for the chosen CRM id, and its vouchers checked
+        return $this->numbers();
+    }
+
+    /** SmartDCM's calling account (CRM id, voucher and its status, numbers) now, not at the next 5-minute sync. */
+    private function pullSmartDcmLicence(): void
+    {
+        $conn = \App\Models\IntegrationConnection::query()->where('system', 'smartdcm')->where('enabled', true)->first();
+        $conn && rescue(fn () => \App\Services\SmartDcm\SmartDcmSync::for($conn)->telephony(), null);
     }
 
     public function addVoucher(Request $r, \App\Telephony\VoucherService $vouchers)

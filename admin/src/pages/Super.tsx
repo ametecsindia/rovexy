@@ -277,7 +277,7 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
   const c = useAsync(() => get(`/companies/${id}`), [id]);
   const plans = usePlans();
   const [mode, setMode] = useState<'' | 'edit' | 'licence' | 'password'>('');
-  const [det, setDet] = useState({ name: '', billing_email: '', billing_phone: '', state_code: '', gstin: '', address: '', crm_id: '' });
+  const [det, setDet] = useState({ name: '', billing_email: '', billing_phone: '', state_code: '', gstin: '', address: '', });
   const [lic, setLic] = useState({ plan_id: '', kind: 'trial', users: '', billing: 'annual', reason: '' });
   const [pw, setPw] = useState({ password: '', reason: '' });
   const [licOpen, setLicOpen] = useState<number | null>(null);
@@ -301,14 +301,14 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
         </div>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
           <a className="button secondary" href={x.console_url} target="_blank" rel="noreferrer">Open console ↗</a>
-          {can && <button className="secondary" onClick={() => { setDet({ name: x.name, billing_email: x.billing_email ?? '', billing_phone: x.billing_phone ?? '', state_code: x.state_code ?? '', gstin: x.gstin ?? '', address: x.address ?? '', crm_id: x.crm_id ?? '' }); setMode('edit'); }}>Edit details</button>}
+          {can && <button className="secondary" onClick={() => { setDet({ name: x.name, billing_email: x.billing_email ?? '', billing_phone: x.billing_phone ?? '', state_code: x.state_code ?? '', gstin: x.gstin ?? '', address: x.address ?? '' }); setMode('edit'); }}>Edit details</button>}
           {can && !live && <button onClick={() => setMode('licence')}>Issue licence</button>}
           {can && <button className="secondary" disabled={a.busy} onClick={() => void a.run(async () => { const r: any = await post(`/companies/${id}/invite`); toast(r.mail_ready ? `Set-password e-mail sent to ${r.email}` : `E-mail sending is not set up; copy the link from the audit-safe box below`, r.mail_ready ? 'ok' : 'bad'); setInviteLink(r.mail_ready ? null : r.set_password_url); })}>E-mail set-password link</button>}
           {isSuper && <button className="secondary" onClick={() => setMode('password')}>Set admin password</button>}
         </div>
         <p className="small">Console address: <a href={x.console_url} target="_blank" rel="noreferrer">{x.console_url}</a> · slug <code>{x.slug}</code> <button type="button" className="ghost small" onClick={() => { void navigator.clipboard?.writeText(x.console_url); toast('Console address copied'); }}>Copy</button></p>
         {inviteLink && <div className="row"><input readOnly value={inviteLink} onFocus={(e) => e.target.select()} aria-label="Set-password link" /><button type="button" className="secondary" onClick={() => navigator.clipboard?.writeText(inviteLink).then(() => toast('Link copied'))}>Copy</button></div>}
-        <p className="small muted">Billing: {[x.billing_email, x.billing_phone, x.state_code ? STATES[x.state_code] ?? x.state_code : null, x.gstin ? `GSTIN ${x.gstin}` : null, x.address].filter(Boolean).join(' · ') || 'not set — renewals ask for the GST state each time'}{' · '}Ametecs CRM id: {x.crm_id || 'not set (needed for Click2Call vouchers)'}</p>
+        <p className="small muted">Billing: {[x.billing_email, x.billing_phone, x.state_code ? STATES[x.state_code] ?? x.state_code : null, x.gstin ? `GSTIN ${x.gstin}` : null, x.address].filter(Boolean).join(' · ') || 'not set — renewals ask for the GST state each time'}</p>
         {mode === 'edit' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { await put(`/companies/${id}`, det); await done('Company details saved'); }); }}>
           <div className="form-grid">
             <Field label="Company name"><input value={det.name} onChange={(e) => setDet({ ...det, name: e.target.value })} required maxLength={150} /></Field>
@@ -317,7 +317,6 @@ function CompanyDetail({ id, can, isSuper, onClose }: { id: number; can: boolean
             <Field label="State (for GST)"><select value={det.state_code} onChange={(e) => setDet({ ...det, state_code: e.target.value })}><option value="">Not set</option>{Object.entries(STATES).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></Field>
             <Field label="GSTIN"><input value={det.gstin} onChange={(e) => setDet({ ...det, gstin: e.target.value.toUpperCase() })} maxLength={15} pattern="\d{2}[A-Z0-9]{13}" /></Field>
             <Field label="Billing address"><input value={det.address} onChange={(e) => setDet({ ...det, address: e.target.value })} maxLength={300} /></Field>
-            <Field label="Ametecs CRM id" hint="For this client's Click2Call vouchers"><input value={det.crm_id} onChange={(e) => setDet({ ...det, crm_id: e.target.value })} maxLength={60} /></Field>
           </div>
           <div className="row"><button disabled={a.busy}>Save details</button><button type="button" className="secondary" onClick={() => setMode('')}>Cancel</button></div></form>}
         {mode === 'licence' && <form className="card" onSubmit={(e) => { e.preventDefault(); void a.run(async () => { const r: any = await post(`/companies/${id}/licence`, { ...lic, plan_id: Number(lic.plan_id), users: lic.users ? Number(lic.users) : null }); await done(r.order ? `Trial started. Order ${r.order.number} (${inr(r.order.total)}) raised: the subscription starts when it is paid (Orders & payments)` : 'Licence issued'); }); }}>
@@ -1002,7 +1001,7 @@ function Settings() {
   const [f, setF] = useState<any | null>(null);
   const [saved, setSaved] = useState(false);
   const a = useAction();
-  useEffect(() => { if (s.data) setF({ ...s.data, razorpay_key_secret: '', razorpay_webhook_secret: '', mail_password: '', fcm_service_account_json: '', c2c_gateway_secret: '', c2c_crm_secret: '' }); }, [s.data]);
+  useEffect(() => { if (s.data) setF({ ...s.data, razorpay_key_secret: '', razorpay_webhook_secret: '', mail_password: '', fcm_service_account_json: '', c2c_gateway_secret: '' }); }, [s.data]);
   const [pushTest, setPushTest] = useState<any>(null);
   const pt = useAction();
   const [testTo, setTestTo] = useState('');
@@ -1012,7 +1011,7 @@ function Settings() {
   const keys = ['seller_name', 'seller_address', 'seller_gstin', 'seller_state', 'seller_email', 'seller_phone', 'invoice_prefix', 'gst_rate', 'trial_days', 'trial_users', 'grace_days', 'demo_calling_from',
     'razorpay_key_id', 'razorpay_key_secret', 'razorpay_webhook_secret', 'mail_host', 'mail_port', 'mail_encryption', 'mail_username', 'mail_password', 'mail_from_address', 'mail_from_name', 'fcm_service_account_json', 'site_announcement', 'site_hero_title', 'site_hero_text', 'site_meta_description', 'reminders_enabled', 'trial_verify_email', 'staff_mfa_required',
     'price_annual_discount_pct', 'price_half_yearly_discount_pct', 'setup_base', 'setup_included_users', 'setup_per_extra', 'cloud_setup_base', 'cloud_setup_included_users', 'cloud_setup_per_extra', 'amc_pct', 'quote_validity_days',
-    'price_c2c_user', 'price_smart31_user', 'deposit_per_fos', 'c2c_gateway_secret', 'c2c_crm_secret'];
+    'price_c2c_user', 'price_smart31_user', 'deposit_per_fos', 'c2c_gateway_secret'];
   const [clear, setClear] = useState<string[]>([]);
   const submit = (e: FormEvent) => { e.preventDefault(); void a.run(async () => { s.setData(await put('/settings', { ...Object.fromEntries(keys.map((k) => [k, f[k]])), clear_secrets: clear })); setClear([]); setSaved(true); toast('Settings saved'); }); };
   const removeBox = (k: string) => s.data?.[`${k}_set`] ? <label className="row small" style={{ gap: 6 }}><input type="checkbox" style={{ width: 'auto' }} checked={clear.includes(k)} onChange={(e) => setClear(e.target.checked ? [...clear, k] : clear.filter((x) => x !== k))} />Remove the saved value</label> : null;
@@ -1102,10 +1101,9 @@ function Settings() {
           <Field label="Search engine description" hint="Shown under the link in Google results (up to 300 characters)"><textarea rows={2} value={f.site_meta_description ?? ''} onChange={(e) => set('site_meta_description', e.target.value)} /></Field>
         </Card>
         <Card title="Click2Call (all clients)">
-          <p className="muted small">Ametecs's keys, used for every workspace. With both saved, clients only add their voucher; set each client's CRM id under Companies → Edit details. A client's own saved key still wins. Stored encrypted; leave blank to keep.</p>
+          <p className="muted small">Ametecs's OBD gateway key, used to read call results for every workspace. Licences (CRM id, CRM key, vouchers) are each client's own: set in its console or taken from its SmartDCM. Stored encrypted; leave blank to keep.</p>
           <div className="form-grid">
             <div>{box('c2c_gateway_secret', `OBD gateway Secret-Key ${s.data.c2c_gateway_secret_set ? '(saved)' : '(not set)'}`, undefined, 'password')}{removeBox('c2c_gateway_secret')}</div>
-            <div>{box('c2c_crm_secret', `CRM voucher Secret-Key ${s.data.c2c_crm_secret_set ? '(saved)' : '(not set)'}`, undefined, 'password')}{removeBox('c2c_crm_secret')}</div>
           </div>
         </Card>
         <Card title="Razorpay">

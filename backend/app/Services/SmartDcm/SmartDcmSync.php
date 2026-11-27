@@ -95,10 +95,15 @@ final class SmartDcmSync
             $old = (array) ($company->setting('click2call') ?? []);
             $c2c = (array) ($t['c2c'] ?? []);
             $new = array_replace($old, array_filter([
-                'crm_id' => filled($t['crm_id'] ?? null) ? (string) $t['crm_id'] : null,
                 'secret' => filled($c2c['gateway_secret'] ?? null) ? Crypt::encryptString((string) $c2c['gateway_secret']) : null,
-                'lc_secret' => filled($c2c['lc_secret'] ?? null) ? Crypt::encryptString((string) $c2c['lc_secret']) : null,
             ]));
+            // SmartDCM's licence (CRM id, CRM key) is kept apart from the client's own (Calling options): the client
+            // chooses which one C2C / Smart31 run on, and neither overwrites the other (27 Nov 2026).
+            $new['smartdcm'] = array_filter([
+                'crm_id' => filled($t['crm_id'] ?? null) ? (string) $t['crm_id'] : null,
+                'lc_secret' => filled($c2c['lc_secret'] ?? null) ? Crypt::encryptString((string) $c2c['lc_secret']) : null,
+                'at' => now()->toIso8601String(),
+            ]);
             // Switched on only if the admin never chose a mode here; an admin's own choice (even "off") stays.
             if (!empty($c2c['enabled']) && empty($old['mode'])) {
                 $new['mode'] = 'choice';
@@ -115,6 +120,7 @@ final class SmartDcmSync
             };
             if (array_key_exists('numbers', $t)) {   // SmartDCM's numbers replace the company numbers (as a voucher does), updated in place
                 $keep = [];
+                $seen = [];   // SmartDCM vouchers in this answer
                 foreach ((array) $t['numbers'] as $n) {
                     $num = $digits($n['number'] ?? '');
                     // ROVEXY offers Click2Call and Smart31 only (27 Nov 2026): WebRTC-only numbers are not taken.
@@ -124,7 +130,11 @@ final class SmartDcmSync
                     // LC control (27 Nov 2026): each number carries its LC voucher, which ROVEXY checks with the LC Manager
                     // itself (LcGuard). A voucher the LC Manager revoked / expired is never brought back by SmartDCM.
                     $code = trim((string) ($n['voucher_code'] ?? $c2c['voucher_code'] ?? ''));
-                    $voucher = $code !== '' ? \App\Models\C2c\Voucher::query()->firstOrCreate(['voucher_code' => mb_substr($code, 0, 100)], ['numbers' => 0, 'status' => 'active']) : null;
+                    $voucher = $code !== '' ? \App\Models\C2c\Voucher::query()->firstOrCreate(['voucher_code' => mb_substr($code, 0, 100)], ['numbers' => 0, 'status' => 'active', 'source' => 'smartdcm']) : null;
+                    if ($voucher && !isset($seen[$voucher->id])) {
+                        $seen[$voucher->id] = true;
+                        $this->voucherStatus($voucher, $n + $c2c);
+                    }
                     if ($voucher && in_array($voucher->status, ['revoked', 'expired'], true)) {
                         continue;
                     }
@@ -133,7 +143,11 @@ final class SmartDcmSync
                         'obd' => (bool) ($n['obd'] ?? false), 'tc_verified' => (bool) ($n['tc_verified'] ?? false), 'team_ids' => $mapTeams($n['team_ids'] ?? []),
                         'expires_at' => $this->date($n['expires_on'] ?? null)]);
                 }
-                Vmn::query()->whereNotIn('virtual_number', array_keys($keep) ?: [''])->delete();
+                // SmartDCM's numbers only: numbers of the client's own ROVEXY voucher stay.
+                Vmn::query()->whereNotIn('virtual_number', array_keys($keep) ?: [''])
+                    ->where(fn ($q) => $q->whereNull('voucher_id')->orWhereIn('voucher_id', \App\Models\C2c\Voucher::query()->where('source', 'smartdcm')->select('id')))->delete();
+                // A SmartDCM voucher SmartDCM no longer sends (changed voucher) stops.
+                \App\Models\C2c\Voucher::query()->where('source', 'smartdcm')->where('status', 'active')->whereNotIn('id', array_keys($seen) ?: [0])->update(['status' => 'replaced']);
             }
             if (array_key_exists('numbers', $smart)) {   // SmartDCM's Smart31 numbers, updated in place (rotation and counts kept); hand-added ones stay
                 $keep = [];
@@ -157,6 +171,39 @@ final class SmartDcmSync
         });
         $this->saveState(['crm_id' => $t['crm_id'] ?? null]);
         $this->log[] = 'calling: ' . count((array) ($t['numbers'] ?? [])) . ' numbers, ' . count((array) ($t['smart31']['numbers'] ?? [])) . ' Smart31';
+    }
+
+    /**
+     * Voucher status from SmartDCM (voucher_status: active | revoked | expired, voucher_expiry). Revoked / expired stops it
+     * at once; "active" counts as a confirmation (with a CRM key ROVEXY also asks the LC Manager itself, every 5 minutes).
+     * A voucher already revoked or expired is never brought back.
+     */
+    private function voucherStatus(\App\Models\C2c\Voucher $v, array $n): void
+    {
+        if (in_array($v->status, ['revoked', 'expired'], true)) {
+            return;
+        }
+        $status = strtolower(trim((string) ($n['voucher_status'] ?? '')));
+        $expiry = $this->date($n['voucher_expiry'] ?? null);
+        if ($expiry) {
+            $v->expires_at = $expiry;
+        }
+        if (in_array($status, ['revoked', 'expired', 'blocked', 'inactive'], true)) {
+            app(\App\Telephony\VoucherService::class)->retire($v, $status === 'expired' ? 'expired' : 'revoked', 'SmartDCM reports this voucher as ' . $status . '.');
+            $v->save();
+            return;
+        }
+        if ($v->expires_at && $v->expires_at->copy()->endOfDay()->lt(now())) {
+            app(\App\Telephony\VoucherService::class)->retire($v, 'expired', 'The voucher expired on ' . $v->expires_at->toDateString() . '.');
+            $v->save();
+            return;
+        }
+        $v->status = 'active';   // a "replaced" SmartDCM voucher that SmartDCM sends again is back in use
+        if ($status === 'active') {
+            $v->last_ok_at = now();
+            $v->checked_at = now();
+        }
+        $v->save();
     }
 
     public function teams(): void

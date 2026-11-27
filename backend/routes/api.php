@@ -394,6 +394,7 @@ Route::prefix('admin')->middleware('company')->group(function () {
             Route::get('numbers', [$cc, 'numbers']);
             Route::post('vouchers', [$cc, 'addVoucher'])->middleware(['feature:click2call', 'throttle:20,1']);
             Route::post('vouchers/sync', [$cc, 'syncVouchers'])->middleware(['feature:click2call', 'throttle:10,1']);
+            Route::put('licence-source', [$cc, 'setLicenceSource'])->middleware(['feature:click2call', 'throttle:10,1']);
             Route::patch('numbers/{id}', [$cc, 'updateNumberVmn'])->whereNumber('id');
             Route::post('numbers/bulk', [$cc, 'bulkNumbers']);
             Route::delete('numbers/{id}', [$cc, 'deleteVmn'])->whereNumber('id');

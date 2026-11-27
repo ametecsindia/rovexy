@@ -14,7 +14,7 @@ class Voucher extends Model
 
     protected $table = 'c2c_vouchers';
 
-    protected $fillable = ['voucher_code', 'numbers', 'smart31_numbers', 'expires_at', 'created_by', 'status', 'last_ok_at', 'checked_at', 'revoked_at', 'status_message'];
+    protected $fillable = ['voucher_code', 'source', 'numbers', 'smart31_numbers', 'expires_at', 'created_by', 'status', 'last_ok_at', 'checked_at', 'revoked_at', 'status_message'];
 
     protected function casts(): array
     {

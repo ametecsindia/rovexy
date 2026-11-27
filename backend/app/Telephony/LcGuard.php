@@ -37,11 +37,27 @@ final class LcGuard
         return (bool) VoucherService::crmId();
     }
 
+    /**
+     * Which licence C2C and C2C Smart31 run on (27 Nov 2026), chosen in the client's Company numbers page:
+     * 'smartdcm' = the voucher / CRM id already set up in the linked SmartDCM; 'rovexy' = the client's own, added in ROVEXY.
+     * Stored as the SmartDCM connection's "use_calling" option (one switch, no second copy).
+     */
+    public static function source(): string
+    {
+        return self::smartDcmCalling() ? 'smartdcm' : 'rovexy';
+    }
+
+    /** SmartDCM is linked (and in the plan): the SmartDCM licence can be chosen. */
+    public static function smartDcmLinked(): bool
+    {
+        return IntegrationConnection::query()->where('system', 'smartdcm')->where('enabled', true)->exists() && app(Licensing::class)->has('smartdcm');
+    }
+
     /** Ask the LC Manager again (at most every TTL seconds per company, unless forced). Never throws. */
     public static function refresh(bool $force = false): void
     {
         $cid = app(CurrentCompany::class)->id();
-        if (!$cid || !self::managed() || !VoucherService::licenceSecret()) {
+        if (!$cid || !self::managed()) {   // Smart31 needs only the CRM id; vouchers without a key go by SmartDCM's status
             return;
         }
         $key = "lc-check:{$cid}";
@@ -60,9 +76,11 @@ final class LcGuard
             return false;
         }
         if ($v->voucher_id) {
-            return (bool) Voucher::query()->find($v->voucher_id)?->licensed();
+            $voucher = Voucher::query()->find($v->voucher_id);
+            return $voucher !== null && $voucher->licensed() && ($voucher->source ?? 'rovexy') === self::source();   // only the chosen licence's numbers
         }
-        return !self::managed();   // no LC voucher behind it (typed by hand, or SmartDCM sent no voucher code): only outside LC control
+        // No LC voucher behind it (SmartDCM sent no voucher code): only outside LC control, and never a SmartDCM number.
+        return !self::managed() && !self::smartDcmLinked();
     }
 
     /** May calls go out on this Smart31 number now? */
@@ -93,7 +111,7 @@ final class LcGuard
         return ($s['date'] ?? null) === now(CurrentCompany::tz())->toDateString() ? (array) ($s['numbers'] ?? []) : [];
     }
 
-    private static function smartDcmCalling(): bool
+    public static function smartDcmCalling(): bool
     {
         $c = IntegrationConnection::query()->where('system', 'smartdcm')->where('enabled', true)->first();
         return $c !== null && $c->option('use_calling', true) && app(Licensing::class)->has('smartdcm');

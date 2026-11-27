@@ -164,10 +164,11 @@ Newest first, max 200 entries: calls/dispositions, PTPs, payments, field visits,
 
 ```json
 {"crm_id": "1133",
- "c2c": {"enabled": true, "gateway_secret": "<OBD gateway secret used by click2call_data>", "lc_secret": "<CRM Secret-Key for vouchers, optional>"},
+ "c2c": {"enabled": true, "gateway_secret": "<OBD gateway secret used by click2call_data>", "lc_secret": "<CRM Secret-Key SmartDCM uses with the LC Manager>",
+         "voucher_code": "74fe352484374b634b2f8a43a42b8f9b", "voucher_status": "active", "voucher_expiry": "2026-12-26"},
  "numbers": [
    {"number": "918040001111", "click2call": true, "obd": false, "tc_verified": true, "team_ids": [7], "expires_on": "2027-03-31",
-    "voucher_code": "e580eb0e2969e3c97f0b07f712383ca6"}
+    "voucher_code": "74fe352484374b634b2f8a43a42b8f9b", "voucher_status": "active", "voucher_expiry": "2026-12-26"}
  ],
  "smart31": {"enabled": true,
    "numbers": [{"number": "8040002222", "group": "Pool A", "team_ids": [7], "expires_on": null, "c2c": true}]}}
@@ -175,6 +176,13 @@ Newest first, max 200 entries: calls/dispositions, PTPs, payments, field visits,
 
 * Fill from the tables SmartDCM already uses for its C2C/dialer: the tenant's CRM ID, the OBD gateway secret, the active voucher numbers (click2call / obd DIDs with expiry and the teams/groups they are given to), the Smart31 groups/numbers.
 * **`voucher_code` is required on every number (27 Nov 2026)** — the LC voucher the number came from (SmartDCM `obd_credits_history.voucher_code`). ROVEXY checks it with the Ametecs LC Manager itself (`did_voucher_validate/{code}/{crm_id}`, before calls and every 5 minutes). A number without a voucher code, or whose voucher the LC Manager has revoked or expired, is **not used** for calls in ROVEXY, and SmartDCM's next sync does not bring it back. ROVEXY's Smart31 numbers from SmartDCM are used only if they are on the LC Manager's Smart31 list for the day (`smart31-details/{crm_id}`).
+* **The client does not enter the voucher again in ROVEXY (27 Nov 2026).** With "SmartDCM licence" chosen in ROVEXY (Company numbers → Licence), ROVEXY uses SmartDCM's CRM id, `lc_secret` and voucher as they are. Send:
+  * `voucher_status` — `active`, `revoked` or `expired`, from SmartDCM's own LC checks. `revoked` / `expired` stops the voucher in ROVEXY at once; a stopped voucher is never brought back (a renewed licence is a new voucher code).
+  * `voucher_expiry` (`YYYY-MM-DD`) — past that day ROVEXY stops it.
+  * `lc_secret` — the CRM Secret-Key SmartDCM uses for `did_voucher_validate`. With it ROVEXY also asks the LC Manager itself every 5 minutes, so a revocation stops calls within minutes, not at SmartDCM's next daily check. Without it ROVEXY goes by `voucher_status` only (re-sent every sync; not re-confirmed within 24 hours = stopped).
+  * Per number or once in `c2c` (the per-number value wins). A voucher code SmartDCM no longer sends is stopped in ROVEXY.
+* With "ROVEXY licence" chosen, ROVEXY ignores SmartDCM's calling account (the client's own CRM id, key and voucher are used) — SmartDCM's numbers are not used for calls.
+* Smart31 groups whose name contains "Web RTC" are WebRTC Smart31 and are not used (the LC Manager marks C2C Smart31 groups `webrtc=1` too, so the name decides).
 * ROVEXY offers **Click2Call and Click2Call Smart31 only — no WebRTC**. WebRTC-only numbers (`click2call` and `obd` false) and Smart31 numbers with `"c2c": false` are ignored; the `webrtc` block and the `/webrtc/calls` endpoints (§ WebRTC) are no longer used.
 * ROVEXY **replaces** its company numbers with `numbers` on every sync, and replaces only the Smart31 numbers that came from SmartDCM. Omit a key (`numbers`, `smart31.numbers`) to leave ROVEXY's list unchanged.
 * This is why both systems show one telephony account: ROVEXY's Click2Call already uses the Telozar `c2c_call` API and the OBD gateway `click2call_data/{ref_id}/{vmn}` with `ref_id = {uuid}_d_{crm_id}_{user_id}_1` — the same format as SmartDCM/LeadGER — so ROVEXY calls appear under this CRM ID in the gateway and in SmartDCM's C2C logs.
