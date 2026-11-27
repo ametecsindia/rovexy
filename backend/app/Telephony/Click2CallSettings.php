@@ -238,9 +238,12 @@ final class Click2CallSettings
             return null;
         }
         $teams = $u->teams()->pluck('teams.id')->map(fn ($i) => (int) $i)->all();
-        return DB::transaction(function () use ($teams) {
+        $today = now(\App\Support\CurrentCompany::tz())->toDateString();
+        return DB::transaction(function () use ($teams, $today) {
             $n = Smart31Number::query()->where('active', true)
-                ->where(fn ($q) => $q->whereNull('expires_on')->orWhere('expires_on', '>=', now(\App\Support\CurrentCompany::tz())->toDateString()))
+                ->where(fn ($q) => $q->whereNull('expires_on')->orWhere('expires_on', '>=', $today))
+                // Smart31 numbers from the CRM are allotted per day (SmartDCM smart31_vmn_numbers.usage_date): never reuse yesterday's.
+                ->where(fn ($q) => $q->where('source', '!=', 'voucher')->orWhereNull('source')->orWhereDate('usage_date', $today))
                 ->orderByRaw('last_used_at IS NOT NULL')->orderBy('last_used_at')->orderBy('id')->lockForUpdate()->get()
                 // ponytail: group filter in PHP (team_ids is JSON; pools are tens of numbers). Move to a pivot if pools grow to thousands.
                 ->first(fn ($n) => empty($n->team_ids) || array_intersect(array_map('intval', $n->team_ids), $teams));

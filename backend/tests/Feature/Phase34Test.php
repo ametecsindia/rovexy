@@ -195,6 +195,21 @@ final class Phase34Test extends TestCase
         $this->as('emp')->getJson("/api/admin/my/calls/{$uuid}")->assertOk()->assertJsonPath('state', 'ringing');
     }
 
+    public function test_smart31_skips_numbers_the_crm_allotted_for_another_day(): void
+    {
+        $this->in(function () {
+            $this->a->forceFill(['settings' => ($this->a->settings ?? []) + ['smart31' => ['enabled' => true]]])->save();
+            app(CurrentCompany::class)->run($this->a->fresh(), function () {
+                \App\Models\Smart31Number::query()->create(['number' => '8047000201', 'source' => 'voucher', 'active' => true, 'usage_date' => now()->subDay()->toDateString()]);
+                \App\Models\Smart31Number::query()->create(['number' => '8047000202', 'source' => 'voucher', 'active' => true, 'usage_date' => now()->toDateString()]);
+                \App\Models\Smart31Number::query()->create(['number' => '8047000203', 'source' => 'admin', 'active' => true]);
+                $got = [\App\Telephony\Click2CallSettings::nextSmart31($this->u['emp']), \App\Telephony\Click2CallSettings::nextSmart31($this->u['emp']), \App\Telephony\Click2CallSettings::nextSmart31($this->u['emp'])];
+                sort($got);
+                $this->assertSame(['8047000202', '8047000202', '8047000203'], $got);   // yesterday's CRM number never used
+            });
+        });
+    }
+
     // ── G15 + G16 + G22 ───────────────────────────────────────────────────────────────────────────────────────────
 
     public function test_calling_add_on_counts_deposits_amc_and_recording_verified(): void
