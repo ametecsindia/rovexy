@@ -139,7 +139,7 @@ final class SmartDcmSync
                 $keep = [];
                 foreach ((array) $smart['numbers'] as $n) {
                     $num = $digits($n['number'] ?? '');
-                    if ($num === '' || isset($keep[$num]) || (array_key_exists('c2c', $n) && !$n['c2c'])) {   // WebRTC-only Smart31 numbers are not taken
+                    if ($num === '' || isset($keep[$num]) || (array_key_exists('c2c', $n) && !$n['c2c']) || !empty($n['webrtc'])) {   // WebRTC Smart31 numbers are not taken
                         continue;
                     }
                     $keep[$num] = true;

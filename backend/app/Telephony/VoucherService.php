@@ -134,7 +134,7 @@ final class VoucherService
      * click2call.voucher_sync for the console.
      * @return array{ok: bool, message: string, removed: int, smart31: ?int, voucher: ?string}
      */
-    public function verify(): array
+    public function verify(bool $record = false): array
     {
         if (!self::crmId() || !self::licenceSecret()) {
             return ['ok' => false, 'message' => Click2CallSettings::managed() ? 'Ametecs has not finished your Click2Call set-up yet (CRM id).' : 'Enter the CRM id and CRM secret key in Calling options first.', 'removed' => 0, 'smart31' => null, 'voucher' => null];
@@ -198,7 +198,7 @@ final class VoucherService
         $prev = data_get($s, 'click2call.voucher_sync');
         data_set($s, 'click2call.voucher_sync', ['at' => now()->toIso8601String(), 'ok' => $ok, 'message' => $message, 'voucher' => $state]);
         // The 5-minute check would otherwise save the company row every time; save only when something changed.
-        if ($removed || $prev === null || ($prev['ok'] ?? null) !== $ok || ($prev['voucher'] ?? null) !== $state
+        if ($record || $removed || $prev === null || ($prev['ok'] ?? null) !== $ok || ($prev['voucher'] ?? null) !== $state
             || \Illuminate\Support\Carbon::parse($prev['at'] ?? '2000-01-01')->lt(now()->subHour())) {
             $c->forceFill(['settings' => $s])->save();
         }
@@ -208,7 +208,7 @@ final class VoucherService
     /** Kept for callers of the old name ("Sync with Ametecs CRM"). */
     public function syncDaily(): array
     {
-        return $this->verify();
+        return $this->verify(true);   // pressed in the console: always show this check's result
     }
 
     /** As SmartDCM's helper: anything but status 200 is a refusal (revoked, expired, not found, wrong CRM id). */
@@ -289,7 +289,8 @@ final class VoucherService
     {
         $today = now(CurrentCompany::tz())->toDateString();
         $want = collect($rows)->map(fn ($g) => (array) $g)
-            ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']))
+            // C2C Smart31 only: a group the LC Manager also marks WebRTC ("SMART-31 Web RTC", c2c=1 + webrtc=1) is WebRTC Smart31 → not used (27 Nov 2026)
+            ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']) && empty($g['webrtc']))
             ->keyBy(fn ($g) => Click2CallAdapter::normalize($g['vmn']));
         $this->lcSmart31 = $want->keys()->map(fn ($k) => (string) $k)->values()->all();   // SmartDCM's Smart31 numbers are checked against this
         $cid = app(CurrentCompany::class)->id();

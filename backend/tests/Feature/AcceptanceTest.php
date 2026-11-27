@@ -1083,7 +1083,7 @@ final class AcceptanceTest extends TestCase
         ]]];
         $daily = ['vmn_details' => [
             ['vmn' => '8040001111', 'usage_date' => $today, 'c2c' => 1, 'webrtc' => 0, 'group_name' => 'S31-B'],
-            ['vmn' => '8040002222', 'usage_date' => $today . ' 00:00:00', 'c2c' => 1, 'webrtc' => 1, 'group_name' => 'S31-A'],   // new number in group A
+            ['vmn' => '8040002222', 'usage_date' => $today . ' 00:00:00', 'c2c' => 1, 'webrtc' => 0, 'group_name' => 'S31-A'],   // new number in group A (C2C only: WebRTC Smart31 rows are skipped)
             ['vmn' => '8040003333', 'usage_date' => $today, 'c2c' => 0, 'webrtc' => 1, 'group_name' => 'S31-A'],                // WebRTC only: not for Click2Call
         ]];
         \Illuminate\Support\Facades\Http::fake([
@@ -1137,7 +1137,8 @@ final class AcceptanceTest extends TestCase
         config(['ammp.telephony.routes' => [], 'ammp.telephony.route' => 'sim', 'ammp.telephony.driver' => 'freeswitch', 'ammp.telephony.click2call.max_users' => 0]);
         app(TelephonyManager::class)->swap(null);
         $today = now()->toDateString();
-        $lc = ['voucher' => ['status' => 200, 'deleted' => []], 'smart31' => ['status' => 200, 'vmn_details' => [['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-A']]], 'down' => false];
+        $lc = ['voucher' => ['status' => 200, 'deleted' => []], 'smart31' => ['status' => 200, 'vmn_details' => [['vmn' => '1600222001', 'usage_date' => $today, 'c2c' => 1, 'group_name' => 'S31-A'],
+            ['vmn' => '7714581408', 'usage_date' => $today, 'c2c' => 1, 'webrtc' => 1, 'group_name' => 'SMART-31 Web RTC - 1']]], 'down' => false];   // WebRTC Smart31: never used
         $started = [];
         \Illuminate\Support\Facades\Http::fake([
             'lc.ametecsindia.com/api/did_voucher/GOOD1/CRM77' => \Illuminate\Support\Facades\Http::response(['status' => 200, 'data' => ['click2call_did' => '8047000101,8047000102',
@@ -1177,6 +1178,8 @@ final class AcceptanceTest extends TestCase
         $adm->postJson('/api/admin/calling/numbers/bulk', ['ids' => collect($res['numbers'])->pluck('id')->all(), 'action' => 'update', 'team_ids' => [$team->id]])->assertOk();
         $adm->putJson('/api/admin/calling/smart31', ['enabled' => true])->assertOk();
         $adm->putJson('/api/admin/calling/smart31/groups', ['group_name' => 'S31-A', 'team_ids' => [$team->id]])->assertOk();
+        app(CurrentCompany::class)->run($this->a->fresh(), fn () => \App\Telephony\LcGuard::refresh(true));   // the 5-minute check loads today's LC list
+        $this->assertSame(['1600222001'], collect($adm->getJson('/api/admin/calling/smart31')->json('numbers'))->pluck('number')->all());   // not the WebRTC Smart31 one
         $cid = $m->work('GET', '/api/mobile/v1/customers')->json('visible_ids')[0];
         $call = fn (?string $vmn = null) => $m->work('POST', '/api/mobile/v1/calls', array_filter(['customer_id' => $cid, 'which' => 'primary', 'route' => 'server', 'vmn' => $vmn]));
         $end = function () {
