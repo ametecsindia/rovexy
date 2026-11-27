@@ -41,7 +41,20 @@ final class VoucherService
     {
         $enc = app(CurrentCompany::class)->get()->setting('click2call.lc_secret');
         try { $s = $enc ? \Illuminate\Support\Facades\Crypt::decryptString($enc) : null; } catch (\Throwable) { $s = null; }
-        return ($s ?: Click2CallSettings::platformSecret('c2c_crm_secret') ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
+        // The CRM key is one fixed key for every client: the Super Admin copy wins over an old one saved in a workspace (27 Nov 2026).
+        return (Click2CallSettings::platformSecret('c2c_crm_secret') ?: $s ?: config('ammp.telephony.click2call.licence_secret')) ?: null;
+    }
+
+    /** "SMART-31 Web RTC - 1" is WebRTC Smart31. The LC Manager marks C2C groups webrtc=1 too, so the group name decides (27 Nov 2026). */
+    public static function webrtcGroup(?string $name): bool
+    {
+        return (bool) preg_match('/web\s*-?\s*rtc/i', (string) $name);
+    }
+
+    /** "Secret Key not matched": ROVEXY's CRM key is wrong. Says nothing about the voucher, so it is never revoked for it. */
+    private static function keyRejected(?array $json): bool
+    {
+        return stripos((string) ($json['message'] ?? $json['msg'] ?? $json['error'] ?? ''), 'secret key') !== false;
     }
 
     /** @return array{ok: bool, message: string, voucher?: Voucher} */
@@ -152,6 +165,8 @@ final class VoucherService
                 [$json, $reachable] = $this->ask('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
                 if (!$reachable) {
                     $problems[] = 'the LC Manager did not answer the voucher check';
+                } elseif (self::keyRejected($json)) {
+                    $problems[] = 'the LC Manager rejected the CRM secret key (Super Admin → Settings → Click2Call)';
                 } elseif (self::refused($json)) {
                     $msg = (string) ($json['message'] ?? $json['msg'] ?? $json['error'] ?? 'The LC Manager no longer accepts this voucher.');
                     $removed += $this->retire($voucher, self::looksExpired($json) ? 'expired' : 'revoked', mb_substr($msg, 0, 250));
@@ -182,7 +197,7 @@ final class VoucherService
         $smart = null;
         [$json, $reachable] = $this->ask('/api/smart31-details/' . rawurlencode((string) self::crmId()));
         $list = is_array($json) ? ($json['vmn_details'] ?? $json['data']['vmn_details'] ?? null) : null;
-        if (is_array($list) || ($reachable && self::refused($json))) {
+        if (is_array($list) || ($reachable && self::refused($json) && !self::keyRejected($json))) {
             $smart = DB::transaction(fn () => $this->replaceSmart31(is_array($list) ? $list : []));   // refused = no Smart31 numbers for this CRM id
             $this->markSmart31Confirmed();
         } else {
@@ -289,8 +304,8 @@ final class VoucherService
     {
         $today = now(CurrentCompany::tz())->toDateString();
         $want = collect($rows)->map(fn ($g) => (array) $g)
-            // C2C Smart31 only: a group the LC Manager also marks WebRTC ("SMART-31 Web RTC", c2c=1 + webrtc=1) is WebRTC Smart31 → not used (27 Nov 2026)
-            ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']) && empty($g['webrtc']))
+            // C2C Smart31 only: "SMART-31 Web RTC" groups are WebRTC Smart31 → not used (27 Nov 2026)
+            ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']) && !self::webrtcGroup($g['group_name'] ?? null))
             ->keyBy(fn ($g) => Click2CallAdapter::normalize($g['vmn']));
         $this->lcSmart31 = $want->keys()->map(fn ($k) => (string) $k)->values()->all();   // SmartDCM's Smart31 numbers are checked against this
         $cid = app(CurrentCompany::class)->id();

@@ -1083,7 +1083,7 @@ final class AcceptanceTest extends TestCase
         ]]];
         $daily = ['vmn_details' => [
             ['vmn' => '8040001111', 'usage_date' => $today, 'c2c' => 1, 'webrtc' => 0, 'group_name' => 'S31-B'],
-            ['vmn' => '8040002222', 'usage_date' => $today . ' 00:00:00', 'c2c' => 1, 'webrtc' => 0, 'group_name' => 'S31-A'],   // new number in group A (C2C only: WebRTC Smart31 rows are skipped)
+            ['vmn' => '8040002222', 'usage_date' => $today . ' 00:00:00', 'c2c' => 1, 'webrtc' => 1, 'group_name' => 'S31-A'],   // new number in group A (LC Manager marks C2C groups webrtc=1 too: the name decides)
             ['vmn' => '8040003333', 'usage_date' => $today, 'c2c' => 0, 'webrtc' => 1, 'group_name' => 'S31-A'],                // WebRTC only: not for Click2Call
         ]];
         \Illuminate\Support\Facades\Http::fake([
@@ -1196,6 +1196,14 @@ final class AcceptanceTest extends TestCase
         $call('smart31')->assertCreated();
         $this->assertSame('1600222001', end($started)['did']);
         $end();
+
+        // A wrong CRM secret key ("Secret Key not matched") is a set-up problem: the voucher is never revoked for it.
+        $lc['voucher'] = ['status' => 400, 'message' => 'Secret Key not matched'];
+        app(CurrentCompany::class)->run($this->a->fresh(), fn () => \App\Telephony\LcGuard::refresh(true));
+        $this->assertSame('active', app(CurrentCompany::class)->run($this->a, fn () => \App\Models\C2c\Voucher::query()->where('voucher_code', 'GOOD1')->value('status')));
+        $lc['voucher'] = ['status' => 200, 'deleted' => []];
+        $this->travel(61)->seconds();
+        $lc['voucher'] = ['status' => 200, 'deleted' => []];
 
         // A bypass from the console is refused: expiry and Click2Call/WebRTC use come from the LC Manager only.
         $adm->patchJson('/api/admin/calling/numbers/' . $res['numbers'][0]['id'], ['expires_at' => '2099-12-31', 'usage' => 'webrtc'])->assertOk();
