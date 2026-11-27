@@ -379,7 +379,7 @@ function VoucherNumbers() {
         {d?.vouchers?.length > 0 && (
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
             <button className="secondary" disabled={a.busy} onClick={() => a.run(async () => { const r = await post('/calling/vouchers/sync', {}); setMsg(r.message); await s.reload(); })}>Sync with Ametecs CRM</button>
-            <small className="muted">Checked every day at 6:10 am: numbers withdrawn by Ametecs are removed and today's Smart31 numbers are loaded.
+            <small className="muted">Checked from 6:10 am, then every hour until it succeeds: numbers withdrawn by Ametecs are removed and today's Smart31 numbers are loaded.
               {d.last_sync ? ` Last check ${new Date(d.last_sync.at).toLocaleString()}: ${d.last_sync.message}` : ' Not checked yet.'}</small>
           </div>
         )}
