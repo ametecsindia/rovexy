@@ -26,6 +26,6 @@ class Voucher extends Model
     {
         return ($this->status ?? 'active') === 'active'
             && (!$this->expires_at || $this->expires_at->copy()->endOfDay()->gte(now()))
-            && ($this->last_ok_at ?? $this->created_at)?->gte(now()->subHours(\App\Telephony\LcGuard::GRACE_HOURS)) === true;
+            && $this->last_ok_at?->gte(now()->subHours(\App\Telephony\LcGuard::GRACE_HOURS)) === true;   // never confirmed = not licensed
     }
 }

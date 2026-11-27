@@ -121,8 +121,15 @@ final class SmartDcmSync
                     if ($num === '' || isset($keep[$num]) || (!($n['click2call'] ?? true) && !($n['obd'] ?? false))) {
                         continue;
                     }
+                    // LC control (27 Nov 2026): each number carries its LC voucher, which ROVEXY checks with the LC Manager
+                    // itself (LcGuard). A voucher the LC Manager revoked / expired is never brought back by SmartDCM.
+                    $code = trim((string) ($n['voucher_code'] ?? $c2c['voucher_code'] ?? ''));
+                    $voucher = $code !== '' ? \App\Models\C2c\Voucher::query()->firstOrCreate(['voucher_code' => mb_substr($code, 0, 100)], ['numbers' => 0, 'status' => 'active']) : null;
+                    if ($voucher && in_array($voucher->status, ['revoked', 'expired'], true)) {
+                        continue;
+                    }
                     $keep[$num] = true;
-                    Vmn::query()->updateOrCreate(['virtual_number' => $num], ['click2call' => (bool) ($n['click2call'] ?? true), 'webrtc' => false,
+                    Vmn::query()->updateOrCreate(['virtual_number' => $num], ['voucher_id' => $voucher?->id, 'click2call' => (bool) ($n['click2call'] ?? true), 'webrtc' => false,
                         'obd' => (bool) ($n['obd'] ?? false), 'tc_verified' => (bool) ($n['tc_verified'] ?? false), 'team_ids' => $mapTeams($n['team_ids'] ?? []),
                         'expires_at' => $this->date($n['expires_on'] ?? null)]);
                 }

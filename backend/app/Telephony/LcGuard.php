@@ -22,7 +22,8 @@ use Illuminate\Support\Facades\Cache;
  *    scheduler — so a voucher revoked in the LC Manager stops working within a minute, not the next day;
  *  - checks every number again at call time (an app, a cached screen or an old session can't use a removed number);
  *  - only uses numbers the LC Manager gave (voucher numbers, today's Smart31 numbers) or that SmartDCM synced
- *    (SmartDCM validates its own LC); numbers typed in by hand don't count where the LC Manager is in charge.
+ *    with the voucher code each number came from (checked with the LC Manager like ROVEXY's own vouchers);
+ *    numbers typed in by hand, or sent without a voucher code, don't count where the LC Manager is in charge.
  * If the LC Manager can't be reached, the last confirmed licence counts for GRACE_HOURS, then calling stops.
  */
 final class LcGuard
@@ -61,7 +62,7 @@ final class LcGuard
         if ($v->voucher_id) {
             return (bool) Voucher::query()->find($v->voucher_id)?->licensed();
         }
-        return !self::managed() || self::smartDcmCalling();   // SmartDCM's own numbers (SmartDCM checks its LC); else typed by hand
+        return !self::managed();   // no LC voucher behind it (typed by hand, or SmartDCM sent no voucher code): only outside LC control
     }
 
     /** May calls go out on this Smart31 number now? */
@@ -73,7 +74,7 @@ final class LcGuard
         }
         return match ($n->source) {
             'voucher' => $n->usage_date?->toDateString() === $today && self::smart31Confirmed(),   // the LC Manager gives them per day
-            'smartdcm' => self::smartDcmCalling(),
+            'smartdcm' => self::smartDcmCalling() && self::smart31Confirmed() && in_array($n->number, self::smart31Today(), true),   // on the LC's list for today
             default => !self::managed(),   // added by hand: only where the LC Manager is not in charge
         };
     }
@@ -83,6 +84,13 @@ final class LcGuard
     {
         $at = app(CurrentCompany::class)->get()?->setting('click2call.smart31_ok_at');
         return $at && \Illuminate\Support\Carbon::parse($at)->gte(now()->subHours(self::GRACE_HOURS));
+    }
+
+    /** Smart31 numbers the LC Manager gave this CRM id for today (stored by VoucherService::verify). */
+    public static function smart31Today(): array
+    {
+        $s = (array) (app(CurrentCompany::class)->get()?->setting('click2call.smart31_lc') ?? []);
+        return ($s['date'] ?? null) === now(CurrentCompany::tz())->toDateString() ? (array) ($s['numbers'] ?? []) : [];
     }
 
     private static function smartDcmCalling(): bool

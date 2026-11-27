@@ -12,9 +12,8 @@ A SmartDCM client who also uses **ROVEXY** (Ametecs' field-force and calling app
 
 | Direction | What moves | How |
 |---|---|---|
-| SmartDCM → ROVEXY | Teams and branches, users (telecallers, FOS, team leaders, managers), portfolios, cases with their allocation, the client's calling account (CRM ID, OBD gateway secret, company numbers/VMNs, Smart31 pool, WebRTC) | ROVEXY **reads** SmartDCM's API every 5 minutes, and immediately when SmartDCM sends a signed "something changed" webhook |
-| ROVEXY → SmartDCM | Outcomes (dispositions) of SIM, Click2Call, WebRTC calls and field visits, with PTP, payment and call details; GPS check-ins at the customer; remarks; status changes; re-allocations made in ROVEXY; payment verified/rejected | ROVEXY **posts** batches to SmartDCM's API (retried until SmartDCM answers 2xx) |
-| ROVEXY (browser) → SmartDCM telephony | Browser (WebRTC) calls by ROVEXY telecallers, placed through SmartDCM's Telozar SIP/WSS, recorded by SmartDCM | ROVEXY asks SmartDCM for a **one-time dial code** and the user's SIP login; the browser dials the code |
+| SmartDCM → ROVEXY | Teams and branches, users (telecallers, FOS, team leaders, managers), portfolios, cases with their allocation, the client's calling account (CRM ID, OBD gateway secret, company numbers/VMNs with their LC voucher code, Smart31 pool) | ROVEXY **reads** SmartDCM's API every 5 minutes, and immediately when SmartDCM sends a signed "something changed" webhook |
+| ROVEXY → SmartDCM | Outcomes (dispositions) of SIM and Click2Call calls and field visits, with PTP, payment and call details; GPS check-ins at the customer; remarks; status changes; re-allocations made in ROVEXY; payment verified/rejected | ROVEXY **posts** batches to SmartDCM's API (retried until SmartDCM answers 2xx) |
 | SmartDCM → ROVEXY | Call recordings of ROVEXY calls (for SmartDCM's case history) | SmartDCM downloads them from ROVEXY with the ROVEXY secret |
 
 **SmartDCM remains the master for cases, allocation and users.** ROVEXY never deletes anything in SmartDCM.
@@ -167,14 +166,16 @@ Newest first, max 200 entries: calls/dispositions, PTPs, payments, field visits,
 {"crm_id": "1133",
  "c2c": {"enabled": true, "gateway_secret": "<OBD gateway secret used by click2call_data>", "lc_secret": "<CRM Secret-Key for vouchers, optional>"},
  "numbers": [
-   {"number": "918040001111", "click2call": true, "webrtc": true, "obd": false, "tc_verified": true, "team_ids": [7], "expires_on": "2027-03-31"}
+   {"number": "918040001111", "click2call": true, "obd": false, "tc_verified": true, "team_ids": [7], "expires_on": "2027-03-31",
+    "voucher_code": "e580eb0e2969e3c97f0b07f712383ca6"}
  ],
  "smart31": {"enabled": true,
-   "numbers": [{"number": "8040002222", "group": "Pool A", "team_ids": [7], "expires_on": null}]},
- "webrtc": {"enabled": true, "wss_url": "wss://sip.telozar.com:7443", "sip_domain": "sip.telozar.com"}}
+   "numbers": [{"number": "8040002222", "group": "Pool A", "team_ids": [7], "expires_on": null, "c2c": true}]}}
 ```
 
-* Fill from the tables SmartDCM already uses for its C2C/dialer: the tenant's CRM ID, the OBD gateway secret, the active voucher numbers (click2call / webrtc / obd DIDs with expiry and the teams/groups they are given to), the Smart31 groups/numbers, and whether WebRTC is enabled for the tenant.
+* Fill from the tables SmartDCM already uses for its C2C/dialer: the tenant's CRM ID, the OBD gateway secret, the active voucher numbers (click2call / obd DIDs with expiry and the teams/groups they are given to), the Smart31 groups/numbers.
+* **`voucher_code` is required on every number (27 Nov 2026)** — the LC voucher the number came from (SmartDCM `obd_credits_history.voucher_code`). ROVEXY checks it with the Ametecs LC Manager itself (`did_voucher_validate/{code}/{crm_id}`, before calls and every 5 minutes). A number without a voucher code, or whose voucher the LC Manager has revoked or expired, is **not used** for calls in ROVEXY, and SmartDCM's next sync does not bring it back. ROVEXY's Smart31 numbers from SmartDCM are used only if they are on the LC Manager's Smart31 list for the day (`smart31-details/{crm_id}`).
+* ROVEXY offers **Click2Call and Click2Call Smart31 only — no WebRTC**. WebRTC-only numbers (`click2call` and `obd` false) and Smart31 numbers with `"c2c": false` are ignored; the `webrtc` block and the `/webrtc/calls` endpoints (§ WebRTC) are no longer used.
 * ROVEXY **replaces** its company numbers with `numbers` on every sync, and replaces only the Smart31 numbers that came from SmartDCM. Omit a key (`numbers`, `smart31.numbers`) to leave ROVEXY's list unchanged.
 * This is why both systems show one telephony account: ROVEXY's Click2Call already uses the Telozar `c2c_call` API and the OBD gateway `click2call_data/{ref_id}/{vmn}` with `ref_id = {uuid}_d_{crm_id}_{user_id}_1` — the same format as SmartDCM/LeadGER — so ROVEXY calls appear under this CRM ID in the gateway and in SmartDCM's C2C logs.
 
@@ -249,7 +250,7 @@ Send when, for a tenant with the integration on and a webhook URL set:
 | `case.changed` | cases uploaded, allocated, re-allocated, withdrawn, edited (one event per batch/upload, not per case) |
 | `portfolio.changed` | portfolio created/renamed/closed |
 | `user.changed` | user created/edited/deactivated, team changes |
-| `telephony.changed` | voucher added, numbers/teams changed, Smart31 changed, WebRTC switched |
+| `telephony.changed` | voucher added, numbers/teams changed, Smart31 changed |
 | `ping` | the "Test ROVEXY" button |
 
 Request (queued job, timeout 10 s, 3 retries):
@@ -276,7 +277,7 @@ ROVEXY answers **202**; it then reads the lists (§5) itself — the body is onl
 
 ---
 
-## 8. WebRTC calls placed by ROVEXY through SmartDCM
+## 8. WebRTC calls placed by ROVEXY through SmartDCM — NO LONGER USED (27 Nov 2026: ROVEXY offers Click2Call and Smart31 only; do not build this section)
 
 ROVEXY telecallers press **"In browser"** on a customer. Their browser runs JsSIP and talks to **SmartDCM's existing Telozar WSS** (`webrtc.wss_url` from §5.7). Telecallers must never see the customer's full number, so the browser dials a **one-time code**, not the number.
 
@@ -444,5 +445,4 @@ resources/views/settings/rovexy.blade.php            (or the existing admin UI f
 * Lists page correctly with no row missed or repeated when many rows share the same `updated_at`.
 * Every posted item is idempotent by `external_id`.
 * Webhooks are signed, queued, debounced and never slow down SmartDCM.
-* WebRTC: the browser never receives the customer's number; a dial code works once, only for its user, only for 120 seconds.
 * Secrets are hashed/encrypted, never logged; `APP_DEBUG=false`.

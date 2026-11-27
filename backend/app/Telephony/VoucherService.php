@@ -27,6 +27,9 @@ use Illuminate\Support\Facades\Log;
  */
 final class VoucherService
 {
+    /** Today's Click2Call Smart31 numbers from the LC Manager (last replaceSmart31). */
+    private array $lcSmart31 = [];
+
     public static function crmId(): ?string
     {
         $c = app(CurrentCompany::class)->get();
@@ -139,17 +142,19 @@ final class VoucherService
         $removed = 0;
         $problems = [];
         $state = null;
-        if ($voucher = Voucher::query()->where('status', 'active')->latest('id')->first()) {
+        // Every active voucher: ROVEXY's own, and the ones behind SmartDCM's numbers (27 Nov 2026).
+        foreach (Voucher::query()->where('status', 'active')->latest('id')->get() as $voucher) {
+            $was = $removed;
             $voucher->checked_at = now();
             if ($voucher->expires_at && $voucher->expires_at->copy()->endOfDay()->lt(now())) {
-                $removed = $this->retire($voucher, 'expired', 'The voucher expired on ' . $voucher->expires_at->toDateString() . '.');
+                $removed += $this->retire($voucher, 'expired', 'The voucher expired on ' . $voucher->expires_at->toDateString() . '.');
             } else {
                 [$json, $reachable] = $this->ask('/api/did_voucher_validate/' . rawurlencode($voucher->voucher_code) . '/' . rawurlencode((string) self::crmId()));
                 if (!$reachable) {
                     $problems[] = 'the LC Manager did not answer the voucher check';
                 } elseif (self::refused($json)) {
                     $msg = (string) ($json['message'] ?? $json['msg'] ?? $json['error'] ?? 'The LC Manager no longer accepts this voucher.');
-                    $removed = $this->retire($voucher, self::looksExpired($json) ? 'expired' : 'revoked', mb_substr($msg, 0, 250));
+                    $removed += $this->retire($voucher, self::looksExpired($json) ? 'expired' : 'revoked', mb_substr($msg, 0, 250));
                 } else {
                     $voucher->last_ok_at = now();
                     $voucher->status_message = null;
@@ -160,7 +165,7 @@ final class VoucherService
                     }
                     $gone = collect((array) ($json['deleted'] ?? $json['data']['deleted'] ?? []))
                         ->map(fn ($n) => Click2CallAdapter::normalize(is_array($n) ? ($n['virtual_number'] ?? $n['vmn'] ?? '') : (string) $n))->filter()->unique()->values()->all();
-                    $removed = $gone ? DB::transaction(function () use ($gone) {
+                    $removed += $gone ? DB::transaction(function () use ($gone) {
                         $rows = Vmn::query()->whereIn('virtual_number', $gone)->get();
                         $this->archiveVmns($rows, now());
                         Vmn::query()->whereIn('id', $rows->pluck('id'))->delete();
@@ -169,7 +174,10 @@ final class VoucherService
                 }
             }
             $voucher->save();
-            $state = $voucher->status;
+            $state = $state === null || $state === 'active' ? $voucher->status : $state;   // a revoked / expired one is what the console must say
+            if ($voucher->status !== 'active') {
+                \App\Support\Audit::record('c2c.voucher_' . $voucher->status, $voucher, ['removed' => $removed - $was, 'message' => $voucher->status_message]);
+            }
         }
         $smart = null;
         [$json, $reachable] = $this->ask('/api/smart31-details/' . rawurlencode((string) self::crmId()));
@@ -193,9 +201,6 @@ final class VoucherService
         if ($removed || $prev === null || ($prev['ok'] ?? null) !== $ok || ($prev['voucher'] ?? null) !== $state
             || \Illuminate\Support\Carbon::parse($prev['at'] ?? '2000-01-01')->lt(now()->subHour())) {
             $c->forceFill(['settings' => $s])->save();
-        }
-        if ($removed && $state !== 'active') {
-            \App\Support\Audit::record('c2c.voucher_' . $state, $voucher, ['removed' => $removed, 'message' => $voucher->status_message]);
         }
         return ['ok' => $ok, 'message' => $message, 'removed' => $removed, 'smart31' => $smart, 'voucher' => $state];
     }
@@ -242,8 +247,11 @@ final class VoucherService
         $c = app(CurrentCompany::class)->get();
         $s = $c->settings ?? [];
         $prev = data_get($s, 'click2call.smart31_ok_at');
-        if (!$prev || \Illuminate\Support\Carbon::parse($prev)->lt(now()->subMinutes(30))) {   // grace is 24 h: no need to save every check
+        $list = ['date' => now(CurrentCompany::tz())->toDateString(), 'numbers' => $this->lcSmart31];
+        // grace is 24 h: no need to save every check — unless today's LC list changed
+        if (!$prev || \Illuminate\Support\Carbon::parse($prev)->lt(now()->subMinutes(30)) || data_get($s, 'click2call.smart31_lc') != $list) {
             data_set($s, 'click2call.smart31_ok_at', now()->toIso8601String());
+            data_set($s, 'click2call.smart31_lc', $list);
             $c->forceFill(['settings' => $s])->save();
         }
     }
@@ -283,6 +291,7 @@ final class VoucherService
         $want = collect($rows)->map(fn ($g) => (array) $g)
             ->filter(fn ($g) => substr((string) ($g['usage_date'] ?? ''), 0, 10) === $today && !empty($g['vmn']) && !empty($g['c2c']))
             ->keyBy(fn ($g) => Click2CallAdapter::normalize($g['vmn']));
+        $this->lcSmart31 = $want->keys()->map(fn ($k) => (string) $k)->values()->all();   // SmartDCM's Smart31 numbers are checked against this
         $cid = app(CurrentCompany::class)->id();
         $old = Smart31Number::query()->where('source', 'voucher')->get()->keyBy('number');
         $groupTeams = DB::table('smart31_history')->where('company_id', $cid)->whereNotNull('group_name')->orderBy('id')->get(['group_name', 'team_ids'])
