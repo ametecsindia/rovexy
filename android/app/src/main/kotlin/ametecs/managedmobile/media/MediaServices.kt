@@ -20,7 +20,7 @@ import ametecs.managedmobile.R
 abstract class VisibleMediaService(private val kind: String, private val fgsType: Int) : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
     override fun onDestroy() {
-        if (BuildConfig.PLAY) getSystemService(android.app.NotificationManager::class.java).cancel(if (kind == "voice") 2003 else 2002)
+        if (BuildConfig.PLAY && kind != "screen") getSystemService(android.app.NotificationManager::class.java).cancel(if (kind == "voice") 2003 else 2002)
         super.onDestroy()
     }
 
@@ -41,9 +41,9 @@ abstract class VisibleMediaService(private val kind: String, private val fgsType
             .build()
         // Must be in the foreground BEFORE MediaProjection is obtained (Android 14+). Android can refuse (app in the
         // background, permission revoked, OEM limits): that threw and restarted the app — now the session just ends.
-        // Play build has no typed FGS permissions: camera/voice run while ROVEXY is on screen (sessions start from the
-        // Activity), the notification above is still shown so the session stays visible.
-        if (BuildConfig.PLAY) {
+        // Play build: only screen sharing has its typed FGS (mediaProjection, declared in Play Console 27 Nov 2026; Android
+        // requires it for capture). Camera/voice run while ROVEXY is on screen, the notification above keeps them visible.
+        if (BuildConfig.PLAY && kind != "screen") {
             getSystemService(android.app.NotificationManager::class.java).notify(when (kind) { "voice" -> 2003; else -> 2002 }, n)
         } else try {
             ServiceCompat.startForeground(this, when (kind) { "screen" -> 2001; "voice" -> 2003; else -> 2002 }, n, fgsType)
