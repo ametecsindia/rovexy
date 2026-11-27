@@ -210,6 +210,19 @@ final class Phase34Test extends TestCase
         });
     }
 
+    public function test_c2c_button_never_uses_smart31_and_smart31_button_does(): void
+    {
+        $this->in(function () {
+            $this->a->forceFill(['settings' => ($this->a->settings ?? []) + ['smart31' => ['enabled' => true], 'click2call' => ['mode' => 'choice', 'did' => '8047000999']]])->save();
+            app(CurrentCompany::class)->run($this->a->fresh(), function () {
+                \App\Models\Smart31Number::query()->create(['number' => '8047000301', 'source' => 'admin', 'active' => true]);
+                $C = \App\Telephony\Click2CallSettings::class;
+                $this->assertSame('8047000999', $C::callerNumberFor($this->u['emp'], 'c2c'));       // C2C: the company (voucher) number
+                $this->assertSame('8047000301', $C::callerNumberFor($this->u['emp'], 'smart31'));   // Smart31: today's rotation
+            });
+        });
+    }
+
     // ── G15 + G16 + G22 ───────────────────────────────────────────────────────────────────────────────────────────
 
     public function test_calling_add_on_counts_deposits_amc_and_recording_verified(): void

@@ -126,9 +126,9 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
     val defaultNumber by vm.c2cDefault.collectAsState()
     routeAsk?.let { (c, which) ->
         // Only the options this employee is allowed (Calling configuration); Click2Call may also need a company number.
-        // "smart31" = the server's Smart31 rotation picks the number (offered only when the company has Smart31 on).
-        val choices = numbers + if (vm.c2cSmart31()) listOf("smart31") else emptyList()
-        var pick by remember(c.id) { mutableStateOf(if (vm.c2cSmart31()) "smart31" else defaultNumber?.takeIf { it in numbers } ?: numbers.firstOrNull()) }
+        // 27 Nov 2026: Smart31 has its own button; this picker lists the month's C2C (voucher) numbers only.
+        val choices = numbers
+        var pick by remember(c.id) { mutableStateOf(defaultNumber?.takeIf { it in numbers } ?: numbers.firstOrNull()) }
         AlertDialog(onDismissRequest = vm::cancelRouteAsk, containerColor = Ds.Surface, shape = RoundedCornerShape(28.dp), icon = { IconTile(AmmpIcons.Call, Ds.Green, 48) },
             title = { Text("Call ${c.name}") },
             text = {
@@ -140,7 +140,7 @@ fun AppRoot(vm: AppViewModel, requestScreenConsent: () -> Unit, requestCameraCon
                         choices.forEach { n ->
                             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { pick = n }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                                 RadioButton(selected = pick == n, onClick = { pick = n })
-                                Text(if (n == "smart31") "Smart31 (today's rotating number)" else maskPhone(n) ?: n, fontSize = 15.sp)
+                                Text(maskPhone(n) ?: n, fontSize = 15.sp)
                             }
                         }
                     }

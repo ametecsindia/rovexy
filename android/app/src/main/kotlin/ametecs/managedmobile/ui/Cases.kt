@@ -327,6 +327,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
     val call by vm.call.collectAsState()
     val options by vm.routeOptions.collectAsState()
     var route by remember { mutableStateOf<String?>(null) }
+    var callVmn by remember { mutableStateOf<String?>(null) }   // "c2c" / "smart31" / null (picker or server default)
+    val c2cNumbers by vm.c2cNumbers.collectAsState()
     val err by vm.error.collectAsState()
     val codes by vm.dispositions.collectAsState()
     val label = { c: String -> codes.firstOrNull { it.code == c }?.label ?: c.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() } }
@@ -377,12 +379,21 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
                 color = Ds.GoldSoft, fontSize = 12.sp, modifier = Modifier.padding(start = 8.dp, top = 10.dp))
         }
         // Main actions stay at hand on every tab.
+        // 27 Nov 2026 (as SmartDCM's dialer): C2C = the month's voucher number(s), Smart31 = today's rotating number — two buttons.
+        val smart31 = "server" in options && vm.c2cSmart31()
+        val callButtons = listOfNotNull(
+            if ("sim" in options) Triple("SIM call", "sim", null) else null,
+            if ("server" in options && (c2cNumbers.isNotEmpty() || !smart31)) Triple("C2C call", "server", if (c2cNumbers.size > 1) null else "c2c") else null,
+            if (smart31) Triple("Smart31", "server", "smart31") else null)
+        val dial = { r: String?, v: String? -> route = r; callVmn = v; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary", r, v) }
+        if (callButtons.size > 1) Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            callButtons.forEach { (label, r, v) ->
+                ActionChip(AmmpIcons.Call, label, when { v == "smart31" -> Ds.Teal; r == "sim" -> Ds.Green; else -> Ds.Blue }, Modifier.weight(1f), enabled = !busy && call == null) { dial(r, v) }
+            }
+        }
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (options.size > 1) {   // both allowed: one button each, no extra question
-                ActionChip(AmmpIcons.Call, "SIM call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { route = "sim"; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary", "sim") }
-                ActionChip(AmmpIcons.Call, "C2C call", Ds.Blue, Modifier.weight(1f), enabled = !busy && call == null) { route = "server"; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary", "server") }
-            } else {
-                ActionChip(AmmpIcons.Call, "Call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { route = null; if (case.c.altPhone != null) dialog = "which" else vm.placeCall(case.c, "primary") }
+            if (callButtons.size <= 1) {
+                ActionChip(AmmpIcons.Call, "Call", Ds.Green, Modifier.weight(1f), enabled = !busy && call == null) { dial(null, null) }
             }
             ActionChip(AmmpIcons.Event, "Callback", Ds.Amber, Modifier.weight(1f)) { dialog = "callback" }
             ActionChip(AmmpIcons.Check, "Payment", Ds.Teal, Modifier.weight(1f)) { dialog = "payment" }
@@ -420,8 +431,8 @@ fun CustomerProfile(vm: AppViewModel, case: CaseRow, onClose: () -> Unit) {
 
     when (dialog) {
         "which" -> AlertDialog(onDismissRequest = { dialog = null }, title = { Text("Which number?") }, confirmButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary", route) }) { Text("Primary · ${maskPhone(case.c.phone)}") } }, dismissButton = {
-            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate", route) }) { Text("Alternate · ${maskPhone(case.c.altPhone)}") } })
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "primary", route, callVmn) }) { Text("Primary · ${maskPhone(case.c.phone)}") } }, dismissButton = {
+            TextButton(onClick = { dialog = null; vm.placeCall(case.c, "alternate", route, callVmn) }) { Text("Alternate · ${maskPhone(case.c.altPhone)}") } })
         "note" -> TextDialog("Add collection note", "Note", busy, onDismiss = { dialog = null }) { vm.addCaseNote(case.c.id, it); dialog = null }
         "status" -> StatusDialog(p?.s("status") ?: case.c.status, busy, onDismiss = { dialog = null }) { s, n -> vm.setCaseStatus(case.c.id, s, n); dialog = null }
         "callback" -> CallbackDialog(busy, onDismiss = { dialog = null }) { iso, n -> vm.scheduleCallback(case.c.id, iso, n); dialog = null }

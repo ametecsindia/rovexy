@@ -90,7 +90,12 @@ final class Click2CallSettings
     {
         // 25 Nov 2026: the employee picks a voucher number or "smart31" in the app. Nothing picked (older apps,
         // a single number) keeps the earlier order: Smart31 rotation first when it is on.
-        if ($requested === 'smart31' || blank($requested)) {
+        // 27 Nov 2026 (as SmartDCM's dialer): "c2c" = the C2C button — the month's voucher numbers only, never Smart31.
+        $c2cOnly = $requested === 'c2c';
+        if ($c2cOnly) {
+            $requested = null;
+        }
+        if (!$c2cOnly && ($requested === 'smart31' || blank($requested))) {
             if ($n = self::nextSmart31($u)) {
                 return $n;
             }
